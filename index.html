@@ -735,7 +735,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
       </div>
       <div class="accordion-body" id="acc-body-datos">
         <p style="font-size:12px;color:var(--ink2);margin-bottom:12px;line-height:1.5">Borrá ventas e historial local. Menú y configuración no se ven afectados.</p>
-        <button class="btn-sm" style="color:var(--red);border-color:rgba(176,48,48,.3)" onclick="pedirConfirm('¿Limpiar todo el historial local de ventas?','limpiarVentas','Limpiar')">🗑 Limpiar ventas e historial</button>
+        <button class="btn-sm" style="color:var(--red);border-color:rgba(176,48,48,.3)" onclick="pedirConfirm('¿Limpiar todo el historial local de ventas?',limpiarVentas,'Limpiar','var(--red)','🗑')">🗑 Limpiar ventas e historial</button>
       </div>
     </div>
 
@@ -1232,7 +1232,7 @@ function pedirConfirm(msg,fn,labelOk='Eliminar',color='var(--red)',icon='⚠️'
 function cerrarModalConfirm(){$('modal-confirm').classList.remove('open');confirmCallback=null;}
 function closeModalConfirm(e){if(e.target===$('modal-confirm'))cerrarModalConfirm();}
 function ejecutarConfirm(){
-  if(typeof confirmCallback==='string'){try{eval(confirmCallback);}catch(e){}}
+  if(typeof confirmCallback==='string'){try{eval(typeof window[confirmCallback]==='function'?confirmCallback+'()':confirmCallback);}catch(e){}}
   else if(typeof confirmCallback==='function')confirmCallback();
   cerrarModalConfirm();
 }
