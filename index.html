@@ -512,25 +512,6 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
 </style>
 </head>
 <body>
-<!-- HEADER -->
-<div class="header">
-  <div class="header-left">
-    <img src="logo.svg" style="width:44px;height:44px;flex-shrink:0;" alt="Colo Café">
-  </div>
-  <div class="header-right">
-    <span class="header-date" id="hoy-lbl"></span>
-    <div class="turno-pill" id="turno-pill" onclick="openTurnoModal()">
-      <span class="turno-dot" id="turno-dot"></span>Sin turno
-    </div>
-    <div class="gs-pill" id="gs-pill">
-      <div class="gs-dot" id="gs-dot"></div>
-      <span id="gs-txt">Sin conexión</span>
-    </div>
-  </div>
-</div>
-
-</head>
-<body>
 
 <!-- HEADER -->
 <div class="header">
@@ -1112,6 +1093,28 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
   </div>
 </div>
 
+
+<!-- MODAL: OPERADOR DEL GASTO -->
+<div class="modal-ov" id="modal-gasto-operador">
+  <div class="modal-box" style="max-width:360px">
+    <div class="modal-title">¿Quién registró este gasto?</div>
+    <div class="modal-field">
+      <label class="modal-lbl">Operador</label>
+      <select class="modal-select" id="gasto-operador-sel" onchange="onGastoOperadorChange()">
+        <option value="">Seleccioná…</option>
+      </select>
+    </div>
+    <div id="gasto-nuevo-op-wrap" style="display:none" class="modal-field">
+      <label class="modal-lbl">Nombre del nuevo operador</label>
+      <input class="modal-input" id="gasto-nuevo-op" type="text" placeholder="Nombre">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="cerrarModalGastoOperador()">Cancelar</button>
+      <button class="btn-save" onclick="confirmarGastoOperador()">Registrar gasto</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 
@@ -1390,7 +1393,7 @@ async function inicializarSheets(){
 // ══════════════════════════════════════════════════
 function renderSetupBanner(){
   const c=!!config.webappUrl;
-  $('gs-dot').classList.toggle('on',c);$('gs-txt').textContent=c?'Sheets':'Sin conexión';
+  $('gs-dot').classList.toggle('on',c);$('gs-txt').textContent=c?'Conectado':'Sin conexión';
   const d2=$('gs-dot2');if(d2)d2.classList.toggle('on',c);
   const sb=$('setup-banner');if(sb)sb.innerHTML=c?'':
     `<div class="setup-banner" onclick="goTab('ajustes');setTimeout(()=>toggleAccordion('sheets'),200)">⚡ Conectá Google Sheets — ir a Ajustes</div>`;
@@ -1429,8 +1432,39 @@ function guardarGasto(){
   const desc=($('gasto-desc').value||'').trim();
   const monto=parseFloat($('gasto-monto').value)||0;
   if(!desc||!monto){showToast('Completá descripción y monto');return;}
-  const g={id:'g_'+Date.now(),fecha:$('gasto-fecha').value,hora:nowT(),desc,monto,pago:$('gasto-pago').value,operador:(turno&&turno.abierto)?turno.operador:''};
-  gastos.push(g);save();cerrarModalGasto();renderGastos();syncGastosSheets();
+  // Capture all values, close gasto modal, show operador modal
+  const _pendingGasto = {
+    fecha: $('gasto-fecha').value,
+    hora: nowT(),
+    desc,
+    monto,
+    pago: $('gasto-pago').value
+  };
+  cerrarModalGasto();
+  const sel=$('gasto-operador-sel');
+  if(sel){
+    sel.innerHTML=getOperadoresOpts(true);
+    if(turno&&turno.abierto) sel.value=turno.operador;
+  }
+  $('gasto-nuevo-op-wrap').style.display='none';
+  $('modal-gasto-operador').dataset.pending=JSON.stringify(_pendingGasto);
+  $('modal-gasto-operador').classList.add('open');
+}
+function onGastoOperadorChange(){
+  const sel=$('gasto-operador-sel');
+  $('gasto-nuevo-op-wrap').style.display=sel?.value==='__nuevo__'?'block':'none';
+}
+function cerrarModalGastoOperador(){ $('modal-gasto-operador').classList.remove('open'); }
+function confirmarGastoOperador(){
+  const sel=$('gasto-operador-sel');
+  let op='';
+  if(sel?.value==='__nuevo__'){ op=($('gasto-nuevo-op')?.value||'').trim(); }
+  else { op=sel?.value||''; }
+  if(!op){ showToast('Seleccioná o ingresá un operador'); return; }
+  if(!operadores.includes(op)){ operadores.push(op); save(); syncOperadoresSheets(); }
+  const pending=JSON.parse($('modal-gasto-operador').dataset.pending||'{}');
+  const g={id:'g_'+Date.now(),...pending,operador:op};
+  gastos.push(g); save(); cerrarModalGastoOperador(); renderGastos(); syncGastosSheets();
   showToast('✓ Gasto registrado');
 }
 function renderGastos(){
@@ -1963,7 +1997,7 @@ function renderHistVentas(){
       </div>
       <div class="hist-detail" id="hd-${i}">
         ${ventasSorted.map(v=>`<div class="hist-row2">
-          <span><strong>${v.hora||''}</strong> ${v.producto} ×${v.cantidad}${v.operador?' <em style="color:var(--ink3)">· ${v.operador}</em>':''}</span>
+          <span><strong>${v.hora||''}</strong> ${v.producto} ×${v.cantidad}${v.operador?` · <em style="color:var(--ink3)">${v.operador}</em>`:''}</span>
           <span>${fmt(v.total)}</span>
         </div>`).join('')}
         <div class="hist-row2" style="padding-top:6px;border-top:1px solid var(--border);margin-top:4px">
