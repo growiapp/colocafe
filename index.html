@@ -4,9 +4,31 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Colo Café</title>
+
+<!-- Favicon -->
+<link rel="icon" type="image/svg+xml" href="logo.svg">
+<link rel="shortcut icon" href="logo.svg">
+<link rel="apple-touch-icon" href="logo.svg">
+
+<!-- Open Graph (WhatsApp, Facebook, LinkedIn, etc.) -->
+<meta property="og:title" content="Colo Café">
+<meta property="og:description" content="Sistema de gestión — ventas, mesas, reservas y más">
+<meta property="og:image" content="preview.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://colocafe.github.io/admin/">
+
+<!-- Twitter Card (también lo usa WhatsApp en algunos contextos) -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Colo Café">
+<meta name="twitter:description" content="Sistema de gestión — ventas, mesas, reservas y más">
+<meta name="twitter:image" content="preview.jpg">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
 <style>
+
 
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
@@ -422,6 +444,51 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
 .clientes-lista{padding:12px;max-width:900px;margin:0 auto}
 
 </style>
+/* ── DASHBOARD FILTROS ── */
+.dash-filtros{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+.dash-filtro-chip{padding:5px 13px;border-radius:20px;font-size:12px;font-weight:500;border:1px solid var(--border2);background:var(--surf);color:var(--ink2);cursor:pointer;transition:all .15s;user-select:none;white-space:nowrap}
+.dash-filtro-chip.active{background:var(--orange);color:#fff;border-color:var(--orange)}
+.dash-fecha-range{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.dash-fecha-input{padding:5px 10px;border:1px solid var(--border2);border-radius:var(--r-sm);font-family:var(--ff);font-size:12px;color:var(--ink);background:var(--surf2);outline:none}
+.dash-fecha-input:focus{border-color:var(--orange)}
+
+/* ── MESAS+RESERVAS UNIFICADO ── */
+.ventas-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+.ventas-section-title{font-size:10px;font-weight:500;color:var(--ink3);text-transform:uppercase;letter-spacing:.1em;margin:16px 0 8px;display:flex;align-items:center;gap:8px}
+.ventas-section-title::after{content:'';flex:1;height:1px;background:var(--border)}
+.reserva-items{font-size:11px;color:var(--ink3);margin-top:3px}
+.reserva-total{font-size:13px;font-weight:500;color:var(--orange);margin-top:3px}
+
+/* ── STOCK EN PRODUCTO ── */
+.stock-toggle-row{display:flex;align-items:center;gap:10px;padding:8px 0}
+.toggle-switch{position:relative;width:36px;height:20px;flex-shrink:0}
+.toggle-switch input{opacity:0;width:0;height:0}
+.toggle-slider{position:absolute;cursor:pointer;inset:0;background:var(--border2);border-radius:20px;transition:.2s}
+.toggle-slider:before{position:absolute;content:"";height:14px;width:14px;left:3px;bottom:3px;background:white;border-radius:50%;transition:.2s}
+input:checked + .toggle-slider{background:var(--orange)}
+input:checked + .toggle-slider:before{transform:translateX(16px)}
+.toggle-lbl{font-size:13px;color:var(--ink2)}
+
+/* ── VARIANTES en modal producto ── */
+.variantes-section{border-top:1px solid var(--border);margin-top:14px;padding-top:14px}
+.variantes-toggle{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;margin-bottom:10px}
+.variantes-toggle-lbl{font-size:13px;font-weight:500;color:var(--ink)}
+.variantes-toggle-arr{font-size:11px;color:var(--ink3);transition:transform .2s}
+.variantes-toggle-arr.open{transform:rotate(180deg)}
+.variantes-body{display:none}
+.variantes-body.open{display:block}
+.variante-grupo{background:var(--surf2);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px}
+.variante-grupo-hdr{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.variante-grupo-hdr input{flex:1;padding:5px 8px;border:1px solid var(--border2);border-radius:var(--r-xs);font-family:var(--ff);font-size:12px;background:var(--surf);color:var(--ink);outline:none}
+.variante-grupo-hdr input:focus{border-color:var(--orange)}
+.variante-grupo-tipo{font-size:11px;padding:3px 8px;border-radius:20px;background:var(--surf);border:1px solid var(--border2);color:var(--ink3);cursor:pointer;outline:none;font-family:var(--ff)}
+.variante-opcion{display:flex;gap:6px;align-items:center;margin-bottom:5px;padding:5px 8px;background:var(--surf);border-radius:var(--r-xs)}
+.variante-opcion input{padding:4px 7px;border:1px solid var(--border2);border-radius:var(--r-xs);font-family:var(--ff);font-size:12px;background:var(--surf2);color:var(--ink);outline:none}
+.variante-opcion input:focus{border-color:var(--orange)}
+.variante-op-nombre{flex:1}
+.variante-op-precio{width:85px}
+
+</style>
 </head>
 <body>
 
@@ -445,93 +512,61 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
 <!-- PAGE WRAP -->
 <div class="page-wrap">
 
-<!-- TAB: VENTAS / MESAS -->
+<!-- TAB: VENTAS (Mesas + Reservas unificado) -->
 <div class="tab active" id="tab-carga">
-  <div class="subtab-bar">
-    <button class="subtab-btn active" id="stab-mesas" onclick="switchSubtab('mesas')">Mesas</button>
-    <button class="subtab-btn" id="stab-reservas" onclick="switchSubtab('reservas')">Reservas</button>
-  </div>
-  <!-- Mesas -->
-  <div id="subtab-mesas">
-    <div id="view-mesas">
-      <div style="max-width:1200px;margin:0 auto;padding:12px">
-        <div id="setup-banner"></div>
-        <div id="stock-alerts"></div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-          <div style="font-family:var(--ff-serif);font-size:16px;color:var(--ink)">Mesas abiertas</div>
-          <button class="btn-sm primary" onclick="abrirNuevaMesa()">+ Nueva mesa</button>
+  <!-- Vista: lista unificada -->
+  <div id="view-mesas">
+    <div style="max-width:1200px;margin:0 auto;padding:12px">
+      <div id="setup-banner"></div>
+      <!-- Header con filtros y botones -->
+      <div class="ventas-header">
+        <div class="cat-chips" id="ventas-filtro-chips" style="margin-bottom:0"></div>
+        <div style="display:flex;gap:8px;flex-shrink:0">
+          <button class="btn-sm" onclick="openReservaModal(null)">+ Reserva</button>
+          <button class="btn-sm primary" onclick="abrirNuevaMesa()">+ Mesa</button>
         </div>
-        <div id="mesas-container"></div>
-        <div id="mesas-empty" class="empty" style="display:none">No hay mesas abiertas</div>
       </div>
+      <!-- Alertas de stock -->
+      <div id="stock-alerts"></div>
+      <!-- Sección Mesas -->
+      <div class="ventas-section-title">Mesas abiertas</div>
+      <div id="mesas-container"></div>
+      <div id="mesas-empty" style="display:none;font-size:12px;color:var(--ink3);padding:8px 0 4px">Sin mesas abiertas</div>
+      <!-- Sección Reservas -->
+      <div class="ventas-section-title" style="margin-top:20px">Reservas</div>
+      <div id="reservas-container"></div>
+      <div id="reservas-empty" style="display:none;font-size:12px;color:var(--ink3);padding:8px 0 4px">Sin reservas</div>
     </div>
-    <div id="view-pedido" style="display:none">
-      <div class="carga-layout">
-        <div class="carga-left">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-            <button class="btn-sm" onclick="volverAMesas()">← Mesas</button>
-            <div style="font-family:var(--ff-serif);font-size:16px;color:var(--ink)" id="mesa-titulo"></div>
-            <div id="mesa-tipo-badge" class="mesa-tipo-badge"></div>
+  </div>
+  <!-- Vista: pedido de mesa -->
+  <div id="view-pedido" style="display:none">
+    <div class="carga-layout">
+      <div class="carga-left">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <button class="btn-sm" onclick="volverAMesas()">← Volver</button>
+          <div style="font-family:var(--ff-serif);font-size:16px;color:var(--ink)" id="mesa-titulo"></div>
+          <div id="mesa-tipo-badge" class="mesa-tipo-badge"></div>
+        </div>
+        <div class="cat-chips" id="carga-cats"></div>
+        <div class="prod-grid" id="prod-grid"></div>
+      </div>
+      <div class="carga-right">
+        <div class="carrito-wrap">
+          <div class="cart-hdr">
+            <span class="cart-title">Pedido</span>
+            <span class="cart-total" id="cart-total">$0</span>
           </div>
-          <div class="cat-chips" id="carga-cats"></div>
-          <div class="prod-grid" id="prod-grid"></div>
-        </div>
-        <div class="carga-right">
-          <div class="carrito-wrap">
-            <div class="cart-hdr">
-              <span class="cart-title">Pedido</span>
-              <span class="cart-total" id="cart-total">$0</span>
-            </div>
-            <div class="cart-empty" id="cart-empty">El carrito está vacío</div>
-            <div class="cart-rows" id="cart-rows" style="display:none"></div>
-            <div class="divider"></div>
-            <div class="pago-lbl">Forma de pago</div>
-            <div class="pago-grid">
-              <div class="pago-opt active" id="popt-ef" onclick="setPago('ef')">Efectivo</div>
-              <div class="pago-opt" id="popt-mp" onclick="setPago('mp')">Mercado Pago</div>
-            </div>
-            <button class="btn-confirmar" id="btn-confirm" onclick="cerrarMesa()">Cerrar y cobrar</button>
+          <div class="cart-empty" id="cart-empty">El carrito está vacío</div>
+          <div class="cart-rows" id="cart-rows" style="display:none"></div>
+          <div class="divider"></div>
+          <div class="pago-lbl">Forma de pago</div>
+          <div class="pago-grid">
+            <div class="pago-opt active" id="popt-ef" onclick="setPago('ef')">Efectivo</div>
+            <div class="pago-opt" id="popt-mp" onclick="setPago('mp')">Mercado Pago</div>
           </div>
+          <button class="btn-confirmar" id="btn-confirm" onclick="cerrarMesaOReserva()">Cerrar y cobrar</button>
         </div>
       </div>
-    </div>
-  </div>
-  <!-- Reservas de productos -->
-  <div id="subtab-reservas" style="display:none">
-    <div style="max-width:900px;margin:0 auto;padding:12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
-        <div style="font-family:var(--ff-serif);font-size:16px;color:var(--ink)">Reservas</div>
-        <button class="btn-sm primary" onclick="openReservaModal(null)">+ Nueva reserva</button>
-      </div>
-      <div class="cat-chips" id="reserva-filtro-chips"></div>
-      <div id="reservas-lista"></div>
-    </div>
-  </div>
-</div>
-
-<!-- TAB: INSUMOS -->
-<div class="tab" id="tab-inventario">
-  <div class="subtab-bar">
-    <button class="subtab-btn active" id="stab-insumos" onclick="switchInvSubtab('insumos')">Insumos</button>
-    <button class="subtab-btn" id="stab-mermas" onclick="switchInvSubtab('mermas')">Mermas</button>
-  </div>
-  <div id="inv-subtab-insumos">
-    <div class="inv-layout">
-      <div class="inv-toolbar">
-        <input class="inv-search" id="inv-search" type="search" placeholder="Buscar insumo…" oninput="renderInv()">
-        <button class="btn-sm primary" onclick="openInsumoModal(null)">+ Insumo</button>
-      </div>
-      <div id="inv-alerts"></div>
-      <div class="inv-table" id="inv-table"></div>
-    </div>
-  </div>
-  <div id="inv-subtab-mermas" style="display:none">
-    <div class="inv-layout">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-size:13px;color:var(--ink2)">Registro de pérdidas</div>
-        <button class="btn-sm primary" onclick="openMermaModal()">+ Merma</button>
-      </div>
-      <div id="mermas-lista"></div>
     </div>
   </div>
 </div>
@@ -539,15 +574,27 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
 <!-- TAB: DASHBOARD -->
 <div class="tab" id="tab-dashboard">
   <div class="dash-layout">
+    <!-- Filtros de fecha -->
+    <div class="dash-filtros">
+      <div class="dash-filtro-chip active" id="dfiltro-hoy" onclick="setDashFiltro('hoy')">Hoy</div>
+      <div class="dash-filtro-chip" id="dfiltro-semana" onclick="setDashFiltro('semana')">Esta semana</div>
+      <div class="dash-filtro-chip" id="dfiltro-mes" onclick="setDashFiltro('mes')">Este mes</div>
+      <div class="dash-filtro-chip" id="dfiltro-custom" onclick="setDashFiltro('custom')">Personalizado</div>
+      <div class="dash-fecha-range" id="dash-custom-range" style="display:none">
+        <input type="date" class="dash-fecha-input" id="dash-desde" onchange="renderDashboard()">
+        <span style="font-size:12px;color:var(--ink3)">→</span>
+        <input type="date" class="dash-fecha-input" id="dash-hasta" onchange="renderDashboard()">
+      </div>
+    </div>
     <div class="kpi-grid" id="kpi-grid"></div>
     <div class="seccion-split" id="seccion-split"></div>
     <div class="dash-grid">
       <div class="chart-card">
-        <div class="chart-ttl">Ventas — últimos 7 días</div>
+        <div class="chart-ttl" id="bar-chart-titulo">Ventas — últimos 7 días</div>
         <div class="bar-chart" id="bar-semana"></div>
       </div>
       <div class="chart-card">
-        <div class="chart-ttl">Top productos hoy</div>
+        <div class="chart-ttl">Top productos</div>
         <div class="top-list" id="top-list"></div>
       </div>
       <div class="chart-card">
@@ -562,7 +609,7 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
     </div>
     <div class="chart-card">
       <div class="chart-ttl">Ingeniería de menú</div>
-      <div style="font-size:11px;color:var(--ink3);margin-bottom:10px">Últimos 30 días · ventas reales vs costo de receta</div>
+      <div style="font-size:11px;color:var(--ink3);margin-bottom:10px">Basado en ventas reales del período seleccionado</div>
       <div class="menu-eng-grid" id="menu-eng-grid"></div>
     </div>
   </div>
@@ -603,8 +650,6 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
         <div class="inner-tab-bar">
           <button class="inner-tab-btn active" id="itab-cats" onclick="switchMenuTab('cats')">Categorías</button>
           <button class="inner-tab-btn" id="itab-prods" onclick="switchMenuTab('prods')">Productos</button>
-          <button class="inner-tab-btn" id="itab-recetas" onclick="switchMenuTab('recetas')">Recetas</button>
-          <button class="inner-tab-btn" id="itab-mods" onclick="switchMenuTab('mods')">Modificadores</button>
         </div>
         <!-- Categorías -->
         <div id="itab-body-cats">
@@ -619,16 +664,6 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
             <button class="btn-sm primary" onclick="openProdModal(null)">+ Producto</button>
           </div>
           <div id="menu-adm"></div>
-        </div>
-        <!-- Recetas -->
-        <div id="itab-body-recetas" style="display:none">
-          <p style="font-size:12px;color:var(--ink2);margin-bottom:12px">Definí qué insumos usa cada producto. El stock se descuenta al vender.</p>
-          <div id="recetas-adm"></div>
-        </div>
-        <!-- Modificadores -->
-        <div id="itab-body-mods" style="display:none">
-          <p style="font-size:12px;color:var(--ink2);margin-bottom:12px">Agrupá opciones personalizables por producto (tipo de leche, extras, etc.)</p>
-          <div id="mods-adm"></div>
         </div>
       </div>
     </div>
@@ -668,8 +703,8 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
         <span class="accordion-arr" id="acc-arr-datos">▾</span>
       </div>
       <div class="accordion-body" id="acc-body-datos">
-        <p style="font-size:12px;color:var(--ink2);margin-bottom:12px;line-height:1.5">Borrá ventas e historial local. Stock, menú e insumos no se ven afectados.</p>
-        <button class="btn-sm" style="color:var(--red);border-color:rgba(176,48,48,.3)" onclick="confirmarAccion('¿Limpiar todo el historial local de ventas?','limpiarVentas','Limpiar','var(--red)')">🗑 Limpiar ventas e historial</button>
+        <p style="font-size:12px;color:var(--ink2);margin-bottom:12px;line-height:1.5">Borrá ventas e historial local. Menú y configuración no se ven afectados.</p>
+        <button class="btn-sm" style="color:var(--red);border-color:rgba(176,48,48,.3)" onclick="pedirConfirm('¿Limpiar todo el historial local de ventas?','limpiarVentas','Limpiar')">🗑 Limpiar ventas e historial</button>
       </div>
     </div>
 
@@ -682,7 +717,6 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
 <!-- BOTTOM NAV -->
 <nav class="bottom-nav" id="bottom-nav">
   <button class="nav-btn active" data-tab="carga"><span class="nav-icon">🧾</span>Ventas</button>
-  <button class="nav-btn" data-tab="inventario"><span class="nav-icon">📦</span>Insumos</button>
   <button class="nav-btn" data-tab="dashboard"><span class="nav-icon">📊</span>Dashboard</button>
   <button class="nav-btn" data-tab="clientes"><span class="nav-icon">👥</span>Clientes</button>
   <button class="nav-btn" data-tab="historial"><span class="nav-icon">📅</span>Historial</button>
@@ -692,9 +726,9 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
 <!-- MODAL: CONFIRMACIÓN GENÉRICA -->
 <div class="modal-ov" id="modal-confirm" onclick="closeModalConfirm(event)">
   <div class="modal-box" style="max-width:360px;text-align:center">
-    <div class="modal-confirm-icon" id="confirm-icon">⚠️</div>
+    <div style="font-size:32px;margin-bottom:10px" id="confirm-icon">⚠️</div>
     <div class="modal-title" style="text-align:center" id="confirm-titulo">¿Confirmar?</div>
-    <div class="modal-confirm-msg" id="confirm-msg"></div>
+    <div style="font-size:14px;color:var(--ink2);text-align:center;line-height:1.5;margin-bottom:20px" id="confirm-msg"></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="cerrarModalConfirm()">Cancelar</button>
       <button class="btn-save" id="confirm-btn-ok" onclick="ejecutarConfirm()">Confirmar</button>
@@ -732,104 +766,30 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
   </div>
 </div>
 
-<!-- MODAL: MODIFICADORES AL AGREGAR PRODUCTO -->
-<div class="modal-ov" id="modal-mods" onclick="closeModalMods(event)">
+<!-- MODAL: VARIANTES AL AGREGAR PRODUCTO (en carrito) -->
+<div class="modal-ov" id="modal-variantes" onclick="closeModalVariantes(event)">
   <div class="modal-box">
-    <div class="modal-close" onclick="cerrarModalMods()">×</div>
-    <div class="modal-title" id="modal-mods-titulo">Personalizar</div>
-    <div id="modal-mods-grupos"></div>
+    <div class="modal-close" onclick="cerrarModalVariantes()">×</div>
+    <div class="modal-title" id="modal-variantes-titulo">Personalizar</div>
+    <div id="modal-variantes-grupos"></div>
     <div class="modal-field">
       <label class="modal-lbl">Nota (opcional)</label>
-      <input class="modal-input" id="modal-mods-nota" type="text" placeholder="Sin azúcar, extra shot…" maxlength="80">
+      <input class="modal-input" id="modal-variantes-nota" type="text" placeholder="Sin azúcar, extra shot…" maxlength="80">
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:10px 12px;background:var(--surf2);border-radius:var(--r-sm)">
       <span style="font-size:13px;color:var(--ink2)">Total del ítem</span>
-      <span style="font-size:15px;font-weight:500;color:var(--orange)" id="modal-mods-total">$0</span>
+      <span style="font-size:15px;font-weight:500;color:var(--orange)" id="modal-variantes-total">$0</span>
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="cerrarModalMods()">Cancelar</button>
-      <button class="btn-save" onclick="confirmarMods()">Agregar al pedido</button>
+      <button class="btn-cancel" onclick="cerrarModalVariantes()">Cancelar</button>
+      <button class="btn-save" onclick="confirmarVariantes()">Agregar al pedido</button>
     </div>
   </div>
 </div>
 
-<!-- MODAL: INSUMO -->
-<div class="modal-ov" id="modal-insumo" onclick="closeModalInsumo(event)">
-  <div class="modal-box">
-    <div class="modal-close" onclick="cerrarModalInsumo()">×</div>
-    <div class="modal-title" id="insumo-modal-titulo">Insumo</div>
-    <div class="modal-field">
-      <label class="modal-lbl">Nombre</label>
-      <input class="modal-input" id="ins-nombre" type="text" placeholder="Granos de café, leche…">
-    </div>
-    <div class="modal-2col">
-      <div class="modal-field">
-        <label class="modal-lbl">Unidad</label>
-        <select class="modal-select" id="ins-unidad">
-          <option value="g">g (gramos)</option>
-          <option value="ml">ml (mililitros)</option>
-          <option value="u">u (unidades)</option>
-          <option value="kg">kg</option>
-          <option value="l">l (litros)</option>
-        </select>
-      </div>
-      <div class="modal-field">
-        <label class="modal-lbl">Costo unitario ($)</label>
-        <input class="modal-input" id="ins-costo" type="number" placeholder="0" min="0">
-      </div>
-    </div>
-    <div class="modal-2col">
-      <div class="modal-field">
-        <label class="modal-lbl">Stock actual</label>
-        <input class="modal-input" id="ins-stock" type="number" placeholder="0" min="0">
-      </div>
-      <div class="modal-field">
-        <label class="modal-lbl">Alerta si queda menos de</label>
-        <input class="modal-input" id="ins-alerta" type="number" placeholder="5" min="0">
-      </div>
-    </div>
-    <div id="insumo-modal-actions" class="modal-actions"></div>
-  </div>
-</div>
-
-<!-- MODAL: MERMA -->
-<div class="modal-ov" id="modal-merma" onclick="closeModalMerma(event)">
-  <div class="modal-box">
-    <div class="modal-close" onclick="cerrarModalMerma()">×</div>
-    <div class="modal-title">Registrar merma</div>
-    <div class="modal-field">
-      <label class="modal-lbl">Insumo</label>
-      <select class="modal-select" id="merma-insumo"></select>
-    </div>
-    <div class="modal-2col">
-      <div class="modal-field">
-        <label class="modal-lbl">Cantidad</label>
-        <input class="modal-input" id="merma-cant" type="number" placeholder="0" min="0">
-      </div>
-      <div class="modal-field">
-        <label class="modal-lbl">Motivo</label>
-        <select class="modal-select" id="merma-motivo">
-          <option value="vencimiento">Vencimiento</option>
-          <option value="error">Error de preparación</option>
-          <option value="devolucion">Devolución</option>
-          <option value="otro">Otro</option>
-        </select>
-      </div>
-    </div>
-    <div class="modal-field">
-      <label class="modal-lbl">Nota (opcional)</label>
-      <input class="modal-input" id="merma-nota" type="text" placeholder="Detalle adicional…">
-    </div>
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="cerrarModalMerma()">Cancelar</button>
-      <button class="btn-save" onclick="guardarMerma()">Registrar</button>
-    </div>
-  </div>
-</div>
-
-<!-- MODAL: PRODUCTO -->
+<!-- MODAL: PRODUCTO (con variantes expandibles) -->
 <div class="modal-ov" id="modal-prod" onclick="closeProdModalOutside(event)">
-  <div class="modal-box">
+  <div class="modal-box" style="max-width:520px">
     <div class="modal-close" onclick="closeProdModal()">×</div>
     <div class="modal-title" id="prod-modal-title">Producto</div>
     <div class="modal-field">
@@ -849,21 +809,32 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
         </div>
       </div>
     </div>
-    <div id="prod-modal-actions" class="modal-actions"></div>
-  </div>
-</div>
-
-<!-- MODAL: MODIFICADORES DE PRODUCTO (admin) -->
-<div class="modal-ov" id="modal-mods-admin" onclick="closeModalModsAdmin(event)">
-  <div class="modal-box" style="max-width:520px">
-    <div class="modal-close" onclick="cerrarModalModsAdmin()">×</div>
-    <div class="modal-title" id="mods-admin-titulo">Modificadores</div>
-    <div id="mods-admin-grupos"></div>
-    <button class="btn-sm primary" style="width:100%;margin-top:4px" onclick="addGrupoMod()">+ Agregar grupo</button>
-    <div class="modal-actions" style="margin-top:14px">
-      <button class="btn-cancel" onclick="cerrarModalModsAdmin()">Cancelar</button>
-      <button class="btn-save" onclick="guardarModsAdmin()">Guardar</button>
+    <!-- Stock -->
+    <div class="modal-field">
+      <label class="modal-lbl">Stock</label>
+      <div class="stock-toggle-row">
+        <label class="toggle-switch">
+          <input type="checkbox" id="m-ilimitado" onchange="toggleIlimitado()">
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-lbl" id="m-ilimitado-lbl">∞ Ilimitado</span>
+      </div>
+      <div id="m-stock-wrap" style="margin-top:6px">
+        <input class="modal-input" id="m-stock" type="number" placeholder="20" min="0">
+      </div>
     </div>
+    <!-- Variantes (expandible) -->
+    <div class="variantes-section">
+      <div class="variantes-toggle" onclick="toggleVariantesModal()">
+        <span class="variantes-toggle-lbl">Variantes <span id="variantes-count-badge" style="font-size:11px;color:var(--ink3)"></span></span>
+        <span class="variantes-toggle-arr" id="variantes-arr">▾</span>
+      </div>
+      <div class="variantes-body" id="variantes-body">
+        <div id="variantes-grupos-modal"></div>
+        <button class="btn-sm primary" style="width:100%;margin-top:4px" onclick="addVarianteGrupo()">+ Agregar grupo de variantes</button>
+      </div>
+    </div>
+    <div id="prod-modal-actions" class="modal-actions" style="margin-top:14px"></div>
   </div>
 </div>
 
@@ -898,35 +869,28 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
   </div>
 </div>
 
-<!-- MODAL: RESERVA -->
+<!-- MODAL: RESERVA (con productos múltiples) -->
 <div class="modal-ov" id="modal-reserva" onclick="closeModalReserva(event)">
-  <div class="modal-box">
+  <div class="modal-box" style="max-width:540px">
     <div class="modal-close" onclick="cerrarModalReserva()">×</div>
     <div class="modal-title" id="reserva-modal-titulo">Reserva</div>
+    <!-- Tipo -->
     <div class="tipo-btns" style="margin-bottom:14px">
       <div class="tipo-btn" id="rtipo-btn-salon" onclick="selReservaTipo('salon')">🪑 Salón</div>
       <div class="tipo-btn" id="rtipo-btn-delivery" onclick="selReservaTipo('delivery')">🛵 Delivery</div>
       <div class="tipo-btn" id="rtipo-btn-takeaway" onclick="selReservaTipo('takeaway')">🥡 Take away</div>
     </div>
-    <div class="modal-field">
-      <label class="modal-lbl">Cliente (opcional)</label>
-      <div style="display:flex;gap:6px">
-        <select class="modal-select" id="res-cliente" style="flex:1"></select>
-        <button class="btn-sm primary" onclick="openClienteModal(null,'reserva')" style="flex-shrink:0">+</button>
-      </div>
-    </div>
-    <div class="modal-field">
-      <label class="modal-lbl">Nombre / identificación</label>
-      <input class="modal-input" id="res-nombre" type="text" placeholder="Juan García, Cumpleaños…" maxlength="60">
-    </div>
     <div class="modal-2col">
       <div class="modal-field">
-        <label class="modal-lbl">Producto</label>
-        <select class="modal-select" id="res-producto"></select>
+        <label class="modal-lbl">Nombre / identificación</label>
+        <input class="modal-input" id="res-nombre" type="text" placeholder="Juan García, Cumpleaños…" maxlength="60">
       </div>
       <div class="modal-field">
-        <label class="modal-lbl">Porciones / cantidad</label>
-        <input class="modal-input" id="res-porciones" type="number" min="1" placeholder="2">
+        <label class="modal-lbl">Cliente (opcional)</label>
+        <div style="display:flex;gap:6px">
+          <select class="modal-select" id="res-cliente" style="flex:1"></select>
+          <button class="btn-sm primary" onclick="openClienteModal(null,'reserva')" style="flex-shrink:0">+</button>
+        </div>
       </div>
     </div>
     <div class="modal-2col">
@@ -944,9 +908,27 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
         </select>
       </div>
     </div>
+    <!-- Productos múltiples -->
+    <div class="modal-field">
+      <label class="modal-lbl">Productos reservados</label>
+      <div id="res-prod-chips" class="cat-chips" style="margin-bottom:8px"></div>
+      <div class="prod-grid" id="res-prod-grid" style="max-height:240px;overflow-y:auto"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surf2);border-radius:var(--r-sm);margin-bottom:12px">
+      <span style="font-size:13px;color:var(--ink2)">Total</span>
+      <span style="font-size:15px;font-weight:500;color:var(--orange)" id="res-total">$0</span>
+    </div>
     <div class="modal-field">
       <label class="modal-lbl">Nota</label>
       <textarea class="modal-textarea" id="res-nota" placeholder="Canelones veganos, alergia a maní…"></textarea>
+    </div>
+    <!-- Forma de pago (para cuando se confirma como venta) -->
+    <div id="res-pago-wrap" style="display:none">
+      <div class="pago-lbl" style="margin-top:10px">Forma de pago</div>
+      <div class="pago-grid">
+        <div class="pago-opt active" id="rpopt-ef" onclick="setReservaPago('ef')">Efectivo</div>
+        <div class="pago-opt" id="rpopt-mp" onclick="setReservaPago('mp')">Mercado Pago</div>
+      </div>
     </div>
     <div id="reserva-modal-actions" class="modal-actions"></div>
   </div>
@@ -957,7 +939,7 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
 
 <script>
 // ══════════════════════════════════════════════════
-//  DATA & DEFAULTS
+//  DATOS & DEFAULTS
 // ══════════════════════════════════════════════════
 const PRESET_COLORS=['#C94A1A','#1A7A4A','#185FA5','#854F0B','#6B3AA5','#993C1D','#0F6E56','#2C5F8A','#A0522D','#555555'];
 
@@ -968,78 +950,83 @@ const DEFAULT_CATS=[
   {id:'cerv',   name:'Strange (Cerveza)', color:'#185FA5', seccion:'cocina'},
   {id:'beb',    name:'Bebidas',           color:'#6B3AA5', seccion:'cafeteria'},
 ];
-
 const DEFAULT_MENU=[
-  {id:1, name:'Espresso',         price:4000, cat:'cafe',   modificadores:[]},
-  {id:2, name:'Cappuccino',       price:5500, cat:'cafe',   modificadores:[]},
-  {id:3, name:'Latte',            price:5000, cat:'cafe',   modificadores:[]},
-  {id:4, name:'Latte saborizado', price:6500, cat:'cafe',   modificadores:[]},
-  {id:5, name:'Moca / Caramel',   price:6000, cat:'cafe',   modificadores:[]},
-  {id:6, name:'Latte frío',       price:5500, cat:'cafe',   modificadores:[]},
-  {id:7, name:'Exprimido',        price:6500, cat:'cafe',   modificadores:[]},
-  {id:8, name:'Licuado',          price:6000, cat:'cafe',   modificadores:[]},
-  {id:9, name:'Medialunas',       price:1800, cat:'pan',    modificadores:[]},
-  {id:10,name:'Croissant',        price:7000, cat:'pan',    modificadores:[]},
-  {id:11,name:'Pan de chocolate', price:7500, cat:'pan',    modificadores:[]},
-  {id:12,name:'Roll canela',      price:7000, cat:'pan',    modificadores:[]},
-  {id:13,name:'Mc Toast',         price:4500, cat:'pan',    modificadores:[]},
-  {id:14,name:'Sandwich pollo',   price:9000, cat:'pan',    modificadores:[]},
-  {id:15,name:'Medialunas JyQ',   price:3500, cat:'pan',    modificadores:[]},
-  {id:16,name:'Croissant JyQ',    price:8500, cat:'pan',    modificadores:[]},
-  {id:17,name:'Árabe especial',   price:9000, cat:'pan',    modificadores:[]},
-  {id:18,name:'Fosforitos',       price:6500, cat:'comida', modificadores:[]},
-  {id:19,name:'Pancho alemán',    price:4500, cat:'comida', modificadores:[]},
-  {id:20,name:'Moño Suizo',       price:9000, cat:'comida', modificadores:[]},
-  {id:21,name:'Chipa JyQ',        price:5500, cat:'comida', modificadores:[]},
-  {id:22,name:'Bimbo JyQ',        price:7000, cat:'comida', modificadores:[]},
-  {id:23,name:'Platos de Café',   price:5200, cat:'cerv',   modificadores:[]},
-  {id:24,name:'Taxi Praga',       price:5200, cat:'cerv',   modificadores:[]},
-  {id:25,name:'Fiesta de Focas',  price:4200, cat:'cerv',   modificadores:[]},
-  {id:26,name:'Citra a Ciegas',   price:7500, cat:'cerv',   modificadores:[]},
-  {id:27,name:'Salto de Fe',      price:7500, cat:'cerv',   modificadores:[]},
-  {id:28,name:'Samsa Enamorado',  price:6700, cat:'cerv',   modificadores:[]},
-  {id:29,name:'Casi Maduro',      price:7000, cat:'cerv',   modificadores:[]},
-  {id:30,name:'Gaseosa 357ml',    price:3500, cat:'beb',    modificadores:[]},
-  {id:31,name:'Gaseosa 269ml',    price:2500, cat:'beb',    modificadores:[]},
-  {id:32,name:'Yogurt',           price:5000, cat:'beb',    modificadores:[]},
+  {id:1, name:'Espresso',         price:4000, cat:'cafe',   stock:40, ilimitado:false, variantes:[]},
+  {id:2, name:'Cappuccino',       price:5500, cat:'cafe',   stock:40, ilimitado:false, variantes:[]},
+  {id:3, name:'Latte',            price:5000, cat:'cafe',   stock:40, ilimitado:false, variantes:[]},
+  {id:4, name:'Latte saborizado', price:6500, cat:'cafe',   stock:30, ilimitado:false, variantes:[]},
+  {id:5, name:'Moca / Caramel',   price:6000, cat:'cafe',   stock:30, ilimitado:false, variantes:[]},
+  {id:6, name:'Latte frío',       price:5500, cat:'cafe',   stock:20, ilimitado:false, variantes:[]},
+  {id:7, name:'Exprimido',        price:6500, cat:'cafe',   stock:15, ilimitado:false, variantes:[]},
+  {id:8, name:'Licuado',          price:6000, cat:'cafe',   stock:15, ilimitado:false, variantes:[]},
+  {id:9, name:'Medialunas',       price:1800, cat:'pan',    stock:60, ilimitado:false, variantes:[]},
+  {id:10,name:'Croissant',        price:7000, cat:'pan',    stock:20, ilimitado:false, variantes:[]},
+  {id:11,name:'Pan de chocolate', price:7500, cat:'pan',    stock:15, ilimitado:false, variantes:[]},
+  {id:12,name:'Roll canela',      price:7000, cat:'pan',    stock:12, ilimitado:false, variantes:[]},
+  {id:13,name:'Mc Toast',         price:4500, cat:'pan',    stock:20, ilimitado:false, variantes:[]},
+  {id:14,name:'Sandwich pollo',   price:9000, cat:'pan',    stock:15, ilimitado:false, variantes:[]},
+  {id:15,name:'Medialunas JyQ',   price:3500, cat:'pan',    stock:30, ilimitado:false, variantes:[]},
+  {id:16,name:'Croissant JyQ',    price:8500, cat:'pan',    stock:15, ilimitado:false, variantes:[]},
+  {id:17,name:'Árabe especial',   price:9000, cat:'pan',    stock:10, ilimitado:false, variantes:[]},
+  {id:18,name:'Fosforitos',       price:6500, cat:'comida', stock:20, ilimitado:false, variantes:[]},
+  {id:19,name:'Pancho alemán',    price:4500, cat:'comida', stock:15, ilimitado:false, variantes:[]},
+  {id:20,name:'Moño Suizo',       price:9000, cat:'comida', stock:10, ilimitado:false, variantes:[]},
+  {id:21,name:'Chipa JyQ',        price:5500, cat:'comida', stock:25, ilimitado:false, variantes:[]},
+  {id:22,name:'Bimbo JyQ',        price:7000, cat:'comida', stock:15, ilimitado:false, variantes:[]},
+  {id:23,name:'Platos de Café',   price:5200, cat:'cerv',   stock:12, ilimitado:true,  variantes:[]},
+  {id:24,name:'Taxi Praga',       price:5200, cat:'cerv',   stock:12, ilimitado:true,  variantes:[]},
+  {id:25,name:'Fiesta de Focas',  price:4200, cat:'cerv',   stock:12, ilimitado:true,  variantes:[]},
+  {id:26,name:'Citra a Ciegas',   price:7500, cat:'cerv',   stock:10, ilimitado:true,  variantes:[]},
+  {id:27,name:'Salto de Fe',      price:7500, cat:'cerv',   stock:10, ilimitado:true,  variantes:[]},
+  {id:28,name:'Samsa Enamorado',  price:6700, cat:'cerv',   stock:8,  ilimitado:true,  variantes:[]},
+  {id:29,name:'Casi Maduro',      price:7000, cat:'cerv',   stock:8,  ilimitado:true,  variantes:[]},
+  {id:30,name:'Gaseosa 357ml',    price:3500, cat:'beb',    stock:30, ilimitado:false, variantes:[]},
+  {id:31,name:'Gaseosa 269ml',    price:2500, cat:'beb',    stock:30, ilimitado:false, variantes:[]},
+  {id:32,name:'Yogurt',           price:5000, cat:'beb',    stock:15, ilimitado:false, variantes:[]},
 ];
 
+// ── Persistencia ──────────────────────────────────
 let cats     = JSON.parse(localStorage.getItem('cats')||'null')||DEFAULT_CATS;
 let menu     = JSON.parse(localStorage.getItem('menu')||'null')||DEFAULT_MENU;
 let ventas   = JSON.parse(localStorage.getItem('ventas')||'[]');
 let config   = JSON.parse(localStorage.getItem('config')||'{}');
 let mesas    = JSON.parse(localStorage.getItem('mesas')||'[]');
-let insumos  = JSON.parse(localStorage.getItem('insumos')||'[]');
-let recetas  = JSON.parse(localStorage.getItem('recetas')||'{}');
 let mermas   = JSON.parse(localStorage.getItem('mermas')||'[]');
 let clientes = JSON.parse(localStorage.getItem('clientes')||'[]');
 let reservas = JSON.parse(localStorage.getItem('reservas')||'[]');
 let turno    = JSON.parse(localStorage.getItem('turno')||'null');
 
-// Migrar datos
-menu = menu.map(p=>({...p, name:p.name??p.nombre??'(sin nombre)', price:p.price??p.precio??0, modificadores:p.modificadores??[]}));
+// Migrate existing data
+menu = menu.map(p=>({
+  ...p,
+  name:  p.name  ?? p.nombre ?? '(sin nombre)',
+  price: p.price ?? p.precio ?? 0,
+  stock: p.stock ?? p.alert ?? 10,
+  ilimitado: p.ilimitado ?? false,
+  variantes: p.variantes ?? p.modificadores ?? [],
+}));
 cats = cats.map(c=>({...c, seccion:c.seccion||'cafeteria'}));
 
-// Estado UI
-let carrito={}, pago='ef', catCarga='todos', editId=null, editInsumoId=null;
+// ── Estado UI ─────────────────────────────────────
+let carrito={}, pago='ef', catCarga='todos', editId=null;
 let editClienteId=null, editReservaId=null, activeTab='carga';
-let mesaActivaId=null, mesaParaEliminar=null, tipoNuevaMesa='salon';
-let prodParaMods=null, modsSeleccionados={}, clienteModalRetorno=null;
-let modAdminProdId=null, modAdminGrupos=[], reservaFiltroTipo='todos';
-let confirmCallback=null, tipoNuevaMesaReserva='salon';
-let activeAccordion=null, activeMenuTab='cats';
+let mesaActivaId=null, tipoNuevaMesa='salon', ventasFiltro='hoy';
+let prodParaVariantes=null, variantesSeleccionadas={};
+let clienteModalRetorno=null, tipoNuevaMesaReserva='salon';
+let reservaPago='ef', reservaCarrito={}, catReserva='todos';
+let variantesModalGrupos=[], variantesModalProdId=null;
+let confirmCallback=null, activeMenuTab='cats', ventasFiltroTipo='todos';
+let dashFiltro='hoy';
 
 function save(){
   localStorage.setItem('cats',     JSON.stringify(cats));
   localStorage.setItem('menu',     JSON.stringify(menu));
   localStorage.setItem('ventas',   JSON.stringify(ventas));
   localStorage.setItem('mesas',    JSON.stringify(mesas));
-  localStorage.setItem('insumos',  JSON.stringify(insumos));
-  localStorage.setItem('recetas',  JSON.stringify(recetas));
   localStorage.setItem('mermas',   JSON.stringify(mermas));
   localStorage.setItem('clientes', JSON.stringify(clientes));
   localStorage.setItem('reservas', JSON.stringify(reservas));
-  turno ? localStorage.setItem('turno', JSON.stringify(turno)) : localStorage.removeItem('turno');
+  turno ? localStorage.setItem('turno',JSON.stringify(turno)) : localStorage.removeItem('turno');
 }
 
 // ══════════════════════════════════════════════════
@@ -1050,56 +1037,61 @@ const fmt  = n => '$' + Math.round(n).toLocaleString('es-AR');
 const fmtK = n => n>=1000000?'$'+(n/1000000).toFixed(1).replace('.0','')+'M':n>=1000?'$'+Math.round(n/1000)+'k':fmt(n);
 
 function fmtFull(d){
-  const dias=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
-  const meses=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-  return `${dias[d.getDay()]} ${d.getDate()} de ${meses[d.getMonth()]} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  const D=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+  const M=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  return `${D[d.getDay()]} ${d.getDate()} de ${M[d.getMonth()]} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 function fmtShort(d){
-  const dias=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  const meses=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-  return `${dias[d.getDay()]} ${d.getDate()} ${meses[d.getMonth()]}`;
+  const D=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const M=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  return `${D[d.getDay()]} ${d.getDate()} ${M[d.getMonth()]}`;
 }
 function today(){ return new Date().toISOString().split('T')[0]; }
 function nowISO(){ return new Date().toISOString(); }
 function nowT(){ const n=new Date(); return `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`; }
-function getCat(id){ return cats.find(c=>c.id===id)||{name:'Sin categoría',color:'#aaa',seccion:'cafeteria'}; }
-function getInsumo(id){ return insumos.find(x=>x.id===id); }
+function getCat(id){ return cats.find(c=>c.id===id)||{name:'Sin cat',color:'#aaa',seccion:'cafeteria'}; }
 function showToast(msg,ms=2200){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),ms); }
 function tipoLabel(t){ return t==='salon'?'Salón':t==='delivery'?'Delivery':'Take away'; }
 function tipoBadgeClass(t){ return t==='salon'?'mesa-tipo-salon':t==='delivery'?'mesa-tipo-delivery':'mesa-tipo-takeaway'; }
-function carritoItemTotal(item){ return (item.precio+(item.mods||[]).reduce((s,m)=>s+m.precio,0))*item.qty; }
-function carritoTotal(){ return Object.values(carrito).reduce((s,i)=>s+carritoItemTotal(i),0); }
+function carritoItemTotal(item){ return (item.precio+(item.vars||[]).reduce((s,v)=>s+v.precio,0))*item.qty; }
+function carritoTotalFn(c){ return Object.values(c).reduce((s,i)=>s+carritoItemTotal(i),0); }
+function stockStatus(p){ if(p.ilimitado) return 'ok'; return p.stock<=0?'out':p.stock<=5?'low':'ok'; }
+
+// Fecha range por filtro
+function dashRango(){
+  const hoy=today();
+  if(dashFiltro==='hoy') return {desde:hoy,hasta:hoy};
+  if(dashFiltro==='semana'){ const d=new Date(); d.setDate(d.getDate()-6); return {desde:d.toISOString().split('T')[0],hasta:hoy}; }
+  if(dashFiltro==='mes'){ const d=new Date(); d.setDate(1); return {desde:d.toISOString().split('T')[0],hasta:hoy}; }
+  if(dashFiltro==='custom'){ return {desde:$('dash-desde')?.value||hoy, hasta:$('dash-hasta')?.value||hoy}; }
+  return {desde:hoy,hasta:hoy};
+}
 
 // ══════════════════════════════════════════════════
-//  MODAL CONFIRMACIÓN GENÉRICO
+//  MODAL CONFIRMACIÓN
 // ══════════════════════════════════════════════════
-function confirmarAccion(msg, callbackFn, labelOk='Confirmar', colorOk='var(--red)', icon='⚠️'){
-  confirmCallback = callbackFn;
-  $('confirm-icon').textContent = icon;
-  $('confirm-titulo').textContent = '¿Confirmar?';
-  $('confirm-msg').textContent = msg;
-  const btn = $('confirm-btn-ok');
-  btn.textContent = labelOk;
-  btn.style.background = colorOk;
+function pedirConfirm(msg, fn, labelOk='Eliminar', color='var(--red)', icon='⚠️'){
+  confirmCallback=fn;
+  $('confirm-icon').textContent=icon;
+  $('confirm-msg').textContent=msg;
+  const btn=$('confirm-btn-ok');
+  btn.textContent=labelOk; btn.style.background=color;
   $('modal-confirm').classList.add('open');
 }
 function cerrarModalConfirm(){ $('modal-confirm').classList.remove('open'); confirmCallback=null; }
 function closeModalConfirm(e){ if(e.target===$('modal-confirm')) cerrarModalConfirm(); }
 function ejecutarConfirm(){
-  if(typeof confirmCallback === 'string') eval(confirmCallback+'()');
-  else if(typeof confirmCallback === 'function') confirmCallback();
+  if(typeof confirmCallback==='string') { try{ eval(confirmCallback); }catch(e){} }
+  else if(typeof confirmCallback==='function') confirmCallback();
   cerrarModalConfirm();
 }
 
 // ══════════════════════════════════════════════════
-//  DATE TICKER
+//  DATE TICKER & NAV
 // ══════════════════════════════════════════════════
-function updateDate(){ $('hoy-lbl').textContent = fmtFull(new Date()); }
+function updateDate(){ $('hoy-lbl').textContent=fmtFull(new Date()); }
 updateDate(); setInterval(updateDate,30000);
 
-// ══════════════════════════════════════════════════
-//  BOTTOM NAV
-// ══════════════════════════════════════════════════
 document.querySelectorAll('.nav-btn').forEach(btn=>{
   btn.addEventListener('click',()=>goTab(btn.dataset.tab));
 });
@@ -1108,53 +1100,25 @@ function goTab(id){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   $('tab-'+id).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===id));
-  if(id==='carga')      renderMesas();
-  if(id==='dashboard')  renderDashboard();
-  if(id==='historial')  renderHistorial();
-  if(id==='inventario') renderInv();
-  if(id==='ajustes')    renderAjustes();
-  if(id==='clientes')   renderClientesTab();
-}
-function switchSubtab(t){
-  $('subtab-mesas').style.display    = t==='mesas'?'block':'none';
-  $('subtab-reservas').style.display = t==='reservas'?'block':'none';
-  $('stab-mesas').classList.toggle('active', t==='mesas');
-  $('stab-reservas').classList.toggle('active', t==='reservas');
-  if(t==='reservas') renderReservas();
-}
-function switchInvSubtab(t){
-  $('inv-subtab-insumos').style.display = t==='insumos'?'block':'none';
-  $('inv-subtab-mermas').style.display  = t==='mermas'?'block':'none';
-  $('stab-insumos').classList.toggle('active', t==='insumos');
-  $('stab-mermas').classList.toggle('active', t==='mermas');
-  if(t==='mermas') renderMermas();
+  if(id==='carga')     renderVentas();
+  if(id==='dashboard') renderDashboard();
+  if(id==='historial') renderHistorial();
+  if(id==='clientes')  renderClientesTab();
+  if(id==='ajustes')   renderAjustes();
 }
 
-// ══════════════════════════════════════════════════
-//  ACCORDION (Ajustes)
-// ══════════════════════════════════════════════════
+// ── Accordion Ajustes ──
 function toggleAccordion(key){
   const body=$(`acc-body-${key}`), arr=$(`acc-arr-${key}`);
   const isOpen=body.classList.contains('open');
-  // close all
-  ['menu','sheets','datos'].forEach(k=>{
-    $(`acc-body-${k}`)?.classList.remove('open');
-    $(`acc-arr-${k}`)?.classList.remove('open');
-  });
+  ['menu','sheets','datos'].forEach(k=>{ $(`acc-body-${k}`)?.classList.remove('open'); $(`acc-arr-${k}`)?.classList.remove('open'); });
   if(!isOpen){ body.classList.add('open'); arr.classList.add('open'); }
 }
-
-// ── Tabs internas del accordion Menú ──
 function switchMenuTab(tab){
-  ['cats','prods','recetas','mods'].forEach(t=>{
-    $(`itab-body-${t}`).style.display = t===tab?'block':'none';
-    $(`itab-${t}`).classList.toggle('active', t===tab);
-  });
+  ['cats','prods'].forEach(t=>{ $(`itab-body-${t}`).style.display=t===tab?'block':'none'; $(`itab-${t}`).classList.toggle('active',t===tab); });
   activeMenuTab=tab;
-  if(tab==='recetas') renderRecetasAdm();
-  if(tab==='mods')    renderModsAdm();
-  if(tab==='prods')   renderMenuAdm();
-  if(tab==='cats')    renderCatMgr();
+  if(tab==='prods') renderMenuAdm();
+  if(tab==='cats')  renderCatMgr();
 }
 
 // ══════════════════════════════════════════════════
@@ -1162,7 +1126,6 @@ function switchMenuTab(tab){
 // ══════════════════════════════════════════════════
 function renderTurnoPill(){
   const pill=$('turno-pill'); if(!pill) return;
-  const dot=$('turno-dot');
   if(turno&&turno.abierto){
     pill.innerHTML=`<span class="turno-dot on"></span>${turno.operador}`;
     pill.className='turno-pill abierto';
@@ -1171,24 +1134,17 @@ function renderTurnoPill(){
     pill.className='turno-pill';
   }
 }
-function openTurnoModal(){
-  turno&&turno.abierto ? mostrarResumenTurno() : mostrarAbrirTurno();
-  $('modal-turno').classList.add('open');
-}
+function openTurnoModal(){ turno&&turno.abierto?mostrarResumenTurno():mostrarAbrirTurno(); $('modal-turno').classList.add('open'); }
 function cerrarModalTurno(){ $('modal-turno').classList.remove('open'); }
 function closeModalTurno(e){ if(e.target===$('modal-turno')) cerrarModalTurno(); }
 
 function mostrarAbrirTurno(){
   $('turno-modal-titulo').textContent='Abrir turno';
   $('turno-modal-body').innerHTML=`
-    <div class="modal-field">
-      <label class="modal-lbl">Nombre del operador</label>
-      <input class="modal-input" id="turno-operador" type="text" placeholder="Nombre del cajero / barista">
-    </div>
-    <div class="modal-field">
-      <label class="modal-lbl">Fondo de caja ($)</label>
-      <input class="modal-input" id="turno-fondo" type="number" placeholder="0" min="0">
-    </div>
+    <div class="modal-field"><label class="modal-lbl">Operador</label>
+      <input class="modal-input" id="turno-operador" type="text" placeholder="Nombre del cajero / barista"></div>
+    <div class="modal-field"><label class="modal-lbl">Fondo de caja ($)</label>
+      <input class="modal-input" id="turno-fondo" type="number" placeholder="0" min="0"></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="cerrarModalTurno()">Cancelar</button>
       <button class="btn-save" onclick="abrirTurno()">Abrir turno</button>
@@ -1197,11 +1153,10 @@ function mostrarAbrirTurno(){
 }
 function abrirTurno(){
   const op=($('turno-operador')?.value||'').trim();
-  if(!op){ showToast('Ingresá el nombre del operador'); return; }
+  if(!op){ showToast('Ingresá el nombre'); return; }
   turno={abierto:true,operador:op,fondoCaja:parseFloat($('turno-fondo')?.value)||0,apertura:nowISO(),ventasIds:[]};
-  save(); cerrarModalTurno(); renderTurnoPill(); showToast(`✓ Turno abierto — ${op}`);
+  save(); syncTurnoSheets(); cerrarModalTurno(); renderTurnoPill(); showToast(`✓ Turno abierto — ${op}`);
 }
-
 function mostrarResumenTurno(){
   $('turno-modal-titulo').textContent='Turno activo';
   const vt=turno.ventasIds?ventas.filter(v=>turno.ventasIds.includes(v.id)):[];
@@ -1210,13 +1165,8 @@ function mostrarResumenTurno(){
   const tot=ef+mp;
   const cafe=vt.filter(v=>getCat(v.cat).seccion==='cafeteria').reduce((s,v)=>s+v.total,0);
   const cocina=vt.filter(v=>getCat(v.cat).seccion==='cocina').reduce((s,v)=>s+v.total,0);
-  const ap=new Date(turno.apertura);
-  const porOp={};
-  vt.forEach(v=>{if(!porOp[v.operador])porOp[v.operador]=0;porOp[v.operador]+=v.total;});
   $('turno-modal-body').innerHTML=`
-    <p style="font-size:12px;color:var(--ink3);margin-bottom:14px">
-      Abierto: ${fmtFull(ap)}<br>Operador: <strong>${turno.operador}</strong>
-    </p>
+    <p style="font-size:12px;color:var(--ink3);margin-bottom:14px">Abierto: ${fmtFull(new Date(turno.apertura))}<br>Operador: <strong>${turno.operador}</strong></p>
     <div class="turno-resumen-grid">
       <div class="turno-stat"><div class="turno-stat-lbl">Fondo inicial</div><div class="turno-stat-val">${fmt(turno.fondoCaja)}</div></div>
       <div class="turno-stat"><div class="turno-stat-lbl">Total vendido</div><div class="turno-stat-val" style="color:var(--orange)">${fmt(tot)}</div></div>
@@ -1225,22 +1175,18 @@ function mostrarResumenTurno(){
       <div class="turno-stat"><div class="turno-stat-lbl">☕ Cafetería</div><div class="turno-stat-val">${fmt(cafe)}</div></div>
       <div class="turno-stat"><div class="turno-stat-lbl">🍳 Cocina</div><div class="turno-stat-val">${fmt(cocina)}</div></div>
     </div>
-    ${Object.entries(porOp).length>1?`<div style="margin-bottom:14px;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden">
-      ${Object.entries(porOp).map(([op,t])=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:8px 12px;border-bottom:1px solid var(--border)"><span>${op}</span><span style="font-weight:500">${fmt(t)}</span></div>`).join('')}
-    </div>`:''}
     <div class="modal-actions">
       <button class="btn-cancel" onclick="cerrarModalTurno()">Seguir</button>
       <button class="btn-save" style="background:var(--green)" onclick="pedirCerrarTurno(${ef},${mp},${tot},${cafe},${cocina})">Cerrar turno</button>
     </div>`;
 }
-
 function pedirCerrarTurno(ef,mp,tot,cafe,cocina){
   cerrarModalTurno();
-  confirmarAccion(`Cerrar turno de ${turno.operador} — total ${fmt(tot)}`,()=>cerrarTurno(ef,mp,tot,cafe,cocina),'Cerrar turno','var(--green)','🏁');
+  pedirConfirm(`Cerrar turno de ${turno.operador} — total ${fmt(tot)}`, ()=>cerrarTurno(ef,mp,tot,cafe,cocina), 'Cerrar turno','var(--green)','🏁');
 }
 async function cerrarTurno(ef,mp,tot,cafe,cocina){
-  const resumen={fecha:today(),operador:turno.operador,apertura:turno.apertura,cierre:nowISO(),fondoCaja:turno.fondoCaja,totalEf:ef,totalMp:mp,total:tot,totalCafeteria:cafe,totalCocina:cocina};
-  await sheetsPost({action:'addTurno',row:resumen});
+  const r={fecha:today(),operador:turno.operador,apertura:turno.apertura,cierre:nowISO(),fondoCaja:turno.fondoCaja,totalEf:ef,totalMp:mp,total:tot,totalCafeteria:cafe,totalCocina:cocina};
+  await sheetsPost({action:'addTurno',row:r});
   turno=null; save(); renderTurnoPill(); showToast('✓ Turno cerrado');
 }
 
@@ -1253,15 +1199,16 @@ async function sheetsPost(payload){
   catch(e){ return false; }
 }
 async function syncVentasSheets(rows){ await sheetsPost({action:'addVentas',rows}); }
-async function syncStockSheets(){ await sheetsPost({action:'updateInsumos',rows:insumos}); }
-async function syncMenuSheets(){ await sheetsPost({action:'updateMenu',rows:menu.map(p=>({id:p.id,name:p.name,cat:getCat(p.cat).name,seccion:getCat(p.cat).seccion,price:p.price}))}); }
+async function syncMenuSheets(){ await sheetsPost({action:'updateMenu',rows:menu.map(p=>({id:p.id,name:p.name,cat:getCat(p.cat).name,seccion:getCat(p.cat).seccion,price:p.price,stock:p.stock,ilimitado:p.ilimitado}))}); }
 async function syncClientesSheets(){ await sheetsPost({action:'updateClientes',rows:clientes}); }
 async function syncReservasSheets(){ await sheetsPost({action:'updateReservas',rows:reservas}); }
+async function syncTurnoSheets(){ await sheetsPost({action:'syncTurno',turno}); }
+async function syncMesasSheets(){ await sheetsPost({action:'syncMesas',mesas}); }
 async function inicializarSheets(){
   if(!config.webappUrl){ showToast('Configurá la URL primero'); return; }
   showToast('Inicializando…');
   const ok=await sheetsPost({action:'initSheets'});
-  showToast(ok?'✓ Hojas creadas en Sheets':'Error al conectar');
+  showToast(ok?'✓ Hojas creadas':'Error al conectar');
 }
 
 // ══════════════════════════════════════════════════
@@ -1272,17 +1219,13 @@ function renderSetupBanner(){
   $('gs-dot').classList.toggle('on',connected);
   $('gs-txt').textContent=connected?'Sheets':'Sin conexión';
   const d2=$('gs-dot2'); if(d2) d2.classList.toggle('on',connected);
-  const t2=$('gs-txt2'); if(t2) t2.textContent=connected?'Conectado':'Sin conexión';
   const sb=$('setup-banner'); if(sb) sb.innerHTML=connected?'':
     `<div class="setup-banner" onclick="goTab('ajustes');setTimeout(()=>toggleAccordion('sheets'),200)">⚡ Conectá Google Sheets — ir a Ajustes</div>`;
-  // update accordion meta
-  const am=$('acc-sheets-meta');
-  if(am) am.textContent=connected?`Conectado · ${config.sheetId?.slice(0,12)||''}…`:'Sin configurar';
+  const am=$('acc-sheets-meta'); if(am) am.textContent=connected?'Conectado':'Sin configurar';
 }
 function guardarConfigAdj(){
-  const sheetId=($('cfg-sheet-adj')?.value||'').trim();
-  const webappUrl=($('cfg-url-adj')?.value||'').trim();
-  if(!webappUrl){ showToast('Pegá la URL de la Web App'); return; }
+  const sheetId=($('cfg-sheet-adj')?.value||'').trim(), webappUrl=($('cfg-url-adj')?.value||'').trim();
+  if(!webappUrl){ showToast('Pegá la URL'); return; }
   config={sheetId,webappUrl}; localStorage.setItem('config',JSON.stringify(config));
   renderSetupBanner(); showToast('✓ Configuración guardada'); syncMenuSheets();
 }
@@ -1293,53 +1236,82 @@ function renderAjustesConfig(){
 function limpiarVentas(){ ventas=[]; save(); renderDashboard(); renderHistorial(); showToast('✓ Historial limpiado'); }
 
 // ══════════════════════════════════════════════════
-//  STOCK ALERTS
+//  STOCK ALERTS (por producto)
 // ══════════════════════════════════════════════════
 function renderStockAlerts(){
   const el=$('stock-alerts'); if(!el) return;
-  const out=insumos.filter(p=>p.stock<=0);
-  const low=insumos.filter(p=>p.stock>0&&p.stock<=(p.alertaStock||0));
-  el.innerHTML=(out.length?`<div class="alert-banner crit">⛔ Sin stock: ${out.map(p=>p.nombre).join(', ')}</div>`:'')
-    +(low.length?`<div class="alert-banner">⚠️ Stock bajo: ${low.map(p=>`${p.nombre} (${p.stock}${p.unidad})`).join(', ')}</div>`:'');
+  const out=menu.filter(p=>!p.ilimitado&&p.stock<=0);
+  const low=menu.filter(p=>!p.ilimitado&&p.stock>0&&p.stock<=5);
+  el.innerHTML=(out.length?`<div class="alert-banner crit">⛔ Sin stock: ${out.map(p=>p.name).join(', ')}</div>`:'')
+    +(low.length?`<div class="alert-banner">⚠️ Stock bajo: ${low.map(p=>`${p.name} (${p.stock})`).join(', ')}</div>`:'');
 }
 
 // ══════════════════════════════════════════════════
-//  MESAS
+//  VENTAS (Mesas + Reservas unificado)
 // ══════════════════════════════════════════════════
-function renderMesas(){
+function renderVentas(){
   $('view-mesas').style.display='block'; $('view-pedido').style.display='none';
   mesaActivaId=null; carrito={};
   renderStockAlerts(); renderSetupBanner();
-  if(!mesas.length){ $('mesas-container').innerHTML=''; $('mesas-empty').style.display='block'; return; }
-  $('mesas-empty').style.display='none';
-  const grupos={salon:[],delivery:[],takeaway:[]};
-  mesas.forEach(m=>{ const g=m.tipo||'salon'; grupos[g]?grupos[g].push(m):grupos.salon.push(m); });
-  let html='';
-  ['salon','delivery','takeaway'].forEach(tipo=>{
-    const lista=grupos[tipo]; if(!lista.length) return;
-    html+=`<div class="mesas-grupo"><div class="mesas-grupo-titulo">${tipoLabel(tipo)}</div><div class="mesas-grid">`;
-    lista.forEach(m=>{
-      const items=Object.values(m.items||{}).reduce((s,v)=>s+(typeof v==='object'?v.qty:v),0);
-      const total=Object.values(m.items||{}).reduce((s,v)=>{
-        const q=typeof v==='object'?v.qty:v;
-        const base=typeof v==='object'?v.precio:0;
-        const mods=typeof v==='object'?(v.mods||[]).reduce((a,b)=>a+b.precio,0):0;
-        return s+(base+mods)*q;
-      },0);
-      const borderClass=items>0?'con-items':'sin-items';
-      html+=`<div class="mesa-card ${borderClass}" onclick="abrirMesa('${m.id}')">
-        <span class="mesa-tipo-badge ${tipoBadgeClass(tipo)}">${tipoLabel(tipo)}</span>
-        <div class="mesa-nombre">${m.nombre}</div>
-        <div class="mesa-items">${items} ítem${items!==1?'s':''}</div>
-        <div class="mesa-total">${items>0?fmt(total):'—'}</div>
-        <div class="mesa-close" onclick="event.stopPropagation();pedirEliminarMesa('${m.id}')" title="Eliminar">×</div>
-      </div>`;
-    });
-    html+='</div></div>';
-  });
-  $('mesas-container').innerHTML=html;
+  renderVentasFiltroChips();
+  renderMesasSection();
+  renderReservasSection();
 }
 
+function renderVentasFiltroChips(){
+  const tipos=['todos','salon','delivery','takeaway'];
+  const el=$('ventas-filtro-chips'); if(!el) return;
+  el.innerHTML=tipos.map(t=>`<div class="chip${ventasFiltroTipo===t?' active':''}" onclick="setVentasFiltro('${t}')">
+    ${t==='todos'?'Todos':tipoLabel(t)}</div>`).join('');
+}
+function setVentasFiltro(t){ ventasFiltroTipo=t; renderVentasFiltroChips(); renderMesasSection(); renderReservasSection(); }
+
+function renderMesasSection(){
+  const container=$('mesas-container'), empty=$('mesas-empty'); if(!container) return;
+  const filtradas=ventasFiltroTipo==='todos'?mesas:mesas.filter(m=>m.tipo===ventasFiltroTipo);
+  if(!filtradas.length){ container.innerHTML=''; empty.style.display='block'; return; }
+  empty.style.display='none';
+  container.innerHTML=`<div class="mesas-grid">${filtradas.map(m=>{
+    const items=Object.values(m.items||{}).reduce((s,v)=>s+(v.qty||0),0);
+    const total=Object.values(m.items||{}).reduce((s,v)=>s+carritoItemTotal(v),0);
+    return `<div class="mesa-card ${items>0?'con-items':'sin-items'}" onclick="abrirMesa('${m.id}')">
+      <span class="mesa-tipo-badge ${tipoBadgeClass(m.tipo||'salon')}">${tipoLabel(m.tipo||'salon')}</span>
+      <div class="mesa-nombre">${m.nombre}</div>
+      <div class="mesa-items">${items} ítem${items!==1?'s':''}</div>
+      <div class="mesa-total">${items>0?fmt(total):'—'}</div>
+      <div class="mesa-close" onclick="event.stopPropagation();pedirEliminarMesa('${m.id}')">×</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function renderReservasSection(){
+  const container=$('reservas-container'), empty=$('reservas-empty'); if(!container) return;
+  let lista=ventasFiltroTipo==='todos'?reservas:reservas.filter(r=>r.tipo===ventasFiltroTipo);
+  lista=[...lista].sort((a,b)=>{ const fe=a.estado==='cancelada'?1:0,fb=b.estado==='cancelada'?1:0; return fe-fb||(a.fecha||'').localeCompare(b.fecha||''); });
+  if(!lista.length){ container.innerHTML=''; empty.style.display='block'; return; }
+  empty.style.display='none';
+  container.innerHTML=lista.map(r=>{
+    const prodNames=(r.items||[]).map(i=>{ const p=menu.find(x=>x.id==i.prodId); return p?`${p.name}×${i.qty}`:'?'; }).join(', ');
+    const total=(r.items||[]).reduce((s,i)=>s+carritoItemTotal(i),0);
+    return `<div class="reserva-card ${r.estado||'pendiente'}">
+      <div style="flex-shrink:0"><span class="mesa-tipo-badge ${tipoBadgeClass(r.tipo||'salon')}">${tipoLabel(r.tipo||'salon')}</span></div>
+      <div class="reserva-info" style="flex:1;min-width:0">
+        <div class="reserva-cliente">${r.nombre||'Sin nombre'}</div>
+        ${prodNames?`<div class="reserva-items">${prodNames}</div>`:''}
+        ${total>0?`<div class="reserva-total">${fmt(total)}</div>`:''}
+        ${r.fecha?`<div style="font-size:11px;color:var(--ink3)">📅 ${r.fecha}</div>`:''}
+        ${r.nota?`<div class="reserva-nota">${r.nota}</div>`:''}
+        <div class="reserva-actions">
+          <button class="btn-sm" onclick="openReservaModal('${r.id}')">Editar</button>
+          ${r.estado!=='cancelada'&&r.estado!=='pagada'?`<button class="btn-sm primary" onclick="abrirReservaComoVenta('${r.id}')">→ Cobrar</button>`:''}
+        </div>
+      </div>
+      <span class="reserva-estado ${r.estado||'pendiente'}">${r.estado||'pendiente'}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Nueva mesa ──
 function abrirNuevaMesa(){
   tipoNuevaMesa='salon'; $('nueva-mesa-input').value='';
   ['salon','delivery','takeaway'].forEach(t=>{ $(`tipo-btn-${t}`).className=`tipo-btn${t===tipoNuevaMesa?' sel-'+t:''}`; });
@@ -1349,19 +1321,17 @@ function selTipo(t){ tipoNuevaMesa=t; ['salon','delivery','takeaway'].forEach(x=
 function cerrarModalNuevaMesa(){ $('modal-nueva-mesa').classList.remove('open'); }
 function closeModalNuevaMesa(e){ if(e.target===$('modal-nueva-mesa')) cerrarModalNuevaMesa(); }
 function confirmarNuevaMesa(){
-  const nombre=$('nueva-mesa-input').value.trim();
-  if(!nombre){ showToast('Ingresá un nombre'); return; }
+  const nombre=$('nueva-mesa-input').value.trim(); if(!nombre){ showToast('Ingresá un nombre'); return; }
   const m={id:'m_'+Date.now(),nombre,tipo:tipoNuevaMesa,items:{},pago:'ef',apertura:nowISO()};
-  mesas.push(m); save(); cerrarModalNuevaMesa(); abrirMesa(m.id);
+  mesas.push(m); save(); syncMesasSheets(); cerrarModalNuevaMesa(); abrirMesa(m.id);
 }
-document.addEventListener('DOMContentLoaded', () => {
-  const mInput = $('nueva-mesa-input');
-  if(mInput) mInput.addEventListener('keydown', e=>{ if(e.key==='Enter') confirmarNuevaMesa(); });
+document.addEventListener('DOMContentLoaded',()=>{
+  const el=$('nueva-mesa-input'); if(el) el.addEventListener('keydown',e=>{ if(e.key==='Enter') confirmarNuevaMesa(); });
 });
 
 function pedirEliminarMesa(id){
   const m=mesas.find(x=>x.id===id); if(!m) return;
-  confirmarAccion(`¿Eliminar la mesa "${m.nombre}"? Se perderán los ítems.`,()=>{ mesas=mesas.filter(x=>x.id!==id); save(); renderMesas(); showToast('Mesa eliminada'); });
+  pedirConfirm(`¿Eliminar la mesa "${m.nombre}"? Se perderán los ítems.`,()=>{ mesas=mesas.filter(x=>x.id!==id); save(); syncMesasSheets(); renderVentas(); showToast('Mesa eliminada'); });
 }
 
 function abrirMesa(id){
@@ -1370,49 +1340,91 @@ function abrirMesa(id){
   Object.entries(m.items||{}).forEach(([k,v])=>{ carrito[k]={...v}; });
   pago=m.pago||'ef';
   $('mesa-titulo').textContent=m.nombre;
-  const badge=$('mesa-tipo-badge');
-  badge.textContent=tipoLabel(m.tipo||'salon'); badge.className=`mesa-tipo-badge ${tipoBadgeClass(m.tipo||'salon')}`;
+  const badge=$('mesa-tipo-badge'); badge.textContent=tipoLabel(m.tipo||'salon'); badge.className=`mesa-tipo-badge ${tipoBadgeClass(m.tipo||'salon')}`;
+  $('btn-confirm').textContent='Cerrar y cobrar';
   $('view-mesas').style.display='none'; $('view-pedido').style.display='block';
   renderCargaCats(); renderProdGrid(); renderCart(); setPago(pago);
 }
-function volverAMesas(){
-  if(mesaActivaId){ const m=mesas.find(x=>x.id===mesaActivaId); if(m){ m.items={...carrito}; m.pago=pago; save(); } }
-  renderMesas();
-}
-function saveMesaCarrito(){
-  if(mesaActivaId){ const m=mesas.find(x=>x.id===mesaActivaId); if(m){ m.items={...carrito}; save(); } }
+
+function abrirReservaComoVenta(id){
+  const r=reservas.find(x=>x.id===id); if(!r) return;
+  // Open the pedido view pre-loaded with the reservation items
+  mesaActivaId='reserva_'+id;
+  carrito={};
+  (r.items||[]).forEach((item,i)=>{ carrito[`res_${i}`]={...item}; });
+  pago=r.pago||'ef';
+  $('mesa-titulo').textContent=r.nombre;
+  const badge=$('mesa-tipo-badge'); badge.textContent=tipoLabel(r.tipo||'salon'); badge.className=`mesa-tipo-badge ${tipoBadgeClass(r.tipo||'salon')}`;
+  $('btn-confirm').textContent='Cobrar reserva';
+  $('view-mesas').style.display='none'; $('view-pedido').style.display='block';
+  renderCargaCats(); renderProdGrid(); renderCart(); setPago(pago);
 }
 
-async function cerrarMesa(){
+function volverAMesas(){
+  if(mesaActivaId && !mesaActivaId.startsWith('reserva_')){
+    const m=mesas.find(x=>x.id===mesaActivaId); if(m){ m.items={...carrito}; m.pago=pago; save(); syncMesasSheets(); }
+  }
+  renderVentas();
+}
+
+function saveMesaCarrito(){
+  if(!mesaActivaId||mesaActivaId.startsWith('reserva_')) return;
+  const m=mesas.find(x=>x.id===mesaActivaId); if(m){ m.items={...carrito}; save(); syncMesasSheets(); }
+}
+
+async function cerrarMesaOReserva(){
+  const esReserva=mesaActivaId&&mesaActivaId.startsWith('reserva_');
   const items=Object.values(carrito);
   if(!items.length){ showToast('El pedido está vacío'); return; }
   const btn=$('btn-confirm'); btn.disabled=true; btn.textContent='Cerrando…';
   const fecha=today(), hora=nowT(), ts=nowISO();
-  const m=mesas.find(x=>x.id===mesaActivaId);
   const operador=(turno&&turno.abierto)?turno.operador:'Sin turno';
   const ventaIds=[];
+  let tipoVenta='salon', nombreMesa='';
+
+  if(esReserva){
+    const rid=mesaActivaId.replace('reserva_','');
+    const r=reservas.find(x=>x.id===rid);
+    if(r){ tipoVenta=r.tipo||'salon'; nombreMesa=r.nombre; }
+  } else {
+    const m=mesas.find(x=>x.id===mesaActivaId);
+    if(m){ tipoVenta=m.tipo||'salon'; nombreMesa=m.nombre; }
+  }
+
   const nuevas=items.map(item=>{
     const p=menu.find(x=>x.id==item.prodId);
-    const modsExtra=(item.mods||[]).reduce((s,mo)=>s+mo.precio,0);
+    const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
     const ventaId='v_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
     ventaIds.push(ventaId);
-    const rec=recetas[item.prodId]||[];
-    rec.forEach(r=>{ const ins=insumos.find(x=>x.id===r.insumoId); if(ins) ins.stock=Math.max(0,(ins.stock||0)-r.cantidad*item.qty); });
-    return {id:ventaId,fecha,hora,timestamp:ts,operador,mesa:m?m.nombre:'',tipo:m?m.tipo:'salon',
-      producto:p?p.name:'?',modificadores:(item.mods||[]).map(mo=>mo.nombre).join(', '),
+    // Descontar stock
+    if(p&&!p.ilimitado) p.stock=Math.max(0,(p.stock||0)-item.qty);
+    return {id:ventaId,fecha,hora,timestamp:ts,operador,mesa:nombreMesa,tipo:tipoVenta,
+      producto:p?p.name:'?',variantes:(item.vars||[]).map(v=>v.nombre).join(', '),
       nota:item.nota||'',categoria:getCat(p?.cat).name,seccion:getCat(p?.cat).seccion,
-      cantidad:item.qty,precioBase:item.precio,precioMods:modsExtra,total:(item.precio+modsExtra)*item.qty,pago,cat:p?.cat};
+      cantidad:item.qty,precioBase:item.precio,precioVars:varsExtra,
+      total:(item.precio+varsExtra)*item.qty,pago,cat:p?.cat};
   });
+
   ventas.push(...nuevas);
   if(turno&&turno.abierto) turno.ventasIds=[...(turno.ventasIds||[]),...ventaIds];
-  mesas=mesas.filter(x=>x.id!==mesaActivaId); save();
-  const ok=await syncVentasSheets(nuevas); syncStockSheets();
-  showToast(ok?'✓ Venta guardada en Sheets':(config.webappUrl?'✓ Venta registrada (sin internet)':'✓ Venta registrada'));
-  btn.disabled=false; btn.textContent='Cerrar y cobrar'; renderMesas();
+
+  if(esReserva){
+    const rid=mesaActivaId.replace('reserva_','');
+    const r=reservas.find(x=>x.id===rid);
+    if(r){ r.estado='pagada'; r.pago=pago; }
+  } else {
+    mesas=mesas.filter(x=>x.id!==mesaActivaId);
+  }
+
+  save(); syncMesasSheets(); if(turno&&turno.abierto) syncTurnoSheets();
+  const ok=await syncVentasSheets(nuevas);
+  showToast(ok?'✓ Venta guardada en Sheets':(config.webappUrl?'✓ Registrada (sin internet)':'✓ Venta registrada'));
+  btn.disabled=false; btn.textContent='Cerrar y cobrar';
+  renderVentas();
 }
 
 // ══════════════════════════════════════════════════
-//  CARRITO + MODIFICADORES
+//  CARRITO + VARIANTES (al agregar)
 // ══════════════════════════════════════════════════
 function renderCargaCats(){
   const el=$('carga-cats'); if(!el) return;
@@ -1430,12 +1442,14 @@ function renderProdGrid(){
   Object.values(carrito).forEach(item=>{ qtyMap[item.prodId]=(qtyMap[item.prodId]||0)+item.qty; });
   el.innerHTML=list.map(p=>{
     const qty=qtyMap[p.id]||0; const cat=getCat(p.cat);
-    const hasMods=(p.modificadores||[]).length>0;
-    return `<div class="prod-card${qty>0?' in-cart':''}" onclick="addItem(${p.id})">
+    const st=stockStatus(p); const hasVars=(p.variantes||[]).length>0;
+    return `<div class="prod-card${qty>0?' in-cart':''}${st==='out'?' disabled':''}" onclick="addItem(${p.id})">
       <div class="cat-dot" style="background:${cat.color}"></div>
       <div class="prod-name">${p.name}</div>
       <div class="prod-price">${fmt(p.price)}</div>
-      ${hasMods?`<div class="prod-mods-hint">🔧 Personalizable</div>`:''}
+      ${!p.ilimitado&&st==='low'?`<div class="prod-low-txt">⚠ ${p.stock} restantes</div>`:''}
+      ${!p.ilimitado&&st==='out'?'<div class="out-lbl">Agotado</div>':''}
+      ${hasVars?`<div class="prod-mods-hint">🔧 Variantes</div>`:''}
       ${qty>0?`<div class="prod-badge">${qty}</div>`:''}
     </div>`;
   }).join('');
@@ -1443,10 +1457,12 @@ function renderProdGrid(){
 
 function addItem(id){
   const p=menu.find(x=>x.id===id); if(!p) return;
-  if((p.modificadores||[]).length>0){ abrirModalMods(p); }
+  if(!p.ilimitado&&p.stock<=0){ showToast(`Sin stock: ${p.name}`); return; }
+  if((p.variantes||[]).length>0){ abrirModalVariantes(p); }
   else {
     const key=`${id}_plain`;
-    carrito[key] ? carrito[key].qty++ : (carrito[key]={prodId:id,qty:1,mods:[],nota:'',precio:p.price});
+    if(!p.ilimitado&&carrito[key]&&carrito[key].qty>=p.stock){ showToast(`Solo ${p.stock} disponibles`); return; }
+    carrito[key] ? carrito[key].qty++ : (carrito[key]={prodId:id,qty:1,vars:[],nota:'',precio:p.price});
     saveMesaCarrito(); renderProdGrid(); renderCart();
   }
 }
@@ -1455,6 +1471,7 @@ function changeQty(key,d){
   if(carrito[key].qty<=0) delete carrito[key];
   saveMesaCarrito(); renderProdGrid(); renderCart();
 }
+
 function renderCart(){
   const items=Object.entries(carrito);
   const ct=$('cart-total'),ce=$('cart-empty'),cr=$('cart-rows'),bc=$('btn-confirm');
@@ -1463,13 +1480,13 @@ function renderCart(){
   if(bc) bc.disabled=false; ce.style.display='none'; cr.style.display='flex';
   cr.innerHTML=items.map(([key,item])=>{
     const p=menu.find(x=>x.id==item.prodId); if(!p) return '';
-    const modsExtra=(item.mods||[]).reduce((s,m)=>s+m.precio,0);
-    const sub=(item.precio+modsExtra)*item.qty;
-    const modsStr=(item.mods||[]).map(m=>m.nombre+(m.precio?` +${fmt(m.precio)}`:'')  ).join(' · ');
+    const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
+    const sub=(item.precio+varsExtra)*item.qty;
+    const varsStr=(item.vars||[]).map(v=>v.nombre+(v.precio?` +${fmt(v.precio)}`:'')  ).join(' · ');
     return `<div class="cart-row">
       <div class="c-name-wrap">
         <div class="c-name">${p.name}</div>
-        ${modsStr?`<div class="c-mods">${modsStr}</div>`:''}
+        ${varsStr?`<div class="c-mods">${varsStr}</div>`:''}
         ${item.nota?`<div class="c-nota">${item.nota}</div>`:''}
       </div>
       <div class="qty-wrap">
@@ -1480,87 +1497,199 @@ function renderCart(){
       <span class="c-sub">${fmt(sub)}</span>
     </div>`;
   }).join('');
-  ct.textContent=fmt(carritoTotal());
+  ct.textContent=fmt(carritoTotalFn(carrito));
 }
+
 function setPago(t){
   pago=t;
-  if(mesaActivaId){ const m=mesas.find(x=>x.id===mesaActivaId); if(m){ m.pago=t; save(); } }
+  if(mesaActivaId&&!mesaActivaId.startsWith('reserva_')){ const m=mesas.find(x=>x.id===mesaActivaId); if(m){ m.pago=t; save(); } }
   $('popt-ef').className='pago-opt'+(t==='ef'?' active':'');
   $('popt-mp').className='pago-opt'+(t==='mp'?' active':'');
 }
 
-// ── Modal modificadores (al cargar) ──
-function abrirModalMods(p){
-  prodParaMods=p; modsSeleccionados={};
-  $('modal-mods-titulo').textContent=p.name; $('modal-mods-nota').value='';
-  const el=$('modal-mods-grupos');
-  el.innerHTML=(p.modificadores||[]).map((grupo,gi)=>`
+// ── Modal variantes (al agregar al carrito) ──
+function abrirModalVariantes(p){
+  prodParaVariantes=p; variantesSeleccionadas={};
+  $('modal-variantes-titulo').textContent=p.name; $('modal-variantes-nota').value='';
+  const el=$('modal-variantes-grupos');
+  el.innerHTML=(p.variantes||[]).map((grupo,gi)=>`
     <div class="mod-sel-grupo">
       <div class="mod-sel-titulo">${grupo.grupo} <span style="font-size:10px;color:var(--ink3)">${grupo.tipo==='unico'?'(elegí uno)':'(varios)'}</span></div>
       <div class="mod-sel-opciones">${(grupo.opciones||[]).map((op,oi)=>`
-        <div class="mod-sel-opt" id="mop-${gi}-${oi}" onclick="toggleMod(${gi},${oi},'${grupo.tipo}')">
+        <div class="mod-sel-opt" id="vop-${gi}-${oi}" onclick="toggleVariante(${gi},${oi},'${grupo.tipo}')">
           <span class="mod-sel-opt-nombre">${op.nombre}</span>
           <span class="mod-sel-opt-precio">${op.precio>0?`+${fmt(op.precio)}`:'sin cargo'}</span>
         </div>`).join('')}
       </div>
     </div>`).join('');
-  actualizarTotalMods(); $('modal-mods').classList.add('open');
+  actualizarTotalVariantes(); $('modal-variantes').classList.add('open');
 }
-function cerrarModalMods(){ $('modal-mods').classList.remove('open'); prodParaMods=null; }
-function closeModalMods(e){ if(e.target===$('modal-mods')) cerrarModalMods(); }
-function toggleMod(gi,oi,tipo){
-  const grupo=(prodParaMods.modificadores||[])[gi]; if(!grupo) return;
+function cerrarModalVariantes(){ $('modal-variantes').classList.remove('open'); prodParaVariantes=null; }
+function closeModalVariantes(e){ if(e.target===$('modal-variantes')) cerrarModalVariantes(); }
+function toggleVariante(gi,oi,tipo){
+  const grupo=(prodParaVariantes.variantes||[])[gi]; if(!grupo) return;
   const op=grupo.opciones[oi];
-  if(!modsSeleccionados[gi]) modsSeleccionados[gi]=[];
+  if(!variantesSeleccionadas[gi]) variantesSeleccionadas[gi]=[];
   if(tipo==='unico'){
-    grupo.opciones.forEach((_,x)=>document.getElementById(`mop-${gi}-${x}`)?.classList.remove('sel'));
-    modsSeleccionados[gi]=[{nombre:op.nombre,precio:op.precio||0}];
-    document.getElementById(`mop-${gi}-${oi}`)?.classList.add('sel');
+    grupo.opciones.forEach((_,x)=>document.getElementById(`vop-${gi}-${x}`)?.classList.remove('sel'));
+    variantesSeleccionadas[gi]=[{nombre:op.nombre,precio:op.precio||0}];
+    document.getElementById(`vop-${gi}-${oi}`)?.classList.add('sel');
   } else {
-    const el=document.getElementById(`mop-${gi}-${oi}`);
-    const idx=modsSeleccionados[gi].findIndex(x=>x.nombre===op.nombre);
-    if(idx>=0){ modsSeleccionados[gi].splice(idx,1); el?.classList.remove('sel'); }
-    else { modsSeleccionados[gi].push({nombre:op.nombre,precio:op.precio||0}); el?.classList.add('sel'); }
+    const el=document.getElementById(`vop-${gi}-${oi}`);
+    const idx=variantesSeleccionadas[gi].findIndex(x=>x.nombre===op.nombre);
+    if(idx>=0){ variantesSeleccionadas[gi].splice(idx,1); el?.classList.remove('sel'); }
+    else { variantesSeleccionadas[gi].push({nombre:op.nombre,precio:op.precio||0}); el?.classList.add('sel'); }
   }
-  actualizarTotalMods();
+  actualizarTotalVariantes();
 }
-function actualizarTotalMods(){
-  if(!prodParaMods) return;
-  const extra=Object.values(modsSeleccionados).flat().reduce((s,m)=>s+m.precio,0);
-  $('modal-mods-total').textContent=fmt(prodParaMods.price+extra);
+function actualizarTotalVariantes(){
+  if(!prodParaVariantes) return;
+  const extra=Object.values(variantesSeleccionadas).flat().reduce((s,v)=>s+v.precio,0);
+  $('modal-variantes-total').textContent=fmt(prodParaVariantes.price+extra);
 }
-function confirmarMods(){
-  if(!prodParaMods) return;
-  const mods=Object.values(modsSeleccionados).flat();
-  const nota=$('modal-mods-nota').value.trim();
-  const key=`${prodParaMods.id}_${mods.map(m=>m.nombre).sort().join(',')}_${Date.now()}`;
-  carrito[key]={prodId:prodParaMods.id,qty:1,mods,nota,precio:prodParaMods.price};
-  cerrarModalMods(); saveMesaCarrito(); renderProdGrid(); renderCart();
+function confirmarVariantes(){
+  if(!prodParaVariantes) return;
+  const vars=Object.values(variantesSeleccionadas).flat();
+  const nota=$('modal-variantes-nota').value.trim();
+  const key=`${prodParaVariantes.id}_${vars.map(v=>v.nombre).sort().join(',')}_${Date.now()}`;
+  carrito[key]={prodId:prodParaVariantes.id,qty:1,vars,nota,precio:prodParaVariantes.price};
+  cerrarModalVariantes(); saveMesaCarrito(); renderProdGrid(); renderCart();
 }
 
 // ══════════════════════════════════════════════════
-//  DASHBOARD
+//  RESERVAS (múltiples productos)
 // ══════════════════════════════════════════════════
+function popularClienteSelectReserva(){
+  const sel=$('res-cliente'); if(!sel) return;
+  sel.innerHTML=`<option value="">Sin cliente</option>`+clientes.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+}
+function selReservaTipo(t){ tipoNuevaMesaReserva=t; ['salon','delivery','takeaway'].forEach(x=>{ $(`rtipo-btn-${x}`).className=`tipo-btn${x===t?' sel-'+x:''}`; }); }
+function setReservaPago(t){ reservaPago=t; $('rpopt-ef').className='pago-opt'+(t==='ef'?' active':''); $('rpopt-mp').className='pago-opt'+(t==='mp'?' active':''); }
+
+function openReservaModal(id){
+  editReservaId=id; tipoNuevaMesaReserva='salon'; reservaCarrito={}; catReserva='todos';
+  popularClienteSelectReserva();
+  ['salon','delivery','takeaway'].forEach(t=>{ $(`rtipo-btn-${t}`).className='tipo-btn'; });
+  $('rtipo-btn-salon').className='tipo-btn sel-salon';
+
+  if(id){
+    const r=reservas.find(x=>x.id===id); if(!r) return;
+    tipoNuevaMesaReserva=r.tipo||'salon';
+    ['salon','delivery','takeaway'].forEach(t=>{ $(`rtipo-btn-${t}`).className=`tipo-btn${t===tipoNuevaMesaReserva?' sel-'+t:''}`; });
+    $('res-nombre').value=r.nombre||''; $('res-cliente').value=r.clienteId||'';
+    $('res-fecha').value=r.fecha||''; $('res-estado').value=r.estado||'pendiente';
+    $('res-nota').value=r.nota||'';
+    // Restaurar carrito de la reserva
+    (r.items||[]).forEach((item,i)=>{ reservaCarrito[`ri_${i}`]={...item}; });
+    $('reserva-modal-titulo').textContent='Editar reserva';
+    $('reserva-modal-actions').innerHTML=`<button class="btn-cancel" onclick="pedirEliminarReserva('${id}')">Eliminar</button><button class="btn-save" onclick="guardarReserva()">Guardar</button>`;
+  } else {
+    $('reserva-modal-titulo').textContent='Nueva reserva';
+    ['res-nombre','res-nota'].forEach(fid=>$(fid).value='');
+    $('res-fecha').value=today(); $('res-estado').value='pendiente'; $('res-cliente').value='';
+    $('reserva-modal-actions').innerHTML=`<button class="btn-cancel" onclick="cerrarModalReserva()">Cancelar</button><button class="btn-save" onclick="guardarReserva()">Guardar</button>`;
+  }
+
+  renderReservaProductoGrid();
+  renderReservaProdChips();
+  renderReservaCarritoChips();
+  $('modal-reserva').classList.add('open');
+}
+
+function pedirEliminarReserva(id){
+  const r=reservas.find(x=>x.id===id);
+  cerrarModalReserva();
+  pedirConfirm(`¿Eliminar la reserva "${r?.nombre||''}"?`, ()=>{
+    reservas=reservas.filter(x=>x.id!==id); save(); syncReservasSheets(); renderVentas(); showToast('✓ Reserva eliminada');
+  });
+}
+
+function renderReservaProdChips(){
+  const el=$('res-prod-chips'); if(!el) return;
+  const all=[{id:'todos',name:'Todos',color:'#888'},...cats];
+  el.innerHTML=all.map(c=>`<div class="chip${catReserva===c.id?' active':''}" onclick="setCatReserva('${c.id}')">
+    ${c.id!=='todos'?`<span class="chip-dot" style="background:${c.color}"></span>`:''}${c.name}</div>`).join('');
+}
+function setCatReserva(id){ catReserva=id; renderReservaProdChips(); renderReservaProductoGrid(); }
+
+function renderReservaProductoGrid(){
+  const el=$('res-prod-grid'); if(!el) return;
+  const list=catReserva==='todos'?menu:menu.filter(p=>p.cat===catReserva);
+  const qtyMap={}; Object.values(reservaCarrito).forEach(item=>{ qtyMap[item.prodId]=(qtyMap[item.prodId]||0)+item.qty; });
+  el.innerHTML=list.map(p=>{
+    const qty=qtyMap[p.id]||0; const cat=getCat(p.cat);
+    return `<div class="prod-card${qty>0?' in-cart':''}" onclick="addItemReserva(${p.id})" style="cursor:pointer">
+      <div class="cat-dot" style="background:${cat.color}"></div>
+      <div class="prod-name">${p.name}</div>
+      <div class="prod-price">${fmt(p.price)}</div>
+      ${qty>0?`<div class="prod-badge">${qty}</div>`:''}
+    </div>`;
+  }).join('');
+  renderReservaCarritoChips();
+  $('res-total').textContent=fmt(carritoTotalFn(reservaCarrito));
+}
+
+function addItemReserva(id){
+  const p=menu.find(x=>x.id===id); if(!p) return;
+  const key=`${id}_plain`;
+  reservaCarrito[key]?reservaCarrito[key].qty++:(reservaCarrito[key]={prodId:id,qty:1,vars:[],nota:'',precio:p.price});
+  renderReservaProductoGrid();
+}
+
+function renderReservaCarritoChips(){
+  // Show selected items as small pills above the grid
+}
+
+function cerrarModalReserva(){ $('modal-reserva').classList.remove('open'); }
+function closeModalReserva(e){ if(e.target===$('modal-reserva')) cerrarModalReserva(); }
+
+function guardarReserva(){
+  const nombre=$('res-nombre').value.trim(); if(!nombre){ showToast('Ingresá un nombre'); return; }
+  const clienteId=$('res-cliente').value;
+  const cli=clientes.find(c=>c.id===clienteId);
+  const items=Object.values(reservaCarrito).filter(i=>i.qty>0);
+  const data={tipo:tipoNuevaMesaReserva,nombre,clienteId,clienteNombre:cli?cli.nombre:'',
+    fecha:$('res-fecha').value,estado:$('res-estado').value,nota:$('res-nota').value.trim(),
+    items,pago:reservaPago};
+  if(editReservaId){ Object.assign(reservas.find(x=>x.id===editReservaId),data); }
+  else { reservas.push({id:'res_'+Date.now(),...data}); }
+  save(); cerrarModalReserva(); syncReservasSheets(); renderVentas();
+  showToast(editReservaId?'✓ Reserva actualizada':'✓ Reserva creada');
+}
+
+// ══════════════════════════════════════════════════
+//  DASHBOARD con filtros de fecha
+// ══════════════════════════════════════════════════
+function setDashFiltro(f){
+  dashFiltro=f;
+  ['hoy','semana','mes','custom'].forEach(x=>{ $(`dfiltro-${x}`)?.classList.toggle('active',x===f); });
+  $('dash-custom-range').style.display=f==='custom'?'flex':'none';
+  if(f!=='custom') renderDashboard();
+}
+
 function renderDashboard(){
-  const hoy=today();
-  const vh=ventas.filter(v=>v.fecha===hoy);
-  const totalHoy=vh.reduce((s,v)=>s+v.total,0);
-  const txHoy=vh.length, prom=txHoy?Math.round(totalHoy/txHoy):0;
-  const ayer=new Date(); ayer.setDate(ayer.getDate()-1);
-  const va=ventas.filter(v=>v.fecha===ayer.toISOString().split('T')[0]);
-  const totalAyer=va.reduce((s,v)=>s+v.total,0);
-  const difPct=totalAyer>0?Math.round((totalHoy-totalAyer)/totalAyer*100):null;
+  const {desde,hasta}=dashRango();
+  const vh=ventas.filter(v=>v.fecha>=desde&&v.fecha<=hasta);
+  const totalP=vh.reduce((s,v)=>s+v.total,0);
+  const txP=vh.length, promP=txP?Math.round(totalP/txP):0;
+
+  // Label for bar chart
+  const barTtl=$('bar-chart-titulo');
+  if(barTtl) barTtl.textContent=dashFiltro==='hoy'?'Ventas por hora':dashFiltro==='semana'?'Últimos 7 días':dashFiltro==='mes'?'Últimos 30 días':'Período seleccionado';
+
   $('kpi-grid').innerHTML=`
-    <div class="kpi"><div class="kpi-lbl">Venta hoy</div><div class="kpi-val">${fmt(totalHoy)}</div><div class="kpi-sub ${difPct!==null?(difPct>=0?'kpi-up':'kpi-dn'):''}">${difPct!==null?(difPct>=0?'+':'')+difPct+'%':'-'} vs ayer</div></div>
-    <div class="kpi"><div class="kpi-lbl">Transacciones</div><div class="kpi-val">${txHoy}</div><div class="kpi-sub">prom. ${fmt(prom)}</div></div>
-    <div class="kpi"><div class="kpi-lbl">Mesas hoy</div><div class="kpi-val">${new Set(vh.map(v=>v.mesa)).size}</div><div class="kpi-sub">${new Set(vh.filter(v=>v.tipo==='delivery').map(v=>v.mesa)).size} delivery</div></div>
-    <div class="kpi"><div class="kpi-lbl">Clientes</div><div class="kpi-val">${clientes.length}</div><div class="kpi-sub">${reservas.filter(r=>r.fecha===hoy).length} reservas hoy</div></div>`;
-  const cafe=vh.filter(v=>v.seccion==='cafeteria').reduce((s,v)=>s+v.total,0);
-  const cocina=vh.filter(v=>v.seccion==='cocina').reduce((s,v)=>s+v.total,0);
+    <div class="kpi"><div class="kpi-lbl">Total ventas</div><div class="kpi-val">${fmt(totalP)}</div><div class="kpi-sub">${desde===hasta?desde:`${desde} → ${hasta}`}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Transacciones</div><div class="kpi-val">${txP}</div><div class="kpi-sub">prom. ${fmt(promP)}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Clientes</div><div class="kpi-val">${clientes.length}</div><div class="kpi-sub">${reservas.filter(r=>r.fecha>=desde&&r.fecha<=hasta).length} reservas</div></div>
+    <div class="kpi"><div class="kpi-lbl">Reservas período</div><div class="kpi-val">${reservas.filter(r=>r.fecha>=desde&&r.fecha<=hasta&&r.estado==='pagada').length}</div><div class="kpi-sub">pagadas</div></div>`;
+
+  const cafe=vh.filter(v=>getCat(v.cat).seccion==='cafeteria').reduce((s,v)=>s+v.total,0);
+  const cocina=vh.filter(v=>getCat(v.cat).seccion==='cocina').reduce((s,v)=>s+v.total,0);
   $('seccion-split').innerHTML=`
-    <div class="seccion-card"><div class="seccion-lbl">☕ Cafetería</div><div class="seccion-val">${fmt(cafe)}</div><div class="seccion-sub">${vh.filter(v=>v.seccion==='cafeteria').length} ítems</div></div>
-    <div class="seccion-card"><div class="seccion-lbl">🍳 Cocina</div><div class="seccion-val">${fmt(cocina)}</div><div class="seccion-sub">${vh.filter(v=>v.seccion==='cocina').length} ítems</div></div>`;
-  // Bar 7 días
+    <div class="seccion-card"><div class="seccion-lbl">☕ Cafetería</div><div class="seccion-val">${fmt(cafe)}</div><div class="seccion-sub">${vh.filter(v=>getCat(v.cat).seccion==='cafeteria').length} ítems</div></div>
+    <div class="seccion-card"><div class="seccion-lbl">🍳 Cocina</div><div class="seccion-val">${fmt(cocina)}</div><div class="seccion-sub">${vh.filter(v=>getCat(v.cat).seccion==='cocina').length} ítems</div></div>`;
+
+  // Bar chart: 7 días o período
   const dias7=[]; const lbls7=[];
   for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); dias7.push(d.toISOString().split('T')[0]); lbls7.push(i===0?'Hoy':['D','L','M','X','J','V','S'][d.getDay()]); }
   const sem=dias7.map(f=>ventas.filter(v=>v.fecha===f).reduce((s,v)=>s+v.total,0));
@@ -1569,14 +1698,15 @@ function renderDashboard(){
     ${v>0?`<span class="bar-monto">${fmtK(v)}</span>`:'<span class="bar-monto"></span>'}
     <div class="bar-fill${i===6?' today':v===maxV&&v>0?' hi':''}" style="height:${Math.round(v/maxV*60)}px"></div>
     <span class="bar-lbl">${lbls7[i]}</span></div>`).join('');
+
   // Top productos
-  const conteo={};
-  vh.forEach(v=>{conteo[v.producto]=(conteo[v.producto]||0)+v.cantidad});
+  const conteo={}; vh.forEach(v=>{conteo[v.producto]=(conteo[v.producto]||0)+v.cantidad});
   const top=Object.entries(conteo).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([n,c])=>({n,c}));
   const maxC=top[0]?.c||1;
   $('top-list').innerHTML=top.length?top.map((t,i)=>`<div class="top-row"><span class="top-rank">${i+1}</span><span class="top-name">${t.n}</span>
     <div class="top-bar-bg"><div class="top-bar-fill" style="width:${Math.round(t.c/maxC*100)}%"></div></div>
-    <span class="top-cnt">${t.c} ud.</span></div>`).join(''):'<div style="font-size:12px;color:var(--ink3);text-align:center;padding:16px">Sin ventas hoy</div>';
+    <span class="top-cnt">${t.c} ud.</span></div>`).join(''):'<div style="font-size:12px;color:var(--ink3);padding:12px;text-align:center">Sin datos</div>';
+
   // Ef vs MP
   const ef=vh.filter(v=>v.pago==='ef').reduce((s,v)=>s+v.total,0);
   const mp=vh.filter(v=>v.pago==='mp').reduce((s,v)=>s+v.total,0);
@@ -1585,38 +1715,27 @@ function renderDashboard(){
   $('split-stats').innerHTML=`
     <div class="split-stat"><div class="split-lbl"><span class="sdot" style="background:var(--orange)"></span>Efectivo</div><div class="split-pct">${pE}%</div><div class="split-monto">${fmt(ef)}</div></div>
     <div class="split-stat"><div class="split-lbl"><span class="sdot" style="background:var(--orange-mid)"></span>Mercado Pago</div><div class="split-pct">${100-pE}%</div><div class="split-monto">${fmt(mp)}</div></div>`;
-  // Cat
+
+  // Ventas por cat
   const catRev={}; vh.forEach(v=>{catRev[v.cat]=(catRev[v.cat]||0)+v.total});
   const catData=Object.entries(catRev).sort((a,b)=>b[1]-a[1]).map(([c,t])=>({cat:c,t}));
   const maxT=catData[0]?.t||1;
   $('cat-rev').innerHTML=catData.length?catData.map(d=>{ const c=getCat(d.cat); return `<div class="cat-rev-row"><div class="cdot2" style="background:${c.color}"></div><span class="cat-rev-name">${c.name}</span>
     <div class="cat-bar-bg"><div class="cat-bar-fill" style="width:${Math.round(d.t/maxT*100)}%;background:${c.color}"></div></div>
-    <span class="cat-rev-monto">${fmt(d.t)}</span></div>`; }).join(''):'<div style="font-size:12px;color:var(--ink3);text-align:center;padding:16px">Sin ventas hoy</div>';
+    <span class="cat-rev-monto">${fmt(d.t)}</span></div>`; }).join(''):'<div style="font-size:12px;color:var(--ink3);text-align:center;padding:12px">Sin datos</div>';
+
   // Ingeniería de menú
-  const hace30=new Date(); hace30.setDate(hace30.getDate()-30);
-  const v30=ventas.filter(v=>v.fecha>=hace30.toISOString().split('T')[0]);
-  const prodStats={};
-  v30.forEach(v=>{if(!prodStats[v.producto])prodStats[v.producto]={nombre:v.producto,qty:0,rev:0,cat:v.cat};prodStats[v.producto].qty+=v.cantidad;prodStats[v.producto].rev+=v.total;});
+  const prodStats={}; vh.forEach(v=>{if(!prodStats[v.producto])prodStats[v.producto]={nombre:v.producto,qty:0,rev:0,cat:v.cat};prodStats[v.producto].qty+=v.cantidad;prodStats[v.producto].rev+=v.total;});
   const vals=Object.values(prodStats);
   const avgQty=vals.reduce((s,p)=>s+p.qty,0)/(vals.length||1);
-  const costoFn=p=>{ const mi=menu.find(m=>m.name===p.nombre); const rc=mi?recetas[mi.id]||[]:[];
-    return rc.reduce((s,r)=>{ const ins=getInsumo(r.insumoId); return s+(ins?ins.costoUnitario*r.cantidad:0); },0); };
-  const margenFn=p=>{ const c=costoFn(p); return p.qty>0?(p.rev-c*p.qty)/p.qty:0; };
-  const avgMargen=vals.reduce((s,p)=>s+margenFn(p),0)/(vals.length||1);
+  const avgRev=vals.reduce((s,p)=>s+(p.qty?p.rev/p.qty:0),0)/(vals.length||1);
   const quads={estrellas:[],caballos:[],rompecabezas:[],perros:[]};
-  vals.forEach(p=>{ const hi=p.qty>=avgQty, hm=margenFn(p)>=avgMargen;
-    const q=hi&&hm?'estrellas':hi?'caballos':hm?'rompecabezas':'perros';
-    quads[q].push({n:p.nombre,qty:p.qty}); });
-  const quadDef=[
-    {key:'estrellas',   emoji:'⭐',label:'Estrellas',      bg:'var(--green-bg)'},
-    {key:'caballos',    emoji:'🐴',label:'Caballos',       bg:'var(--blue-bg)'},
-    {key:'rompecabezas',emoji:'🧩',label:'Rompecabezas',  bg:'var(--amber-bg)'},
-    {key:'perros',      emoji:'🐶',label:'Perros',         bg:'var(--red-bg)'},
-  ];
+  vals.forEach(p=>{ const hi=p.qty>=avgQty, hr=(p.qty?p.rev/p.qty:0)>=avgRev;
+    quads[hi&&hr?'estrellas':hi?'caballos':hr?'rompecabezas':'perros'].push({n:p.nombre,qty:p.qty}); });
+  const quadDef=[{key:'estrellas',emoji:'⭐',label:'Estrellas',bg:'var(--green-bg)'},{key:'caballos',emoji:'🐴',label:'Caballos',bg:'var(--blue-bg)'},{key:'rompecabezas',emoji:'🧩',label:'Rompecabezas',bg:'var(--amber-bg)'},{key:'perros',emoji:'🐶',label:'Perros',bg:'var(--red-bg)'}];
   $('menu-eng-grid').innerHTML=quadDef.map(q=>`<div class="menu-eng-quad" style="background:${q.bg};border-color:transparent">
     <div class="quad-titulo">${q.emoji} ${q.label}</div>
-    ${quads[q.key].length?quads[q.key].slice(0,5).map(item=>`<div class="quad-item"><span>${item.n}</span><span>${item.qty}ud</span></div>`).join(''):
-      '<div style="font-size:11px;color:var(--ink3)">Sin datos</div>'}
+    ${quads[q.key].length?quads[q.key].slice(0,5).map(p=>`<div class="quad-item"><span>${p.n}</span><span>${p.qty}ud</span></div>`).join(''):'<div style="font-size:11px;color:var(--ink3)">Sin datos</div>'}
   </div>`).join('');
 }
 
@@ -1631,8 +1750,7 @@ function renderHistorial(){
   $('hist-list').innerHTML=entries.map(([fecha,rows],i)=>{
     const total=rows.reduce((s,v)=>s+v.total,0);
     const ef=rows.filter(v=>v.pago==='ef').length, mp=rows.filter(v=>v.pago==='mp').length;
-    const items={};
-    rows.forEach(v=>{items[v.producto]=(items[v.producto]||0)+v.cantidad;});
+    const items={}; rows.forEach(v=>{items[v.producto]=(items[v.producto]||0)+v.cantidad;});
     const d=new Date(fecha+'T12:00:00');
     return `<div class="hist-item">
       <div class="hist-hdr" onclick="toggleHist(${i})">
@@ -1649,183 +1767,7 @@ function renderHistorial(){
 function toggleHist(i){ const d=$('hd-'+i),a=$('ha-'+i); const open=d.classList.toggle('open'); a.classList.toggle('open',open); }
 
 // ══════════════════════════════════════════════════
-//  INSUMOS
-// ══════════════════════════════════════════════════
-function renderInv(){
-  const q=($('inv-search')?.value||'').toLowerCase();
-  let items=insumos.filter(p=>!q||(p.nombre||'').toLowerCase().includes(q));
-  const out=items.filter(p=>p.stock<=0), low=items.filter(p=>p.stock>0&&p.stock<=(p.alertaStock||0));
-  $('inv-alerts').innerHTML=(out.length?`<div class="alert-banner crit">⛔ ${out.map(p=>p.nombre).join(', ')}</div>`:'')
-    +(low.length?`<div class="alert-banner">⚠️ ${low.map(p=>`${p.nombre} (${p.stock}${p.unidad})`).join(', ')}</div>`:'');
-  if(!items.length){ $('inv-table').innerHTML=insumos.length?'<div class="empty">Sin resultados</div>':'<div class="empty">No hay insumos. Creá el primero con + Insumo</div>'; return; }
-  $('inv-table').innerHTML=items.map(ins=>{
-    const st=ins.stock<=0?'out':ins.stock<=(ins.alertaStock||0)?'low':'ok';
-    return `<div class="inv-row${st==='low'?' low':''}${st==='out'?' out':''}">
-      <div class="inv-name"><span>${ins.nombre}</span><span class="inv-cat-tag">${ins.unidad}</span></div>
-      <span class="inv-status ${st}">${st==='ok'?'✓ OK':st==='low'?'⚠ Bajo':'⛔ Agotado'}</span>
-      <div class="stock-ctrl">
-        <button class="qty-btn" onclick="adjInsumo('${ins.id}',-1)">−</button>
-        <input class="stock-num" type="number" value="${ins.stock}" min="0" onchange="setInsumoStock('${ins.id}',this.value)" onblur="setInsumoStock('${ins.id}',this.value)">
-        <button class="qty-btn" onclick="adjInsumo('${ins.id}',1)">+</button>
-      </div>
-      <div class="icon-btn" onclick="openInsumoModal('${ins.id}')">
-        <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2l3 3L5 14H2v-3L11 2z"/></svg>
-      </div>
-    </div>`;
-  }).join('');
-}
-function adjInsumo(id,d){ const ins=insumos.find(x=>x.id===id); if(!ins) return; ins.stock=Math.max(0,(ins.stock||0)+d); save(); renderInv(); renderStockAlerts(); syncStockSheets(); }
-function setInsumoStock(id,val){ const ins=insumos.find(x=>x.id===id); if(!ins) return; ins.stock=Math.max(0,parseFloat(val)||0); save(); renderInv(); renderStockAlerts(); syncStockSheets(); }
-function openInsumoModal(id){
-  editInsumoId=id;
-  if(id){ const ins=insumos.find(x=>x.id===id); if(!ins) return;
-    $('insumo-modal-titulo').textContent='Editar insumo';
-    $('ins-nombre').value=ins.nombre||''; $('ins-unidad').value=ins.unidad||'g';
-    $('ins-costo').value=ins.costoUnitario||0; $('ins-stock').value=ins.stock||0; $('ins-alerta').value=ins.alertaStock||0;
-    $('insumo-modal-actions').innerHTML=`<button class="btn-cancel" onclick="confirmarAccion('¿Eliminar este insumo?','eliminarInsumo_'+\`${id}\`)" style="color:var(--red);border-color:rgba(176,48,48,.3)">Eliminar</button><button class="btn-save" onclick="guardarInsumo()">Guardar</button>`;
-  } else {
-    $('insumo-modal-titulo').textContent='Nuevo insumo';
-    ['ins-nombre','ins-costo','ins-stock','ins-alerta'].forEach(fid=>$(fid).value=''); $('ins-unidad').value='g';
-    $('insumo-modal-actions').innerHTML=`<button class="btn-cancel" onclick="cerrarModalInsumo()">Cancelar</button><button class="btn-save" onclick="guardarInsumo()">Guardar</button>`;
-  }
-  $('modal-insumo').classList.add('open'); setTimeout(()=>$('ins-nombre').focus(),100);
-}
-function cerrarModalInsumo(){ $('modal-insumo').classList.remove('open'); }
-function closeModalInsumo(e){ if(e.target===$('modal-insumo')) cerrarModalInsumo(); }
-function guardarInsumo(){
-  const nombre=$('ins-nombre').value.trim(); if(!nombre){ showToast('Ingresá el nombre'); return; }
-  const data={nombre,unidad:$('ins-unidad').value,costoUnitario:parseFloat($('ins-costo').value)||0,stock:parseFloat($('ins-stock').value)||0,alertaStock:parseFloat($('ins-alerta').value)||0};
-  if(editInsumoId){ Object.assign(insumos.find(x=>x.id===editInsumoId),data); }
-  else { insumos.push({id:'ins_'+Date.now(),...data}); }
-  save(); cerrarModalInsumo(); renderInv(); renderStockAlerts(); syncStockSheets();
-  showToast(editInsumoId?'✓ Insumo actualizado':'✓ Insumo agregado');
-}
-function eliminarInsumo(id){
-  if(typeof id === 'string' && id.startsWith('eliminarInsumo_')) id=id.replace('eliminarInsumo_','');
-  insumos=insumos.filter(x=>x.id!==id);
-  Object.keys(recetas).forEach(pid=>{ recetas[pid]=recetas[pid].filter(r=>r.insumoId!==id); });
-  save(); cerrarModalInsumo(); renderInv(); renderStockAlerts(); syncStockSheets(); showToast('✓ Insumo eliminado');
-}
-
-// ── Mermas ──
-function renderMermas(){
-  const el=$('mermas-lista'); if(!el) return;
-  if(!mermas.length){ el.innerHTML='<div class="empty">No hay mermas registradas</div>'; return; }
-  el.innerHTML=[...mermas].reverse().map(m=>{
-    const ins=getInsumo(m.insumoId);
-    return `<div class="merma-row">
-      <div class="merma-info"><div class="merma-nombre">${ins?ins.nombre:'Insumo eliminado'}</div>
-        <div class="merma-meta">${m.motivo} · ${m.fecha}${m.nota?' · '+m.nota:''}</div></div>
-      <div class="merma-cant">−${m.cantidad}${ins?ins.unidad:''}</div>
-    </div>`;
-  }).join('');
-}
-function openMermaModal(){
-  if(!insumos.length){ showToast('No hay insumos cargados'); return; }
-  $('merma-insumo').innerHTML=insumos.map(ins=>`<option value="${ins.id}">${ins.nombre} (${ins.stock}${ins.unidad})</option>`).join('');
-  $('merma-cant').value=''; $('merma-nota').value=''; $('merma-motivo').value='vencimiento';
-  $('modal-merma').classList.add('open');
-}
-function cerrarModalMerma(){ $('modal-merma').classList.remove('open'); }
-function closeModalMerma(e){ if(e.target===$('modal-merma')) cerrarModalMerma(); }
-function guardarMerma(){
-  const insumoId=$('merma-insumo').value, cantidad=parseFloat($('merma-cant').value)||0;
-  if(!insumoId||!cantidad){ showToast('Seleccioná insumo y cantidad'); return; }
-  const ins=getInsumo(insumoId); ins.stock=Math.max(0,(ins.stock||0)-cantidad);
-  mermas.push({id:'mrm_'+Date.now(),insumoId,cantidad,motivo:$('merma-motivo').value,nota:$('merma-nota').value.trim(),fecha:today(),hora:nowT()});
-  save(); cerrarModalMerma(); renderInv(); renderStockAlerts(); renderMermas(); syncStockSheets(); showToast('✓ Merma registrada');
-}
-
-// ══════════════════════════════════════════════════
-//  RESERVAS (de productos/porciones)
-// ══════════════════════════════════════════════════
-function renderReservaFiltroChips(){
-  const tipos=['todos','salon','delivery','takeaway'];
-  const el=$('reserva-filtro-chips'); if(!el) return;
-  el.innerHTML=tipos.map(t=>`<div class="chip${reservaFiltroTipo===t?' active':''}" onclick="setReservaFiltro('${t}')">
-    ${t==='todos'?'Todos':tipoLabel(t)}</div>`).join('');
-}
-function setReservaFiltro(t){ reservaFiltroTipo=t; renderReservaFiltroChips(); renderReservas(); }
-
-function renderReservas(){
-  renderReservaFiltroChips();
-  let lista=reservaFiltroTipo==='todos'?reservas:reservas.filter(r=>r.tipo===reservaFiltroTipo);
-  lista=[...lista].sort((a,b)=>{ const fe=a.estado==='cancelada'?1:0, fb=b.estado==='cancelada'?1:0; return fe-fb||(a.fecha||'').localeCompare(b.fecha||''); });
-  const el=$('reservas-lista'); if(!el) return;
-  if(!lista.length){ el.innerHTML='<div class="empty">No hay reservas</div>'; return; }
-  el.innerHTML=lista.map(r=>{
-    const prod=menu.find(p=>p.id==r.productoId);
-    const estadoColors={pendiente:'var(--amber)',confirmada:'var(--green)',pagada:'var(--blue)',cancelada:'var(--ink3)'};
-    return `<div class="reserva-card ${r.estado||'pendiente'}">
-      <div style="flex-shrink:0">
-        <span class="mesa-tipo-badge ${tipoBadgeClass(r.tipo||'salon')}">${tipoLabel(r.tipo||'salon')}</span>
-      </div>
-      <div class="reserva-info" style="flex:1;min-width:0">
-        <div class="reserva-cliente">${r.nombre||'Sin nombre'}</div>
-        ${prod?`<div class="reserva-prod">📦 ${prod.name} × ${r.porciones||1}</div>`:''}
-        ${r.fecha?`<div class="reserva-porciones">📅 ${r.fecha}</div>`:''}
-        ${r.nota?`<div class="reserva-nota">${r.nota}</div>`:''}
-        <div class="reserva-actions">
-          <button class="btn-sm" onclick="openReservaModal('${r.id}')">Editar</button>
-          <button class="btn-sm" onclick="confirmarAccion('¿Eliminar esta reserva?',()=>eliminarReserva('${r.id}'))" style="color:var(--red);border-color:rgba(176,48,48,.2)">Eliminar</button>
-        </div>
-      </div>
-      <span class="reserva-estado ${r.estado||'pendiente'}">${r.estado||'pendiente'}</span>
-    </div>`;
-  }).join('');
-}
-
-function popularMenuSelect(selId){
-  const sel=$('res-producto'); if(!sel) return;
-  sel.innerHTML=menu.map(p=>`<option value="${p.id}"${p.id==selId?' selected':''}>${p.name} — ${fmt(p.price)}</option>`).join('');
-}
-
-function openReservaModal(id){
-  editReservaId=id; tipoNuevaMesaReserva='salon';
-  popularMenuSelect(); popularClienteSelectReserva();
-  ['salon','delivery','takeaway'].forEach(t=>{ $(`rtipo-btn-${t}`).className=`tipo-btn${t===tipoNuevaMesaReserva?' sel-'+t:''}`; });
-  if(id){
-    const r=reservas.find(x=>x.id===id); if(!r) return;
-    $('reserva-modal-titulo').textContent='Editar reserva';
-    tipoNuevaMesaReserva=r.tipo||'salon';
-    ['salon','delivery','takeaway'].forEach(t=>{ $(`rtipo-btn-${t}`).className=`tipo-btn${t===tipoNuevaMesaReserva?' sel-'+t:''}`; });
-    $('res-cliente').value=r.clienteId||''; $('res-nombre').value=r.nombre||'';
-    $('res-fecha').value=r.fecha||''; $('res-estado').value=r.estado||'pendiente';
-    $('res-nota').value=r.nota||''; $('res-porciones').value=r.porciones||1;
-    popularMenuSelect(r.productoId);
-    $('reserva-modal-actions').innerHTML=`<button class="btn-cancel" onclick="cerrarModalReserva()">Cancelar</button><button class="btn-save" onclick="guardarReserva()">Guardar</button>`;
-  } else {
-    $('reserva-modal-titulo').textContent='Nueva reserva';
-    ['res-nombre','res-nota'].forEach(fid=>$(fid).value='');
-    $('res-fecha').value=today(); $('res-estado').value='pendiente'; $('res-porciones').value=1; $('res-cliente').value='';
-    $('reserva-modal-actions').innerHTML=`<button class="btn-cancel" onclick="cerrarModalReserva()">Cancelar</button><button class="btn-save" onclick="guardarReserva()">Guardar</button>`;
-  }
-  $('modal-reserva').classList.add('open');
-}
-function popularClienteSelectReserva(){
-  const sel=$('res-cliente'); if(!sel) return;
-  sel.innerHTML=`<option value="">Sin cliente</option>`+clientes.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
-}
-function selReservaTipo(t){ tipoNuevaMesaReserva=t; ['salon','delivery','takeaway'].forEach(x=>{ $(`rtipo-btn-${x}`).className=`tipo-btn${x===t?' sel-'+x:''}`; }); }
-function cerrarModalReserva(){ $('modal-reserva').classList.remove('open'); }
-function closeModalReserva(e){ if(e.target===$('modal-reserva')) cerrarModalReserva(); }
-function guardarReserva(){
-  const nombre=$('res-nombre').value.trim();
-  if(!nombre){ showToast('Ingresá un nombre'); return; }
-  const clienteId=$('res-cliente').value;
-  const cli=clientes.find(c=>c.id===clienteId);
-  const data={tipo:tipoNuevaMesaReserva,nombre,productoId:parseInt($('res-producto').value)||null,porciones:parseInt($('res-porciones').value)||1,fecha:$('res-fecha').value,estado:$('res-estado').value,nota:$('res-nota').value.trim(),clienteId,clienteNombre:cli?cli.nombre:''};
-  if(editReservaId){ Object.assign(reservas.find(x=>x.id===editReservaId),data); }
-  else { reservas.push({id:'res_'+Date.now(),...data}); }
-  save(); cerrarModalReserva(); renderReservas(); syncReservasSheets();
-  showToast(editReservaId?'✓ Reserva actualizada':'✓ Reserva creada');
-}
-function eliminarReserva(id){
-  reservas=reservas.filter(x=>x.id!==id); save(); renderReservas(); syncReservasSheets(); showToast('✓ Reserva eliminada');
-}
-
-// ══════════════════════════════════════════════════
-//  CLIENTES (tab propia)
+//  CLIENTES
 // ══════════════════════════════════════════════════
 function renderClientesTab(){
   const el=$('clientes-lista-tab'); if(!el) return;
@@ -1841,12 +1783,14 @@ function renderClientesTab(){
     ${c.preferencias?`<div style="font-size:11px;color:var(--blue);margin-top:3px">★ ${c.preferencias}</div>`:''}
   </div>`).join('');
 }
+
 function openClienteModal(id,retorno){
   editClienteId=id; clienteModalRetorno=retorno||null;
-  if(id){ const c=clientes.find(x=>x.id===id); if(!c) return;
+  if(id){
+    const c=clientes.find(x=>x.id===id); if(!c) return;
     $('cliente-modal-titulo').textContent='Editar cliente';
     $('cli-nombre').value=c.nombre||''; $('cli-tel').value=c.telefono||''; $('cli-email').value=c.email||''; $('cli-alergias').value=c.alergias||''; $('cli-prefs').value=c.preferencias||'';
-    $('cliente-modal-actions').innerHTML=`<button class="btn-cancel" onclick="confirmarAccion('¿Eliminar a ${c.nombre}?',()=>eliminarCliente('${id}'))" style="color:var(--red);border-color:rgba(176,48,48,.3)">Eliminar</button><button class="btn-save" onclick="guardarCliente()">Guardar</button>`;
+    $('cliente-modal-actions').innerHTML=`<button class="btn-cancel" onclick="pedirEliminarCliente('${id}')">Eliminar</button><button class="btn-save" onclick="guardarCliente()">Guardar</button>`;
   } else {
     $('cliente-modal-titulo').textContent='Nuevo cliente';
     ['cli-nombre','cli-tel','cli-email','cli-alergias','cli-prefs'].forEach(fid=>$(fid).value='');
@@ -1854,9 +1798,13 @@ function openClienteModal(id,retorno){
   }
   $('modal-cliente').classList.add('open'); setTimeout(()=>$('cli-nombre').focus(),100);
 }
+function pedirEliminarCliente(id){
+  const c=clientes.find(x=>x.id===id);
+  cerrarModalCliente();
+  pedirConfirm(`¿Eliminar a "${c?.nombre||''}"?`, ()=>{ clientes=clientes.filter(x=>x.id!==id); save(); renderClientesTab(); syncClientesSheets(); showToast('✓ Cliente eliminado'); });
+}
 function cerrarModalCliente(){ $('modal-cliente').classList.remove('open'); clienteModalRetorno=null; }
 function closeModalCliente(e){ if(e.target===$('modal-cliente')) cerrarModalCliente(); }
-function eliminarCliente(id){ clientes=clientes.filter(x=>x.id!==id); save(); cerrarModalCliente(); renderClientesTab(); syncClientesSheets(); showToast('✓ Cliente eliminado'); }
 function guardarCliente(){
   const nombre=$('cli-nombre').value.trim(); if(!nombre){ showToast('Ingresá el nombre'); return; }
   const data={nombre,telefono:$('cli-tel').value.trim(),email:$('cli-email').value.trim(),alergias:$('cli-alergias').value.trim(),preferencias:$('cli-prefs').value.trim()};
@@ -1871,10 +1819,8 @@ function guardarCliente(){
 //  AJUSTES
 // ══════════════════════════════════════════════════
 function renderAjustes(){
-  renderCatMgr(); renderMenuAdm(); renderRecetasAdm(); renderModsAdm();
-  renderAjustesConfig(); renderSetupBanner();
-  const am=$('acc-menu-meta');
-  if(am) am.textContent=`${menu.length} productos · ${cats.length} categorías`;
+  renderCatMgr(); renderMenuAdm(); renderAjustesConfig(); renderSetupBanner();
+  const am=$('acc-menu-meta'); if(am) am.textContent=`${menu.length} productos · ${cats.length} categorías`;
 }
 
 // ── CATEGORÍAS ──
@@ -1888,7 +1834,7 @@ function renderCatMgr(){
           <option value="cafeteria"${c.seccion==='cafeteria'?' selected':''}>☕ Cafetería</option>
           <option value="cocina"${c.seccion==='cocina'?' selected':''}>🍳 Cocina</option>
         </select>
-        <button class="cat-del" onclick="confirmarAccion('¿Eliminar categoría ${c.name}?',()=>deleteCat(${i}))">×</button>
+        <button class="cat-del" onclick="pedirConfirm('¿Eliminar categoría ${c.name}?',()=>deleteCat(${i}))">×</button>
       </div>
       <div class="color-picker-wrap" id="cp-${i}">
         <div class="color-dots">${PRESET_COLORS.map(col=>`<div class="cdot${c.color===col?' sel':''}" style="background:${col}" onclick="setCatColor(${i},'${col}')"></div>`).join('')}</div>
@@ -1897,130 +1843,108 @@ function renderCatMgr(){
 }
 function toggleCP(i){ document.querySelectorAll('.color-picker-wrap').forEach((el,j)=>{if(j!==i)el.classList.remove('open');}); document.getElementById('cp-'+i).classList.toggle('open'); }
 function setCatColor(i,col){ cats[i].color=col; save(); renderCatMgr(); renderCargaCats(); document.getElementById('cp-'+i).classList.remove('open'); showToast('Color actualizado'); }
-function renameCat(i,val){ const v=val.trim(); if(!v||cats[i].name===v) return; cats[i].name=v; save(); renderCargaCats(); populateCatSelect(); showToast('Categoría renombrada'); }
+function renameCat(i,val){ const v=val.trim(); if(!v||cats[i].name===v) return; cats[i].name=v; save(); renderCargaCats(); populateCatSelect(); }
 function setSeccion(i,val){ cats[i].seccion=val; save(); }
-function deleteCat(i){ const c=cats[i]; if(menu.some(p=>p.cat===c.id)){ showToast(`No se puede eliminar — tiene productos`); return; } cats.splice(i,1); save(); renderCatMgr(); renderCargaCats(); showToast('Categoría eliminada'); }
+function deleteCat(i){ const c=cats[i]; if(menu.some(p=>p.cat===c.id)){ showToast(`No se puede — tiene productos`); return; } cats.splice(i,1); save(); renderCatMgr(); renderCargaCats(); showToast('Categoría eliminada'); }
 function addCat(){ const id='cat_'+Date.now(); cats.push({id,name:'Nueva categoría',color:PRESET_COLORS[cats.length%PRESET_COLORS.length],seccion:'cafeteria'}); save(); renderCatMgr(); renderCargaCats(); setTimeout(()=>{ const ins=document.querySelectorAll('.cat-name-in'); const last=ins[ins.length-1]; if(last){last.focus();last.select();} },50); }
-function addCatFromModal(){ const nombre=prompt('Nombre de la nueva categoría:',''); if(!nombre?.trim()) return; const id='cat_'+Date.now(); cats.push({id,name:nombre.trim(),color:PRESET_COLORS[cats.length%PRESET_COLORS.length],seccion:'cafeteria'}); save(); populateCatSelect(); $('m-cat').value=id; showToast(`✓ "${nombre.trim()}" creada`); }
+function addCatFromModal(){ const n=prompt('Nombre de la nueva categoría:',''); if(!n?.trim()) return; const id='cat_'+Date.now(); cats.push({id,name:n.trim(),color:PRESET_COLORS[cats.length%PRESET_COLORS.length],seccion:'cafeteria'}); save(); populateCatSelect(); $('m-cat').value=id; }
 
 // ── PRODUCTOS ──
 function populateCatSelect(){ $('m-cat').innerHTML=cats.map(c=>`<option value="${c.id}">${c.name}</option>`).join(''); }
+function toggleIlimitado(){ const ilim=$('m-ilimitado')?.checked; $('m-stock-wrap').style.display=ilim?'none':'block'; }
+
 function renderMenuAdm(){
   $('menu-adm').innerHTML=menu.map(p=>{ const cat=getCat(p.cat); return `<div class="menu-adm-row">
     <div style="width:8px;height:8px;border-radius:50%;background:${cat.color};flex-shrink:0"></div>
     <span style="flex:1;font-size:13px">${p.name}</span>
     <span style="font-size:12px;color:var(--ink2)">${fmt(p.price)}</span>
-    ${(p.modificadores||[]).length?`<span style="font-size:10px;color:var(--ink3)">${(p.modificadores||[]).length}g mods</span>`:''}
+    <span style="font-size:11px;color:var(--ink3)">${p.ilimitado?'∞':p.stock}</span>
     <div class="icon-btn" onclick="openProdModal(${p.id})">
       <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2l3 3L5 14H2v-3L11 2z"/></svg>
     </div>
   </div>`; }).join('');
 }
+
+// Variantes locales al modal de producto
+let _variantesEdit=[];
+
 function openProdModal(id){
-  editId=id; populateCatSelect();
-  if(id){ const p=menu.find(x=>x.id===id); if(!p) return;
+  editId=id; populateCatSelect(); _variantesEdit=[];
+  // Reset variantes UI
+  $('variantes-arr').className='variantes-toggle-arr';
+  $('variantes-body').className='variantes-body';
+
+  if(id){
+    const p=menu.find(x=>x.id===id); if(!p) return;
     $('prod-modal-title').textContent='Editar producto';
     $('m-nombre').value=p.name||''; $('m-precio').value=p.price; $('m-cat').value=p.cat;
-    $('prod-modal-actions').innerHTML=`<button class="btn-cancel" onclick="confirmarAccion('¿Eliminar ${p.name}?',()=>eliminarProducto(${id}))" style="color:var(--red);border-color:rgba(176,48,48,.3)">Eliminar</button><button class="btn-save" onclick="guardarProducto()">Guardar</button>`;
+    $('m-stock').value=p.stock||0; $('m-ilimitado').checked=!!p.ilimitado;
+    $('m-stock-wrap').style.display=p.ilimitado?'none':'block';
+    _variantesEdit=JSON.parse(JSON.stringify(p.variantes||[]));
+    $('prod-modal-actions').innerHTML=`<button class="btn-cancel" onclick="pedirEliminarProducto(${id})">Eliminar</button><button class="btn-save" onclick="guardarProducto()">Guardar</button>`;
   } else {
     $('prod-modal-title').textContent='Nuevo producto';
-    ['m-nombre','m-precio'].forEach(fid=>$(fid).value=''); $('m-cat').value=cats[0]?.id||'';
+    ['m-nombre','m-precio','m-stock'].forEach(fid=>$(fid).value='');
+    $('m-cat').value=cats[0]?.id||''; $('m-ilimitado').checked=false; $('m-stock-wrap').style.display='block';
     $('prod-modal-actions').innerHTML=`<button class="btn-cancel" onclick="closeProdModal()">Cancelar</button><button class="btn-save" onclick="guardarProducto()">Guardar</button>`;
   }
+  renderVariantesModalBody();
+  updateVariantesBadge();
   $('modal-prod').classList.add('open'); setTimeout(()=>$('m-nombre').focus(),100);
 }
+
+function pedirEliminarProducto(id){
+  const p=menu.find(x=>x.id===id);
+  closeProdModal();
+  pedirConfirm(`¿Eliminar "${p?.name||''}"?`, ()=>{ menu=menu.filter(x=>x.id!==id); save(); renderMenuAdm(); renderProdGrid(); syncMenuSheets(); showToast('✓ Producto eliminado'); });
+}
+
 function closeProdModal(){ $('modal-prod').classList.remove('open'); }
 function closeProdModalOutside(e){ if(e.target===$('modal-prod')) closeProdModal(); }
-function eliminarProducto(id){ const p=menu.find(x=>x.id===id); if(!p) return; menu=menu.filter(x=>x.id!==id); delete recetas[id]; save(); renderMenuAdm(); renderProdGrid(); renderRecetasAdm(); renderModsAdm(); syncMenuSheets(); closeProdModal(); showToast(`✓ "${p.name}" eliminado`); }
 function guardarProducto(){
   const name=$('m-nombre').value.trim(), price=parseInt($('m-precio').value), cat=$('m-cat').value;
   if(!name||!price){ showToast('Completá nombre y precio'); return; }
-  if(editId){ Object.assign(menu.find(x=>x.id===editId),{name,price,cat}); }
-  else { menu.push({id:menu.reduce((m,p)=>Math.max(m,p.id),0)+1,name,price,cat,modificadores:[]}); }
-  save(); renderMenuAdm(); renderProdGrid(); renderCargaCats(); renderRecetasAdm(); renderModsAdm(); syncMenuSheets(); closeProdModal(); showToast(editId?'✓ Actualizado':'✓ Agregado');
+  const ilimitado=!!$('m-ilimitado').checked;
+  const stock=ilimitado?0:parseInt($('m-stock').value)||0;
+  if(editId){ Object.assign(menu.find(x=>x.id===editId),{name,price,cat,stock,ilimitado,variantes:_variantesEdit}); }
+  else { menu.push({id:menu.reduce((m,p)=>Math.max(m,p.id),0)+1,name,price,cat,stock,ilimitado,variantes:_variantesEdit}); }
+  save(); renderMenuAdm(); renderProdGrid(); renderCargaCats(); syncMenuSheets(); closeProdModal(); showToast(editId?'✓ Actualizado':'✓ Agregado');
 }
 
-// ── RECETAS ──
-function renderRecetasAdm(){
-  const el=$('recetas-adm'); if(!el) return;
-  el.innerHTML=menu.map(p=>{ const rec=recetas[p.id]||[];
-    return `<div style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="font-size:13px;font-weight:500">${p.name}</span>
-        <button class="btn-sm" onclick="addRecetaLinea(${p.id})">+ Insumo</button>
-      </div>
-      <div id="receta-${p.id}">
-        ${rec.map((r,ri)=>{ const ins=getInsumo(r.insumoId);
-          return `<div class="receta-row">
-            <select onchange="setRecetaInsumo(${p.id},${ri},this.value)">${insumos.map(i2=>`<option value="${i2.id}"${r.insumoId===i2.id?' selected':''}>${i2.nombre}</option>`).join('')}</select>
-            <input type="number" value="${r.cantidad}" min="0" step="0.1" onchange="setRecetaCant(${p.id},${ri},this.value)">
-            <span class="receta-unidad">${ins?ins.unidad:''}</span>
-            <button class="qty-btn" onclick="delRecetaLinea(${p.id},${ri})">×</button>
-          </div>`; }).join('')}
-        ${!rec.length&&!insumos.length?`<div style="font-size:12px;color:var(--ink3)">Cargá insumos primero</div>`:''}
-      </div>
-      <div style="height:1px;background:var(--border);margin-top:10px"></div>
-    </div>`;
-  }).join('');
+// ── Variantes dentro del modal de producto ──
+function toggleVariantesModal(){
+  const arr=$('variantes-arr'), body=$('variantes-body');
+  const open=body.classList.toggle('open'); arr.classList.toggle('open',open);
 }
-function addRecetaLinea(prodId){ if(!insumos.length){ showToast('Cargá insumos primero'); return; } if(!recetas[prodId])recetas[prodId]=[]; recetas[prodId].push({insumoId:insumos[0].id,cantidad:1}); save(); renderRecetasAdm(); }
-function setRecetaInsumo(prodId,ri,val){ recetas[prodId][ri].insumoId=val; save(); renderRecetasAdm(); }
-function setRecetaCant(prodId,ri,val){ recetas[prodId][ri].cantidad=parseFloat(val)||0; save(); }
-function delRecetaLinea(prodId,ri){ recetas[prodId].splice(ri,1); save(); renderRecetasAdm(); }
-
-// ── MODIFICADORES admin (modal) ──
-function renderModsAdm(){
-  const el=$('mods-adm'); if(!el) return;
-  el.innerHTML=menu.map(p=>{ const mods=p.modificadores||[];
-    return `<div class="menu-adm-row">
-      <span style="flex:1;font-size:13px">${p.name}</span>
-      <span style="font-size:11px;color:var(--ink3)">${mods.length?mods.length+' grupos':'Sin mods'}</span>
-      <button class="btn-sm" onclick="openModsAdmin(${p.id})">Editar</button>
-    </div>`;
-  }).join('');
+function updateVariantesBadge(){
+  const el=$('variantes-count-badge'); if(el) el.textContent=_variantesEdit.length?`(${_variantesEdit.length} grupos)`:'';
 }
-
-function openModsAdmin(prodId){
-  modAdminProdId=prodId;
-  const p=menu.find(x=>x.id===prodId); if(!p) return;
-  modAdminGrupos=JSON.parse(JSON.stringify(p.modificadores||[]));
-  $('mods-admin-titulo').textContent=`Modificadores — ${p.name}`;
-  renderModAdminGrupos();
-  $('modal-mods-admin').classList.add('open');
-}
-function cerrarModalModsAdmin(){ $('modal-mods-admin').classList.remove('open'); modAdminProdId=null; }
-function closeModalModsAdmin(e){ if(e.target===$('modal-mods-admin')) cerrarModalModsAdmin(); }
-
-function renderModAdminGrupos(){
-  const el=$('mods-admin-grupos'); if(!el) return;
-  el.innerHTML=modAdminGrupos.map((g,gi)=>`
-    <div class="mod-grupo-admin">
-      <div class="mod-grupo-admin-hdr">
-        <input style="flex:1;padding:6px 10px;border:1px solid var(--border2);border-radius:var(--r-xs);font-family:var(--ff);font-size:13px;background:var(--surf);outline:none" value="${g.grupo}" placeholder="Nombre del grupo (ej: Leche)" oninput="modAdminGrupos[${gi}].grupo=this.value">
-        <select class="mod-grupo-tipo" onchange="modAdminGrupos[${gi}].tipo=this.value">
+function renderVariantesModalBody(){
+  const el=$('variantes-grupos-modal'); if(!el) return;
+  el.innerHTML=_variantesEdit.map((g,gi)=>`
+    <div class="variante-grupo">
+      <div class="variante-grupo-hdr">
+        <input value="${g.grupo||''}" placeholder="Nombre del grupo (ej: Tipo de leche)" oninput="_variantesEdit[${gi}].grupo=this.value">
+        <select class="variante-grupo-tipo" onchange="_variantesEdit[${gi}].tipo=this.value">
           <option value="unico"${g.tipo==='unico'?' selected':''}>Único</option>
           <option value="multiple"${g.tipo==='multiple'?' selected':''}>Múltiple</option>
         </select>
-        <button class="qty-btn" onclick="delGrupoMod(${gi})" style="flex-shrink:0">×</button>
+        <button class="qty-btn" onclick="delVarianteGrupo(${gi})">×</button>
       </div>
       ${(g.opciones||[]).map((op,oi)=>`
-        <div class="mod-opcion-admin">
-          <input class="mod-opcion-nombre" placeholder="Opción (ej: Almendras)" value="${op.nombre}" oninput="modAdminGrupos[${gi}].opciones[${oi}].nombre=this.value">
-          <input class="mod-opcion-precio" type="number" min="0" placeholder="$0" value="${op.precio||0}" oninput="modAdminGrupos[${gi}].opciones[${oi}].precio=parseInt(this.value)||0">
-          <button class="qty-btn" onclick="delOpcionMod(${gi},${oi})">×</button>
+        <div class="variante-opcion">
+          <input class="variante-op-nombre" placeholder="Opción (ej: Almendras)" value="${op.nombre||''}" oninput="_variantesEdit[${gi}].opciones[${oi}].nombre=this.value">
+          <input class="variante-op-precio" type="number" min="0" placeholder="$0" value="${op.precio||0}" oninput="_variantesEdit[${gi}].opciones[${oi}].precio=parseInt(this.value)||0">
+          <button class="qty-btn" onclick="delVarianteOpcion(${gi},${oi})">×</button>
         </div>`).join('')}
-      <button class="btn-sm" style="margin-top:6px;font-size:11px" onclick="addOpcionMod(${gi})">+ Opción</button>
+      <button class="btn-sm" style="font-size:11px;margin-top:4px" onclick="addVarianteOpcion(${gi})">+ Opción</button>
     </div>`).join('');
+  updateVariantesBadge();
 }
-function addGrupoMod(){ modAdminGrupos.push({grupo:'Nuevo grupo',tipo:'unico',opciones:[]}); renderModAdminGrupos(); }
-function delGrupoMod(gi){ modAdminGrupos.splice(gi,1); renderModAdminGrupos(); }
-function addOpcionMod(gi){ modAdminGrupos[gi].opciones.push({nombre:'',precio:0}); renderModAdminGrupos(); }
-function delOpcionMod(gi,oi){ modAdminGrupos[gi].opciones.splice(oi,1); renderModAdminGrupos(); }
-function guardarModsAdmin(){
-  const p=menu.find(x=>x.id===modAdminProdId); if(!p) return;
-  p.modificadores=modAdminGrupos.filter(g=>g.grupo.trim());
-  save(); cerrarModalModsAdmin(); renderModsAdm(); renderMenuAdm(); showToast('✓ Modificadores guardados');
-}
+function addVarianteGrupo(){ _variantesEdit.push({grupo:'',tipo:'unico',opciones:[]}); renderVariantesModalBody(); }
+function delVarianteGrupo(gi){ _variantesEdit.splice(gi,1); renderVariantesModalBody(); }
+function addVarianteOpcion(gi){ _variantesEdit[gi].opciones.push({nombre:'',precio:0}); renderVariantesModalBody(); }
+function delVarianteOpcion(gi,oi){ _variantesEdit[gi].opciones.splice(oi,1); renderVariantesModalBody(); }
 
 // ── CONFIG ──
 function renderAjustesConfig(){
@@ -2034,7 +1958,12 @@ function renderAjustesConfig(){
 renderSetupBanner();
 renderStockAlerts();
 renderTurnoPill();
-renderMesas();
+renderVentas();
+// Inicializar fecha del filtro custom
+const hoy=today();
+const dashDesde=$('dash-desde'), dashHasta=$('dash-hasta');
+if(dashDesde) dashDesde.value=hoy;
+if(dashHasta) dashHasta.value=hoy;
 
 </script>
 </body>
