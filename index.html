@@ -562,6 +562,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
       <div class="ventas-header">
         <div class="cat-chips" id="ventas-filtro-chips" style="margin-bottom:0"></div>
         <div style="display:flex;gap:8px;flex-shrink:0">
+          <button class="btn-sm" onclick="openGastoModal()">+ Gasto</button>
           <button class="btn-sm" onclick="openReservaModal(null)">+ Reserva</button>
           <button class="btn-sm primary" onclick="abrirNuevaMesa()">+ Mesa</button>
         </div>
@@ -678,10 +679,6 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
   </div>
   <div id="hist-subtab-gastos" style="display:none">
     <div class="hist-layout">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-size:13px;color:var(--ink2)">Registro de gastos</div>
-        <button class="btn-sm primary" onclick="openGastoModal()">+ Gasto</button>
-      </div>
       <div id="gastos-lista"></div>
     </div>
   </div>
@@ -989,29 +986,74 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
 </div>
 
 
-<!-- MODAL: PRODUCTO RÁPIDO (desde vista de pedido) -->
+<!-- MODAL: NUEVO PRODUCTO (unificado — desde Ajustes y desde pedido) -->
 <div class="modal-ov" id="modal-prod-rapido" onclick="closeModalProdRapido(event)">
-  <div class="modal-box" style="max-width:380px">
+  <div class="modal-box" style="max-width:520px">
     <div class="modal-close" onclick="cerrarModalProdRapido()">×</div>
-    <div class="modal-title">Nuevo producto</div>
+    <div class="modal-title" id="prod-rapido-titulo">Nuevo producto</div>
     <div class="modal-field">
       <label class="modal-lbl">Nombre</label>
-      <input class="modal-input" id="pr-nombre" type="text" placeholder="Nombre del producto">
+      <input class="modal-input" id="pr-nombre" type="text" placeholder="Cappuccino">
     </div>
     <div class="modal-2col">
       <div class="modal-field">
         <label class="modal-lbl">Precio ($)</label>
-        <input class="modal-input" id="pr-precio" type="number" placeholder="0" min="0">
+        <input class="modal-input" id="pr-precio" type="number" placeholder="5500" min="0">
       </div>
       <div class="modal-field">
         <label class="modal-lbl">Categoría</label>
-        <select class="modal-select" id="pr-cat"></select>
+        <div style="display:flex;gap:6px;align-items:center">
+          <select class="modal-select" id="pr-cat" style="flex:1"></select>
+          <button class="btn-sm primary" onclick="abrirNuevaCatDesdeProducto()" style="flex-shrink:0;padding:7px 10px" title="Nueva categoría">+</button>
+        </div>
       </div>
     </div>
-    <p style="font-size:11px;color:var(--ink3);margin-bottom:14px">Se guarda en el menú y se agrega al pedido actual.</p>
+    <div class="modal-field">
+      <label class="modal-lbl">Stock</label>
+      <div class="stock-toggle-row">
+        <label class="toggle-switch">
+          <input type="checkbox" id="pr-ilimitado" onchange="togglePrIlimitado()">
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-lbl" id="pr-ilimitado-lbl">∞ Ilimitado</span>
+      </div>
+      <div id="pr-stock-wrap" style="margin-top:6px">
+        <input class="modal-input" id="pr-stock" type="number" placeholder="20" min="0">
+      </div>
+    </div>
+    <div id="prod-rapido-actions" class="modal-actions"></div>
+  </div>
+</div>
+
+<!-- MODAL: NUEVA CATEGORÍA (standalone, reutilizable) -->
+<div class="modal-ov" id="modal-nueva-cat" onclick="closeModalNuevaCat(event)">
+  <div class="modal-box" style="max-width:380px">
+    <div class="modal-close" onclick="cerrarModalNuevaCat()">×</div>
+    <div class="modal-title">Nueva categoría</div>
+    <div class="modal-field">
+      <label class="modal-lbl">Nombre</label>
+      <input class="modal-input" id="nueva-cat-nombre" type="text" placeholder="Desayunos, Postres…">
+    </div>
+    <div class="modal-field">
+      <label class="modal-lbl">Sección</label>
+      <select class="modal-select" id="nueva-cat-seccion">
+        <option value="cafeteria">☕ Cafetería</option>
+        <option value="cocina">🍳 Cocina</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label class="modal-lbl">Color</label>
+      <div class="color-dots" id="nueva-cat-colors" style="padding:4px 0"></div>
+    </div>
+    <div class="modal-field" style="padding:6px 0">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--ink2)">
+        <input type="checkbox" id="nueva-cat-reservable" style="width:16px;height:16px;accent-color:var(--orange);cursor:pointer">
+        📋 Permite reserva
+      </label>
+    </div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="cerrarModalProdRapido()">Cancelar</button>
-      <button class="btn-save" onclick="guardarProdRapido()">Crear y agregar</button>
+      <button class="btn-cancel" onclick="cerrarModalNuevaCat()">Cancelar</button>
+      <button class="btn-save" onclick="guardarNuevaCat()">Crear categoría</button>
     </div>
   </div>
 </div>
@@ -1388,7 +1430,7 @@ function guardarGasto(){
   const desc=($('gasto-desc').value||'').trim();
   const monto=parseFloat($('gasto-monto').value)||0;
   if(!desc||!monto){showToast('Completá descripción y monto');return;}
-  const g={id:'g_'+Date.now(),fecha:$('gasto-fecha').value,hora:nowT(),desc,monto,pago:$('gasto-pago').value};
+  const g={id:'g_'+Date.now(),fecha:$('gasto-fecha').value,hora:nowT(),desc,monto,pago:$('gasto-pago').value,operador:(turno&&turno.abierto)?turno.operador:''};
   gastos.push(g);save();cerrarModalGasto();renderGastos();syncGastosSheets();
   showToast('✓ Gasto registrado');
 }
@@ -1399,7 +1441,7 @@ function renderGastos(){
   el.innerHTML=lista.map(g=>`<div class="gasto-row">
     <div class="gasto-info">
       <div class="gasto-desc">${g.desc}</div>
-      <div class="gasto-meta">${g.fecha} · ${g.pago==='efectivo'?'Efectivo':'Transferencia'}</div>
+      <div class="gasto-meta">${g.fecha}${g.hora?' · '+g.hora:''} · ${g.pago==='efectivo'?'Efectivo':'Transferencia'}${g.operador?' · '+g.operador:''}</div>
     </div>
     <div class="gasto-monto">−${fmt(g.monto)}</div>
   </div>`).join('');
@@ -1917,15 +1959,22 @@ function renderHistVentas(){
   $('hist-list').innerHTML=entries.map(([fecha,rows],i)=>{
     const total=rows.reduce((s,v)=>s+v.total,0);
     const ef=rows.filter(v=>v.pago==='ef').length,mp=rows.filter(v=>v.pago==='mp').length;
-    const items={};rows.forEach(v=>{items[v.producto]=(items[v.producto]||0)+v.cantidad;});
     const d=new Date(fecha+'T12:00:00');
+    // Group by mesa/transaction for detail view — show individual sales with hora+operador
+    const ventasSorted=[...rows].sort((a,b)=>(a.hora||'').localeCompare(b.hora||''));
     return `<div class="hist-item">
       <div class="hist-hdr" onclick="toggleHist(${i})">
         <div><div class="hist-fecha">${fmtShort(d)}</div><div class="hist-meta">Ef. ${ef} · MP ${mp} · ${rows.length} ítems</div></div>
         <div class="hist-right"><span class="hist-total">${fmt(total)}</span><span class="hist-arr" id="ha-${i}">▾</span></div>
       </div>
       <div class="hist-detail" id="hd-${i}">
-        ${Object.entries(items).map(([prod,qty])=>{const sub=rows.filter(v=>v.producto===prod).reduce((s,v)=>s+(v.total||0),0);return`<div class="hist-row2"><span>${prod} ×${qty}</span><span>${fmt(sub)}</span></div>`;}).join('')}
+        ${ventasSorted.map(v=>`<div class="hist-row2">
+          <span><strong>${v.hora||''}</strong> ${v.producto} ×${v.cantidad}${v.operador?' <em style="color:var(--ink3)">· ${v.operador}</em>':''}</span>
+          <span>${fmt(v.total)}</span>
+        </div>`).join('')}
+        <div class="hist-row2" style="padding-top:6px;border-top:1px solid var(--border);margin-top:4px">
+          <span style="font-weight:500">Total del día</span><span style="font-weight:500">${fmt(total)}</span>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -2034,15 +2083,12 @@ function setSeccion(i,val){if(cats[i])cats[i].seccion=val;save();}
 function setCatReservable(i,checked){if(cats[i])cats[i].reservable=checked;save();showToast(checked?'✓ Categoría reservable':'Categoría sin reserva');}
 function deleteCat(i){const c=cats[i];if(menu.some(p=>p.cat===c.id)){showToast('No se puede — tiene productos');return;}cats.splice(i,1);save();renderCatMgr();renderCargaCats();showToast('Categoría eliminada');}
 function addCat(){
-  // Open accordion if closed
+  // Open accordion + switch tab so it's visible when we return
   const body=$('acc-body-menu');if(body&&!body.classList.contains('open')){toggleAccordion('menu');}
-  // Switch to cats tab
   switchMenuTab('cats');
-  const id='cat_'+Date.now();cats.push({id,name:'Nueva categoría',color:PRESET_COLORS[cats.length%PRESET_COLORS.length],seccion:'cafeteria',reservable:false});
-  save();renderCatMgr();renderCargaCats();
-  setTimeout(()=>{const ins=document.querySelectorAll('.cat-name-in');const last=ins[ins.length-1];if(last){last.focus();last.select();}},100);
+  abrirModalNuevaCat('ajustes');
 }
-function addCatFromModal(){const n=prompt('Nombre de la nueva categoría:','');if(!n?.trim())return;const id='cat_'+Date.now();cats.push({id,name:n.trim(),color:PRESET_COLORS[cats.length%PRESET_COLORS.length],seccion:'cafeteria',reservable:false});save();populateCatSelect();$('m-cat').value=id;}
+function addCatFromModal(){ abrirNuevaCatDesdeProducto('ajustes'); }
 function populateCatSelect(){const el=$('m-cat');if(el)el.innerHTML=cats.sort((a,b)=>a.name.localeCompare(b.name,'es')).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');}
 function toggleIlimitado(){const ilim=$('m-ilimitado')?.checked;$('m-stock-wrap').style.display=ilim?'none':'block';}
 function adjProdStock(id,d){const p=menu.find(x=>x.id===id);if(!p||p.ilimitado)return;p.stock=Math.max(0,(p.stock||0)+d);save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
@@ -2131,22 +2177,178 @@ function delVarianteOpcion(gi,oi){_variantesEdit[gi].opciones.splice(oi,1);rende
 
 function renderAjustesConfig(){if($('cfg-sheet-adj')&&config.sheetId)$('cfg-sheet-adj').value=config.sheetId;if($('cfg-url-adj')&&config.webappUrl)$('cfg-url-adj').value=config.webappUrl;}
 
-// ── Producto rápido ─────────────────────────────
-function openProdRapidoModal(){
-  $('pr-nombre').value='';$('pr-precio').value='';
-  $('pr-cat').innerHTML=cats.sort((a,b)=>a.name.localeCompare(b.name,'es')).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
-  $('modal-prod-rapido').classList.add('open');setTimeout(()=>$('pr-nombre').focus(),100);
+// ── Producto unificado (Ajustes + Pedido) ────────
+// Contexto: 'ajustes' = desde tab Ajustes, 'pedido' = desde vista de pedido
+let _prodRapidoContexto = 'pedido';
+let _prodSnapshot = null; // snapshot cuando se va a crear categoría
+
+function openProdRapidoModal(contexto){
+  _prodRapidoContexto = contexto || 'pedido';
+  _prodSnapshot = null;
+  _rellenarModalProd(null);
+  $('prod-rapido-titulo').textContent = 'Nuevo producto';
+  $('prod-rapido-actions').innerHTML = contexto==='ajustes'
+    ? `<button class="btn-cancel" onclick="cerrarModalProdRapido()">Cancelar</button><button class="btn-save" onclick="guardarProdRapido()">Guardar</button>`
+    : `<button class="btn-cancel" onclick="cerrarModalProdRapido()">Cancelar</button><button class="btn-save" onclick="guardarProdRapido()">Crear y agregar</button>`;
+  $('modal-prod-rapido').classList.add('open');
+  setTimeout(()=>$('pr-nombre').focus(),100);
+}
+function _rellenarModalProd(snap){
+  const sortedCats=cats.slice().sort((a,b)=>a.name.localeCompare(b.name,'es'));
+  $('pr-cat').innerHTML=sortedCats.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  if(snap){
+    $('pr-nombre').value=snap.nombre||'';
+    $('pr-precio').value=snap.precio||'';
+    $('pr-cat').value=snap.cat||'';
+    $('pr-ilimitado').checked=snap.ilimitado||false;
+    $('pr-stock').value=snap.stock||'';
+    togglePrIlimitado();
+  } else {
+    $('pr-nombre').value='';$('pr-precio').value='';
+    $('pr-ilimitado').checked=false;$('pr-stock').value='';
+    togglePrIlimitado();
+  }
+}
+function togglePrIlimitado(){
+  const ilim=$('pr-ilimitado')?.checked;
+  $('pr-stock-wrap').style.display=ilim?'none':'block';
 }
 function cerrarModalProdRapido(){$('modal-prod-rapido').classList.remove('open');}
 function closeModalProdRapido(e){if(e.target===$('modal-prod-rapido'))cerrarModalProdRapido();}
+
 function guardarProdRapido(){
-  const name=($('pr-nombre')?.value||'').trim(),price=parseInt($('pr-precio')?.value)||0,cat=$('pr-cat')?.value;
+  const name=($('pr-nombre')?.value||'').trim();
+  const price=parseInt($('pr-precio')?.value)||0;
+  const cat=$('pr-cat')?.value;
+  const ilimitado=!!$('pr-ilimitado')?.checked;
+  const stock=ilimitado?0:parseInt($('pr-stock')?.value)||10;
   if(!name||!price){showToast('Completá nombre y precio');return;}
   const newId=menu.reduce((m,p)=>Math.max(m,p.id),0)+1;
-  menu.push({id:newId,name,price,cat,stock:99,ilimitado:false,variantes:[]});
-  const key=`${newId}_plain`;carrito[key]={prodId:newId,qty:1,vars:[],nota:'',precio:price};
-  save();saveMesaCarrito();syncMenuSheets();cerrarModalProdRapido();renderProdGrid();renderCart();
-  showToast(`✓ "${name}" creado y agregado`);
+  const newProd={id:newId,name,price,cat,stock,ilimitado,variantes:[]};
+  menu.push(newProd);
+  save();syncMenuSheets();
+  if(_prodRapidoContexto==='pedido'){
+    const key=`${newId}_plain`;
+    carrito[key]={prodId:newId,qty:1,vars:[],nota:'',precio:price};
+    saveMesaCarrito();renderProdGrid();renderCart();
+    cerrarModalProdRapido();
+    showToast(`✓ "${name}" creado y agregado al pedido`);
+  } else {
+    cerrarModalProdRapido();
+    renderMenuAdm();renderCargaCats();renderProdGrid();
+    showToast(`✓ "${name}" creado`);
+  }
+}
+
+// Cuando el + de Categoría se presiona dentro del modal de producto
+function abrirNuevaCatDesdeProducto(contexto){
+  // Capturar snapshot del modal actual
+  _prodSnapshot = {
+    contexto: contexto || _prodRapidoContexto,
+    nombre: $('pr-nombre')?.value||'',
+    precio: $('pr-precio')?.value||'',
+    cat: $('pr-cat')?.value||'',
+    ilimitado: $('pr-ilimitado')?.checked||false,
+    stock: $('pr-stock')?.value||''
+  };
+  cerrarModalProdRapido();
+  abrirModalNuevaCat('producto');
+}
+
+// También para el modal-prod (Ajustes) - mismo flujo
+function addCatFromModal(){
+  // Capture from modal-prod fields
+  _prodSnapshot = {
+    contexto: 'ajustes-prod-modal',
+    editId: editId,
+    nombre: $('m-nombre')?.value||'',
+    precio: $('m-precio')?.value||'',
+    cat: $('m-cat')?.value||'',
+    ilimitado: $('m-ilimitado')?.checked||false,
+    stock: $('m-stock')?.value||''
+  };
+  closeProdModal();
+  abrirModalNuevaCat('prod-modal');
+}
+
+
+// ══════════════════════════════════════════════════
+//  MODAL NUEVA CATEGORÍA (reutilizable)
+// ══════════════════════════════════════════════════
+let _nuevaCatRetorno = null; // 'ajustes' | 'producto' | 'prod-modal'
+let _nuevaCatColorSel = PRESET_COLORS[0];
+
+function abrirModalNuevaCat(retorno){
+  _nuevaCatRetorno = retorno || 'ajustes';
+  _nuevaCatColorSel = PRESET_COLORS[0];
+  $('nueva-cat-nombre').value = '';
+  $('nueva-cat-seccion').value = 'cafeteria';
+  $('nueva-cat-reservable').checked = false;
+  // Render color swatches
+  $('nueva-cat-colors').innerHTML = PRESET_COLORS.map(col =>
+    `<div class="cdot${col===_nuevaCatColorSel?' sel':''}" style="background:${col}"
+      onclick="selNuevaCatColor('${col}')"></div>`
+  ).join('');
+  $('modal-nueva-cat').classList.add('open');
+  setTimeout(()=>$('nueva-cat-nombre').focus(), 120);
+}
+
+function selNuevaCatColor(col){
+  _nuevaCatColorSel = col;
+  $('nueva-cat-colors').innerHTML = PRESET_COLORS.map(c =>
+    `<div class="cdot${c===col?' sel':''}" style="background:${c}"
+      onclick="selNuevaCatColor('${c}')"></div>`
+  ).join('');
+}
+
+function cerrarModalNuevaCat(){ $('modal-nueva-cat').classList.remove('open'); }
+function closeModalNuevaCat(e){ if(e.target===$('modal-nueva-cat')) cerrarModalNuevaCat(); }
+
+function guardarNuevaCat(){
+  const nombre = ($('nueva-cat-nombre').value||'').trim();
+  if(!nombre){ showToast('Ingresá un nombre para la categoría'); return; }
+  const id = 'cat_'+Date.now();
+  const nuevaCat = {
+    id, name: nombre,
+    color: _nuevaCatColorSel,
+    seccion: $('nueva-cat-seccion').value,
+    reservable: $('nueva-cat-reservable').checked
+  };
+  cats.push(nuevaCat);
+  save();
+  cerrarModalNuevaCat();
+  renderCatMgr();
+  renderCargaCats();
+  showToast(`✓ Categoría "${nombre}" creada`);
+
+  // Retornar al contexto original
+  if(_nuevaCatRetorno === 'producto' || _nuevaCatRetorno === 'ajustes-prod-modal'){
+    // Reopen product modal with snapshot
+    if(_prodSnapshot){
+      const snap = _prodSnapshot; _prodSnapshot = null;
+      if(snap.contexto === 'ajustes-prod-modal'){
+        // Reopen modal-prod (Ajustes)
+        editId = snap.editId;
+        populateCatSelect();
+        $('m-nombre').value = snap.nombre||'';
+        $('m-precio').value = snap.precio||'';
+        $('m-cat').value = id; // select the new cat
+        $('m-ilimitado').checked = snap.ilimitado||false;
+        $('m-stock').value = snap.stock||'';
+        $('m-stock-wrap').style.display = snap.ilimitado?'none':'block';
+        renderVariantesModalBody(); updateVariantesBadge();
+        $('modal-prod').classList.add('open');
+      } else {
+        // Reopen modal-prod-rapido (pedido view)
+        _prodRapidoContexto = snap.contexto;
+        _rellenarModalProd(snap);
+        $('pr-cat').value = id;
+        $('modal-prod-rapido').classList.add('open');
+      }
+    }
+  } else {
+    // 'ajustes' — just stay on cat list (already rendered)
+  }
 }
 
 // ══════════════════════════════════════════════════
