@@ -478,6 +478,19 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
 .variante-op-nombre{flex:1}
 .variante-op-precio{width:85px}
 
+
+/* ── STOCK INLINE EN LISTA PRODUCTOS ── */
+.prod-adm-row{background:var(--surf);border:1px solid var(--border);border-radius:var(--r-sm);display:flex;align-items:center;padding:8px 12px;margin-bottom:5px;gap:8px;flex-wrap:wrap}
+.prod-adm-nombre{flex:1;font-size:13px;font-weight:500;min-width:100px}
+.prod-adm-precio{font-size:12px;color:var(--ink2);white-space:nowrap}
+.prod-adm-stock-ctrl{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.prod-adm-stock-num{width:42px;text-align:center;padding:3px 4px;border:1px solid var(--border2);border-radius:var(--r-xs);font-family:var(--ff);font-size:12px;font-weight:500;color:var(--ink);background:var(--surf2);outline:none}
+.prod-adm-stock-num:focus{border-color:var(--orange)}
+.ilim-toggle{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink3);cursor:pointer;white-space:nowrap;flex-shrink:0}
+.ilim-toggle input{width:14px;height:14px;accent-color:var(--orange);cursor:pointer}
+/* ── CATEGORIA RESERVABLE ── */
+.cat-reserva-toggle{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink3);white-space:nowrap;flex-shrink:0}
+.cat-reserva-toggle input{width:14px;height:14px;accent-color:var(--orange);cursor:pointer}
 </style>
 </head>
 <body>
@@ -534,8 +547,9 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
       <div class="carga-left">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
           <button class="btn-sm" onclick="volverAMesas()">← Volver</button>
-          <div style="font-family:var(--ff-serif);font-size:16px;color:var(--ink)" id="mesa-titulo"></div>
+          <div style="font-family:var(--ff-serif);font-size:16px;color:var(--ink);flex:1" id="mesa-titulo"></div>
           <div id="mesa-tipo-badge" class="mesa-tipo-badge"></div>
+          <button class="btn-sm primary" onclick="openProdRapidoModal()" style="font-size:11px;padding:5px 10px">+ Producto</button>
         </div>
         <div class="cat-chips" id="carga-cats"></div>
         <div class="prod-grid" id="prod-grid"></div>
@@ -924,6 +938,34 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
   </div>
 </div>
 
+
+<!-- MODAL: PRODUCTO RÁPIDO (desde vista de pedido) -->
+<div class="modal-ov" id="modal-prod-rapido" onclick="closeModalProdRapido(event)">
+  <div class="modal-box" style="max-width:380px">
+    <div class="modal-close" onclick="cerrarModalProdRapido()">×</div>
+    <div class="modal-title">Nuevo producto</div>
+    <div class="modal-field">
+      <label class="modal-lbl">Nombre</label>
+      <input class="modal-input" id="pr-nombre" type="text" placeholder="Nombre del producto">
+    </div>
+    <div class="modal-2col">
+      <div class="modal-field">
+        <label class="modal-lbl">Precio ($)</label>
+        <input class="modal-input" id="pr-precio" type="number" placeholder="0" min="0">
+      </div>
+      <div class="modal-field">
+        <label class="modal-lbl">Categoría</label>
+        <select class="modal-select" id="pr-cat"></select>
+      </div>
+    </div>
+    <p style="font-size:11px;color:var(--ink3);margin-bottom:14px">Se guarda en el menú y se agrega al pedido actual.</p>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="cerrarModalProdRapido()">Cancelar</button>
+      <button class="btn-save" onclick="guardarProdRapido()">Crear y agregar</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 
@@ -934,11 +976,11 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
 const PRESET_COLORS=['#C94A1A','#1A7A4A','#185FA5','#854F0B','#6B3AA5','#993C1D','#0F6E56','#2C5F8A','#A0522D','#555555'];
 
 const DEFAULT_CATS=[
-  {id:'cafe',   name:'Café',              color:'#C94A1A', seccion:'cafeteria'},
-  {id:'pan',    name:'Panadería',         color:'#854F0B', seccion:'cocina'},
-  {id:'comida', name:'Comida',            color:'#1A7A4A', seccion:'cocina'},
-  {id:'cerv',   name:'Strange (Cerveza)', color:'#185FA5', seccion:'cocina'},
-  {id:'beb',    name:'Bebidas',           color:'#6B3AA5', seccion:'cafeteria'},
+  {id:'cafe',   name:'Café',              color:'#C94A1A', seccion:'cafeteria', reservable:false},
+  {id:'pan',    name:'Panadería',         color:'#854F0B', seccion:'cocina',    reservable:true},
+  {id:'comida', name:'Comida',            color:'#1A7A4A', seccion:'cocina',    reservable:true},
+  {id:'cerv',   name:'Strange (Cerveza)', color:'#185FA5', seccion:'cocina',    reservable:true},
+  {id:'beb',    name:'Bebidas',           color:'#6B3AA5', seccion:'cafeteria', reservable:false},
 ];
 const DEFAULT_MENU=[
   {id:1, name:'Espresso',         price:4000, cat:'cafe',   stock:40, ilimitado:false, variantes:[]},
@@ -995,7 +1037,7 @@ menu = menu.map(p=>({
   ilimitado: p.ilimitado ?? false,
   variantes: p.variantes ?? p.modificadores ?? [],
 }));
-cats = cats.map(c=>({...c, seccion:c.seccion||'cafeteria'}));
+cats = cats.map(c=>({...c, seccion:c.seccion||'cafeteria', reservable:c.reservable??false}));
 
 // ── Estado UI ─────────────────────────────────────
 let carrito={}, pago='ef', catCarga='todos', editId=null;
@@ -1596,7 +1638,8 @@ function pedirEliminarReserva(id){
 
 function renderReservaProdChips(){
   const el=$('res-prod-chips'); if(!el) return;
-  const all=[{id:'todos',name:'Todos',color:'#888'},...cats];
+  const reservableCats=cats.filter(c=>c.reservable).sort((a,b)=>a.name.localeCompare(b.name,'es'));
+  const all=[{id:'todos',name:'Todos',color:'#888'},...reservableCats];
   el.innerHTML=all.map(c=>`<div class="chip${catReserva===c.id?' active':''}" onclick="setCatReserva('${c.id}')">
     ${c.id!=='todos'?`<span class="chip-dot" style="background:${c.color}"></span>`:''}${c.name}</div>`).join('');
 }
@@ -1604,7 +1647,10 @@ function setCatReserva(id){ catReserva=id; renderReservaProdChips(); renderReser
 
 function renderReservaProductoGrid(){
   const el=$('res-prod-grid'); if(!el) return;
-  const list=catReserva==='todos'?menu:menu.filter(p=>p.cat===catReserva);
+  // Only show products from reservable categories
+  const reservableCatIds=cats.filter(c=>c.reservable).map(c=>c.id);
+  const baseList=menu.filter(p=>reservableCatIds.includes(p.cat));
+  const list=catReserva==='todos'?baseList:baseList.filter(p=>p.cat===catReserva);
   const qtyMap={}; Object.values(reservaCarrito).forEach(item=>{ qtyMap[item.prodId]=(qtyMap[item.prodId]||0)+item.qty; });
   el.innerHTML=list.map(p=>{
     const qty=qtyMap[p.id]||0; const cat=getCat(p.cat);
@@ -1815,16 +1861,22 @@ function renderAjustes(){
 
 // ── CATEGORÍAS ──
 function renderCatMgr(){
-  $('cat-mgr').innerHTML=cats.map((c,i)=>`
+  // Sort alphabetically but render with original index for editing
+  const sorted=[...cats].map((c,i)=>({...c,_i:i})).sort((a,b)=>a.name.localeCompare(b.name,'es'));
+  $('cat-mgr').innerHTML=sorted.map(c=>`
     <div>
       <div class="cat-mgr-row">
-        <div class="cat-swatch" style="background:${c.color}" onclick="toggleCP(${i})"></div>
-        <input class="cat-name-in" value="${c.name}" onchange="renameCat(${i},this.value)" onblur="renameCat(${i},this.value)">
-        <select class="cat-seccion-sel" onchange="setSeccion(${i},this.value)">
+        <div class="cat-swatch" style="background:${c.color}" onclick="toggleCP(${c._i})"></div>
+        <input class="cat-name-in" value="${c.name}" onchange="renameCat(${c._i},this.value)" onblur="renameCat(${c._i},this.value)">
+        <select class="cat-seccion-sel" onchange="setSeccion(${c._i},this.value)">
           <option value="cafeteria"${c.seccion==='cafeteria'?' selected':''}>☕ Cafetería</option>
           <option value="cocina"${c.seccion==='cocina'?' selected':''}>🍳 Cocina</option>
         </select>
-        <button class="cat-del" onclick="pedirConfirm('¿Eliminar categoría ${c.name}?',()=>deleteCat(${i}))">×</button>
+        <label class="cat-reserva-toggle" title="Aparece en Reservas">
+          <input type="checkbox" ${c.reservable?'checked':''} onchange="setCatReservable(${c._i},this.checked)">
+          📋
+        </label>
+        <button class="cat-del" onclick="pedirConfirm('¿Eliminar categoría ${c.name}?',()=>deleteCat(${c._i}))">×</button>
       </div>
       <div class="color-picker-wrap" id="cp-${i}">
         <div class="color-dots">${PRESET_COLORS.map(col=>`<div class="cdot${c.color===col?' sel':''}" style="background:${col}" onclick="setCatColor(${i},'${col}')"></div>`).join('')}</div>
@@ -1840,15 +1892,40 @@ function addCat(){ const id='cat_'+Date.now(); cats.push({id,name:'Nueva categor
 function addCatFromModal(){ const n=prompt('Nombre de la nueva categoría:',''); if(!n?.trim()) return; const id='cat_'+Date.now(); cats.push({id,name:n.trim(),color:PRESET_COLORS[cats.length%PRESET_COLORS.length],seccion:'cafeteria'}); save(); populateCatSelect(); $('m-cat').value=id; }
 
 // ── PRODUCTOS ──
+
+function adjProdStock(id, d){
+  const p=menu.find(x=>x.id===id); if(!p||p.ilimitado) return;
+  p.stock=Math.max(0,(p.stock||0)+d); save(); renderMenuAdm(); renderStockAlerts(); syncMenuSheets();
+}
+function setProdStock(id, val){
+  const p=menu.find(x=>x.id===id); if(!p) return;
+  p.stock=Math.max(0,parseInt(val)||0); save(); renderMenuAdm(); renderStockAlerts(); syncMenuSheets();
+}
+function toggleProdIlimitado(id, checked){
+  const p=menu.find(x=>x.id===id); if(!p) return;
+  p.ilimitado=checked; save(); renderMenuAdm(); renderStockAlerts(); syncMenuSheets();
+}
+function setCatReservable(i, checked){
+  cats[i].reservable=checked; save(); showToast(checked?'✓ Categoría reservable':'Categoría sin reserva');
+}
 function populateCatSelect(){ $('m-cat').innerHTML=cats.map(c=>`<option value="${c.id}">${c.name}</option>`).join(''); }
 function toggleIlimitado(){ const ilim=$('m-ilimitado')?.checked; $('m-stock-wrap').style.display=ilim?'none':'block'; }
 
 function renderMenuAdm(){
-  $('menu-adm').innerHTML=menu.map(p=>{ const cat=getCat(p.cat); return `<div class="menu-adm-row">
+  const sorted=[...menu].sort((a,b)=>a.name.localeCompare(b.name,'es'));
+  $('menu-adm').innerHTML=sorted.map(p=>{ const cat=getCat(p.cat); return `<div class="prod-adm-row">
     <div style="width:8px;height:8px;border-radius:50%;background:${cat.color};flex-shrink:0"></div>
-    <span style="flex:1;font-size:13px">${p.name}</span>
-    <span style="font-size:12px;color:var(--ink2)">${fmt(p.price)}</span>
-    <span style="font-size:11px;color:var(--ink3)">${p.ilimitado?'∞':p.stock}</span>
+    <span class="prod-adm-nombre">${p.name}</span>
+    <span class="prod-adm-precio">${fmt(p.price)}</span>
+    <div class="prod-adm-stock-ctrl" style="${p.ilimitado?'display:none':''}">
+      <button class="qty-btn" onclick="adjProdStock(${p.id},-1)">−</button>
+      <input class="prod-adm-stock-num" type="number" value="${p.stock}" min="0"
+        onchange="setProdStock(${p.id},this.value)" onblur="setProdStock(${p.id},this.value)">
+      <button class="qty-btn" onclick="adjProdStock(${p.id},1)">+</button>
+    </div>
+    <label class="ilim-toggle" title="Stock ilimitado">
+      <input type="checkbox" ${p.ilimitado?'checked':''} onchange="toggleProdIlimitado(${p.id},this.checked)"> ∞
+    </label>
     <div class="icon-btn" onclick="openProdModal(${p.id})">
       <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2l3 3L5 14H2v-3L11 2z"/></svg>
     </div>
@@ -1940,6 +2017,32 @@ function delVarianteOpcion(gi,oi){ _variantesEdit[gi].opciones.splice(oi,1); ren
 function renderAjustesConfig(){
   if($('cfg-sheet-adj')&&config.sheetId) $('cfg-sheet-adj').value=config.sheetId;
   if($('cfg-url-adj')&&config.webappUrl) $('cfg-url-adj').value=config.webappUrl;
+}
+
+
+// ── PRODUCTO RÁPIDO (desde pedido) ──────────────────────────
+function openProdRapidoModal(){
+  $('pr-nombre').value=''; $('pr-precio').value='';
+  $('pr-cat').innerHTML=cats.sort((a,b)=>a.name.localeCompare(b.name,'es')).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  $('modal-prod-rapido').classList.add('open');
+  setTimeout(()=>$('pr-nombre').focus(),100);
+}
+function cerrarModalProdRapido(){ $('modal-prod-rapido').classList.remove('open'); }
+function closeModalProdRapido(e){ if(e.target===$('modal-prod-rapido')) cerrarModalProdRapido(); }
+function guardarProdRapido(){
+  const name=$('pr-nombre').value.trim();
+  const price=parseInt($('pr-precio').value)||0;
+  const cat=$('pr-cat').value;
+  if(!name||!price){ showToast('Completá nombre y precio'); return; }
+  const newId=menu.reduce((m,p)=>Math.max(m,p.id),0)+1;
+  const newProd={id:newId,name,price,cat,stock:99,ilimitado:false,variantes:[]};
+  menu.push(newProd);
+  // Add directly to current cart
+  const key=`${newId}_plain`;
+  carrito[key]={prodId:newId,qty:1,vars:[],nota:'',precio:price};
+  save(); saveMesaCarrito(); syncMenuSheets();
+  cerrarModalProdRapido(); renderProdGrid(); renderCart();
+  showToast(`✓ "${name}" creado y agregado`);
 }
 
 // ══════════════════════════════════════════════════
