@@ -23,6 +23,7 @@
 <style>
 
 
+
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
   --bg:#FDF6EE; --surf:#FFFFFF; --surf2:#F5EDE0; --surf3:#EDE3D4;
@@ -491,7 +492,43 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
 /* ── CATEGORIA RESERVABLE ── */
 .cat-reserva-toggle{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink3);white-space:nowrap;flex-shrink:0}
 .cat-reserva-toggle input{width:14px;height:14px;accent-color:var(--orange);cursor:pointer}
+
+/* ── GASTOS ── */
+.gasto-row{background:var(--surf);border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:6px;display:flex;gap:12px;align-items:center}
+.gasto-info{flex:1;min-width:0}
+.gasto-desc{font-size:13px;font-weight:500}
+.gasto-meta{font-size:11px;color:var(--ink3);margin-top:2px}
+.gasto-monto{font-size:14px;font-weight:500;color:var(--red);flex-shrink:0}
+/* ── DASHBOARD RESULTADO ── */
+.resultado-card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.resultado-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
+.resultado-row:last-child{border-bottom:none;padding-top:12px;margin-top:4px}
+.resultado-lbl{font-size:13px;color:var(--ink2)}
+.resultado-val{font-size:15px;font-weight:500}
+.resultado-val.pos{color:var(--green)}
+.resultado-val.neg{color:var(--red)}
+.resultado-val.total{font-size:18px;color:var(--ink)}
+
 </style>
+</head>
+<body>
+<!-- HEADER -->
+<div class="header">
+  <div class="header-left">
+    <img src="logo.svg" style="width:44px;height:44px;flex-shrink:0;" alt="Colo Café">
+  </div>
+  <div class="header-right">
+    <span class="header-date" id="hoy-lbl"></span>
+    <div class="turno-pill" id="turno-pill" onclick="openTurnoModal()">
+      <span class="turno-dot" id="turno-dot"></span>Sin turno
+    </div>
+    <div class="gs-pill" id="gs-pill">
+      <div class="gs-dot" id="gs-dot"></div>
+      <span id="gs-txt">Sin conexión</span>
+    </div>
+  </div>
+</div>
+
 </head>
 <body>
 
@@ -632,8 +669,21 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
 
 <!-- TAB: HISTORIAL -->
 <div class="tab" id="tab-historial">
-  <div class="hist-layout">
-    <div id="hist-list"></div>
+  <div class="subtab-bar">
+    <button class="subtab-btn active" id="stab-ventas-hist" onclick="switchHistSubtab('ventas')">Ventas</button>
+    <button class="subtab-btn" id="stab-gastos-hist" onclick="switchHistSubtab('gastos')">Gastos</button>
+  </div>
+  <div id="hist-subtab-ventas">
+    <div class="hist-layout"><div id="hist-list"></div></div>
+  </div>
+  <div id="hist-subtab-gastos" style="display:none">
+    <div class="hist-layout">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:13px;color:var(--ink2)">Registro de gastos</div>
+        <button class="btn-sm primary" onclick="openGastoModal()">+ Gasto</button>
+      </div>
+      <div id="gastos-lista"></div>
+    </div>
   </div>
 </div>
 
@@ -893,7 +943,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
         <label class="modal-lbl">Cliente (opcional)</label>
         <div style="display:flex;gap:6px">
           <select class="modal-select" id="res-cliente" style="flex:1"></select>
-          <button class="btn-sm primary" onclick="openClienteModal(null,'reserva')" style="flex-shrink:0">+</button>
+          <button class="btn-sm primary" onclick="openClienteDesdeReserva()" style="flex-shrink:0">+</button>
         </div>
       </div>
     </div>
@@ -966,12 +1016,67 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
   </div>
 </div>
 
+
+<!-- MODAL: GASTO -->
+<div class="modal-ov" id="modal-gasto" onclick="closeModalGasto(event)">
+  <div class="modal-box" style="max-width:380px">
+    <div class="modal-close" onclick="cerrarModalGasto()">×</div>
+    <div class="modal-title">Registrar gasto</div>
+    <div class="modal-field">
+      <label class="modal-lbl">Descripción</label>
+      <input class="modal-input" id="gasto-desc" type="text" placeholder="Ej: Harina, gas, sueldo…">
+    </div>
+    <div class="modal-2col">
+      <div class="modal-field">
+        <label class="modal-lbl">Monto ($)</label>
+        <input class="modal-input" id="gasto-monto" type="number" placeholder="0" min="0">
+      </div>
+      <div class="modal-field">
+        <label class="modal-lbl">Medio de pago</label>
+        <select class="modal-select" id="gasto-pago">
+          <option value="efectivo">Efectivo</option>
+          <option value="transferencia">Transferencia</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-lbl">Fecha</label>
+      <input class="modal-input" id="gasto-fecha" type="date">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="cerrarModalGasto()">Cancelar</button>
+      <button class="btn-save" onclick="guardarGasto()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: OPERADOR AL COBRAR -->
+<div class="modal-ov" id="modal-operador-cobro" onclick="e=>e.stopPropagation()">
+  <div class="modal-box" style="max-width:360px">
+    <div class="modal-title">¿Quién atendió esta mesa?</div>
+    <div class="modal-field">
+      <label class="modal-lbl">Operador</label>
+      <select class="modal-select" id="cobro-operador-sel" onchange="onCobroOperadorChange()">
+        <option value="">Seleccioná…</option>
+      </select>
+    </div>
+    <div id="cobro-nuevo-op-wrap" style="display:none" class="modal-field">
+      <label class="modal-lbl">Nombre del nuevo operador</label>
+      <input class="modal-input" id="cobro-nuevo-op" type="text" placeholder="Nombre">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="cerrarModalOperadorCobro()">Cancelar</button>
+      <button class="btn-save" onclick="confirmarOperadorCobro()">Cobrar</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 
 <script>
 // ══════════════════════════════════════════════════
-//  DATOS & DEFAULTS
+//  DATA & DEFAULTS
 // ══════════════════════════════════════════════════
 const PRESET_COLORS=['#C94A1A','#1A7A4A','#185FA5','#854F0B','#6B3AA5','#993C1D','#0F6E56','#2C5F8A','#A0522D','#555555'];
 
@@ -1017,178 +1122,171 @@ const DEFAULT_MENU=[
   {id:32,name:'Yogurt',           price:5000, cat:'beb',    stock:15, ilimitado:false, variantes:[]},
 ];
 
-// ── Persistencia ──────────────────────────────────
-let cats     = JSON.parse(localStorage.getItem('cats')||'null')||DEFAULT_CATS;
-let menu     = JSON.parse(localStorage.getItem('menu')||'null')||DEFAULT_MENU;
-let ventas   = JSON.parse(localStorage.getItem('ventas')||'[]');
-let config   = JSON.parse(localStorage.getItem('config')||'{}');
-let mesas    = JSON.parse(localStorage.getItem('mesas')||'[]');
-let mermas   = JSON.parse(localStorage.getItem('mermas')||'[]');
-let clientes = JSON.parse(localStorage.getItem('clientes')||'[]');
-let reservas = JSON.parse(localStorage.getItem('reservas')||'[]');
-let turno    = JSON.parse(localStorage.getItem('turno')||'null');
+let cats      = JSON.parse(localStorage.getItem('cats')||'null')||DEFAULT_CATS;
+let menu      = JSON.parse(localStorage.getItem('menu')||'null')||DEFAULT_MENU;
+let ventas    = JSON.parse(localStorage.getItem('ventas')||'[]');
+let config    = JSON.parse(localStorage.getItem('config')||'{}');
+let mesas     = JSON.parse(localStorage.getItem('mesas')||'[]');
+let clientes  = JSON.parse(localStorage.getItem('clientes')||'[]');
+let reservas  = JSON.parse(localStorage.getItem('reservas')||'[]');
+let turno     = JSON.parse(localStorage.getItem('turno')||'null');
+let gastos    = JSON.parse(localStorage.getItem('gastos')||'[]');
+let operadores= JSON.parse(localStorage.getItem('operadores')||'[]');
 
-// Migrate existing data
-menu = menu.map(p=>({
-  ...p,
-  name:  p.name  ?? p.nombre ?? '(sin nombre)',
-  price: p.price ?? p.precio ?? 0,
-  stock: p.stock ?? p.alert ?? 10,
-  ilimitado: p.ilimitado ?? false,
-  variantes: p.variantes ?? p.modificadores ?? [],
-}));
-cats = cats.map(c=>({...c, seccion:c.seccion||'cafeteria', reservable:c.reservable??false}));
+// Migrate
+menu = menu.map(p=>({...p,name:p.name??p.nombre??'?',price:p.price??p.precio??0,stock:p.stock??10,ilimitado:p.ilimitado??false,variantes:p.variantes??p.modificadores??[]}));
+cats = cats.map(c=>({...c,seccion:c.seccion||'cafeteria',reservable:c.reservable??false}));
 
-// ── Estado UI ─────────────────────────────────────
-let carrito={}, pago='ef', catCarga='todos', editId=null;
-let editClienteId=null, editReservaId=null, activeTab='carga';
-let mesaActivaId=null, tipoNuevaMesa='salon', ventasFiltro='hoy';
-let prodParaVariantes=null, variantesSeleccionadas={};
-let clienteModalRetorno=null, tipoNuevaMesaReserva='salon';
-let reservaPago='ef', reservaCarrito={}, catReserva='todos';
-let variantesModalGrupos=[], variantesModalProdId=null;
-let confirmCallback=null, activeMenuTab='cats', ventasFiltroTipo='todos';
-let dashFiltro='hoy';
+// State
+let carrito={},pago='ef',catCarga='todos',editId=null;
+let editClienteId=null,editReservaId=null,activeTab='carga';
+let mesaActivaId=null,tipoNuevaMesa='salon',dashFiltro='hoy';
+let prodParaVariantes=null,variantesSeleccionadas={};
+let clienteModalRetorno=null,tipoNuevaMesaReserva='salon';
+let reservaPago='ef',reservaCarrito={},catReserva='todos';
+let confirmCallback=null,activeMenuTab='cats',ventasFiltroTipo='todos';
+let _variantesEdit=[],pendingCobroCallback=null;
+// Snapshot of reserva modal data when opening cliente modal from it
+let reservaSnapshot=null;
 
 function save(){
-  localStorage.setItem('cats',     JSON.stringify(cats));
-  localStorage.setItem('menu',     JSON.stringify(menu));
-  localStorage.setItem('ventas',   JSON.stringify(ventas));
-  localStorage.setItem('mesas',    JSON.stringify(mesas));
-  localStorage.setItem('mermas',   JSON.stringify(mermas));
-  localStorage.setItem('clientes', JSON.stringify(clientes));
-  localStorage.setItem('reservas', JSON.stringify(reservas));
-  turno ? localStorage.setItem('turno',JSON.stringify(turno)) : localStorage.removeItem('turno');
+  localStorage.setItem('cats',    JSON.stringify(cats));
+  localStorage.setItem('menu',    JSON.stringify(menu));
+  localStorage.setItem('ventas',  JSON.stringify(ventas));
+  localStorage.setItem('mesas',   JSON.stringify(mesas));
+  localStorage.setItem('clientes',JSON.stringify(clientes));
+  localStorage.setItem('reservas',JSON.stringify(reservas));
+  localStorage.setItem('gastos',  JSON.stringify(gastos));
+  localStorage.setItem('operadores',JSON.stringify(operadores));
+  turno?localStorage.setItem('turno',JSON.stringify(turno)):localStorage.removeItem('turno');
 }
 
-// ══════════════════════════════════════════════════
-//  UTILS
-// ══════════════════════════════════════════════════
-const $ = id => document.getElementById(id);
-const fmt  = n => '$' + Math.round(n).toLocaleString('es-AR');
-const fmtK = n => n>=1000000?'$'+(n/1000000).toFixed(1).replace('.0','')+'M':n>=1000?'$'+Math.round(n/1000)+'k':fmt(n);
+// ── Utils ─────────────────────────────────────────
+const $=id=>document.getElementById(id);
+const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
+const fmtK=n=>n>=1000000?'$'+(n/1000000).toFixed(1).replace('.0','')+'M':n>=1000?'$'+Math.round(n/1000)+'k':fmt(n);
+function fmtFull(d){const D=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];const M=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];return `${D[d.getDay()]} ${d.getDate()} de ${M[d.getMonth()]} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
+function fmtShort(d){const D=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];const M=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];return `${D[d.getDay()]} ${d.getDate()} ${M[d.getMonth()]}`;}
+function today(){return new Date().toISOString().split('T')[0];}
+function nowISO(){return new Date().toISOString();}
+function nowT(){const n=new Date();return `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;}
+function getCat(id){return cats.find(c=>c.id===id)||{name:'Sin cat',color:'#aaa',seccion:'cafeteria'};}
+function showToast(msg,ms=2200){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),ms);}
+function tipoLabel(t){return t==='salon'?'Salón':t==='delivery'?'Delivery':'Take away';}
+function tipoBadgeClass(t){return t==='salon'?'mesa-tipo-salon':t==='delivery'?'mesa-tipo-delivery':'mesa-tipo-takeaway';}
+function carritoItemTotal(item){return(item.precio+(item.vars||[]).reduce((s,v)=>s+v.precio,0))*item.qty;}
+function carritoTotalFn(c){return Object.values(c).reduce((s,i)=>s+carritoItemTotal(i),0);}
+function stockStatus(p){if(p.ilimitado)return'ok';return p.stock<=0?'out':p.stock<=5?'low':'ok';}
+function dashRango(){const hoy=today();if(dashFiltro==='hoy')return{desde:hoy,hasta:hoy};if(dashFiltro==='semana'){const d=new Date();d.setDate(d.getDate()-6);return{desde:d.toISOString().split('T')[0],hasta:hoy};}if(dashFiltro==='mes'){const d=new Date();d.setDate(1);return{desde:d.toISOString().split('T')[0],hasta:hoy};}return{desde:$('dash-desde')?.value||hoy,hasta:$('dash-hasta')?.value||hoy};}
 
-function fmtFull(d){
-  const D=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
-  const M=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-  return `${D[d.getDay()]} ${d.getDate()} de ${M[d.getMonth()]} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-}
-function fmtShort(d){
-  const D=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  const M=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-  return `${D[d.getDay()]} ${d.getDate()} ${M[d.getMonth()]}`;
-}
-function today(){ return new Date().toISOString().split('T')[0]; }
-function nowISO(){ return new Date().toISOString(); }
-function nowT(){ const n=new Date(); return `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`; }
-function getCat(id){ return cats.find(c=>c.id===id)||{name:'Sin cat',color:'#aaa',seccion:'cafeteria'}; }
-function showToast(msg,ms=2200){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),ms); }
-function tipoLabel(t){ return t==='salon'?'Salón':t==='delivery'?'Delivery':'Take away'; }
-function tipoBadgeClass(t){ return t==='salon'?'mesa-tipo-salon':t==='delivery'?'mesa-tipo-delivery':'mesa-tipo-takeaway'; }
-function carritoItemTotal(item){ return (item.precio+(item.vars||[]).reduce((s,v)=>s+v.precio,0))*item.qty; }
-function carritoTotalFn(c){ return Object.values(c).reduce((s,i)=>s+carritoItemTotal(i),0); }
-function stockStatus(p){ if(p.ilimitado) return 'ok'; return p.stock<=0?'out':p.stock<=5?'low':'ok'; }
-
-// Fecha range por filtro
-function dashRango(){
-  const hoy=today();
-  if(dashFiltro==='hoy') return {desde:hoy,hasta:hoy};
-  if(dashFiltro==='semana'){ const d=new Date(); d.setDate(d.getDate()-6); return {desde:d.toISOString().split('T')[0],hasta:hoy}; }
-  if(dashFiltro==='mes'){ const d=new Date(); d.setDate(1); return {desde:d.toISOString().split('T')[0],hasta:hoy}; }
-  if(dashFiltro==='custom'){ return {desde:$('dash-desde')?.value||hoy, hasta:$('dash-hasta')?.value||hoy}; }
-  return {desde:hoy,hasta:hoy};
-}
-
-// ══════════════════════════════════════════════════
-//  MODAL CONFIRMACIÓN
-// ══════════════════════════════════════════════════
-function pedirConfirm(msg, fn, labelOk='Eliminar', color='var(--red)', icon='⚠️'){
-  confirmCallback=fn;
-  $('confirm-icon').textContent=icon;
-  $('confirm-msg').textContent=msg;
-  const btn=$('confirm-btn-ok');
-  btn.textContent=labelOk; btn.style.background=color;
+// ── Modal confirmación ────────────────────────────
+function pedirConfirm(msg,fn,labelOk='Eliminar',color='var(--red)',icon='⚠️'){
+  confirmCallback=fn;$('confirm-icon').textContent=icon;$('confirm-msg').textContent=msg;
+  const btn=$('confirm-btn-ok');btn.textContent=labelOk;btn.style.background=color;
   $('modal-confirm').classList.add('open');
 }
-function cerrarModalConfirm(){ $('modal-confirm').classList.remove('open'); confirmCallback=null; }
-function closeModalConfirm(e){ if(e.target===$('modal-confirm')) cerrarModalConfirm(); }
+function cerrarModalConfirm(){$('modal-confirm').classList.remove('open');confirmCallback=null;}
+function closeModalConfirm(e){if(e.target===$('modal-confirm'))cerrarModalConfirm();}
 function ejecutarConfirm(){
-  if(typeof confirmCallback==='string') { try{ eval(confirmCallback); }catch(e){} }
-  else if(typeof confirmCallback==='function') confirmCallback();
+  if(typeof confirmCallback==='string'){try{eval(confirmCallback);}catch(e){}}
+  else if(typeof confirmCallback==='function')confirmCallback();
   cerrarModalConfirm();
 }
 
-// ══════════════════════════════════════════════════
-//  DATE TICKER & NAV
-// ══════════════════════════════════════════════════
-function updateDate(){ $('hoy-lbl').textContent=fmtFull(new Date()); }
-updateDate(); setInterval(updateDate,30000);
+// ── Date ticker ──────────────────────────────────
+function updateDate(){$('hoy-lbl').textContent=fmtFull(new Date());}
+updateDate();setInterval(updateDate,30000);
 
-document.querySelectorAll('.nav-btn').forEach(btn=>{
-  btn.addEventListener('click',()=>goTab(btn.dataset.tab));
-});
+// ── Nav ──────────────────────────────────────────
+document.querySelectorAll('.nav-btn').forEach(btn=>{btn.addEventListener('click',()=>goTab(btn.dataset.tab));});
 function goTab(id){
   activeTab=id;
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  $('tab-'+id).classList.add('active');
+  $('tab-'+id)?.classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===id));
-  if(id==='carga')     renderVentas();
-  if(id==='dashboard') renderDashboard();
-  if(id==='historial') renderHistorial();
-  if(id==='clientes')  renderClientesTab();
-  if(id==='ajustes')   renderAjustes();
+  if(id==='carga')    renderVentas();
+  if(id==='dashboard')renderDashboard();
+  if(id==='historial')renderHistorial();
+  if(id==='clientes') renderClientesTab();
+  if(id==='ajustes')  renderAjustes();
 }
-
-// ── Accordion Ajustes ──
+function switchHistSubtab(t){
+  $('hist-subtab-ventas').style.display=t==='ventas'?'block':'none';
+  $('hist-subtab-gastos').style.display=t==='gastos'?'block':'none';
+  $('stab-ventas-hist').classList.toggle('active',t==='ventas');
+  $('stab-gastos-hist').classList.toggle('active',t==='gastos');
+  if(t==='gastos')renderGastos();
+  if(t==='ventas')renderHistVentas();
+}
 function toggleAccordion(key){
-  const body=$(`acc-body-${key}`), arr=$(`acc-arr-${key}`);
-  const isOpen=body.classList.contains('open');
-  ['menu','sheets','datos'].forEach(k=>{ $(`acc-body-${k}`)?.classList.remove('open'); $(`acc-arr-${k}`)?.classList.remove('open'); });
-  if(!isOpen){ body.classList.add('open'); arr.classList.add('open'); }
+  const body=$(`acc-body-${key}`),arr=$(`acc-arr-${key}`);
+  const isOpen=body?.classList.contains('open');
+  ['menu','sheets','datos'].forEach(k=>{$(`acc-body-${k}`)?.classList.remove('open');$(`acc-arr-${k}`)?.classList.remove('open');});
+  if(!isOpen){body?.classList.add('open');arr?.classList.add('open');}
 }
 function switchMenuTab(tab){
-  ['cats','prods'].forEach(t=>{ $(`itab-body-${t}`).style.display=t===tab?'block':'none'; $(`itab-${t}`).classList.toggle('active',t===tab); });
+  ['cats','prods'].forEach(t=>{$(`itab-body-${t}`).style.display=t===tab?'block':'none';$(`itab-${t}`).classList.toggle('active',t===tab);});
   activeMenuTab=tab;
-  if(tab==='prods') renderMenuAdm();
-  if(tab==='cats')  renderCatMgr();
+  if(tab==='prods')renderMenuAdm();
+  if(tab==='cats')renderCatMgr();
 }
+
+// ══════════════════════════════════════════════════
+//  OPERADORES
+// ══════════════════════════════════════════════════
+function getOperadoresOpts(includeNuevo=true){
+  const opts=operadores.map(op=>`<option value="${op}">${op}</option>`).join('');
+  return `<option value="">Seleccioná…</option>${opts}${includeNuevo?'<option value="__nuevo__">➕ Nuevo operador</option>':opts}`;
+}
+function syncOperadoresSheets(){sheetsPost({action:'updateOperadores',rows:operadores.map(op=>({nombre:op}))});}
 
 // ══════════════════════════════════════════════════
 //  TURNO
 // ══════════════════════════════════════════════════
 function renderTurnoPill(){
-  const pill=$('turno-pill'); if(!pill) return;
-  if(turno&&turno.abierto){
-    pill.innerHTML=`<span class="turno-dot on"></span>${turno.operador}`;
-    pill.className='turno-pill abierto';
-  } else {
-    pill.innerHTML=`<span class="turno-dot"></span>Sin turno`;
-    pill.className='turno-pill';
-  }
+  const pill=$('turno-pill');if(!pill)return;
+  if(turno&&turno.abierto){pill.innerHTML=`<span class="turno-dot on"></span>${turno.operador}`;pill.className='turno-pill abierto';}
+  else{pill.innerHTML=`<span class="turno-dot"></span>Sin turno`;pill.className='turno-pill';}
 }
-function openTurnoModal(){ turno&&turno.abierto?mostrarResumenTurno():mostrarAbrirTurno(); $('modal-turno').classList.add('open'); }
-function cerrarModalTurno(){ $('modal-turno').classList.remove('open'); }
-function closeModalTurno(e){ if(e.target===$('modal-turno')) cerrarModalTurno(); }
+function openTurnoModal(){turno&&turno.abierto?mostrarResumenTurno():mostrarAbrirTurno();$('modal-turno').classList.add('open');}
+function cerrarModalTurno(){$('modal-turno').classList.remove('open');}
+function closeModalTurno(e){if(e.target===$('modal-turno'))cerrarModalTurno();}
 
 function mostrarAbrirTurno(){
   $('turno-modal-titulo').textContent='Abrir turno';
+  const optsHtml=getOperadoresOpts(true);
   $('turno-modal-body').innerHTML=`
     <div class="modal-field"><label class="modal-lbl">Operador</label>
-      <input class="modal-input" id="turno-operador" type="text" placeholder="Nombre del cajero / barista"></div>
+      <select class="modal-select" id="turno-operador-sel" onchange="onTurnoOperadorChange()">
+        ${optsHtml}
+      </select>
+    </div>
+    <div id="turno-nuevo-op-wrap" style="display:none" class="modal-field">
+      <label class="modal-lbl">Nombre del nuevo operador</label>
+      <input class="modal-input" id="turno-nuevo-op" type="text" placeholder="Nombre">
+    </div>
     <div class="modal-field"><label class="modal-lbl">Fondo de caja ($)</label>
       <input class="modal-input" id="turno-fondo" type="number" placeholder="0" min="0"></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="cerrarModalTurno()">Cancelar</button>
       <button class="btn-save" onclick="abrirTurno()">Abrir turno</button>
     </div>`;
-  setTimeout(()=>$('turno-operador')?.focus(),120);
+}
+function onTurnoOperadorChange(){
+  const sel=$('turno-operador-sel');
+  $('turno-nuevo-op-wrap').style.display=sel?.value==='__nuevo__'?'block':'none';
 }
 function abrirTurno(){
-  const op=($('turno-operador')?.value||'').trim();
-  if(!op){ showToast('Ingresá el nombre'); return; }
+  const sel=$('turno-operador-sel');
+  let op='';
+  if(sel?.value==='__nuevo__'){op=($('turno-nuevo-op')?.value||'').trim();}
+  else{op=sel?.value||'';}
+  if(!op){showToast('Seleccioná o ingresá un operador');return;}
+  if(!operadores.includes(op)){operadores.push(op);save();syncOperadoresSheets();}
   turno={abierto:true,operador:op,fondoCaja:parseFloat($('turno-fondo')?.value)||0,apertura:nowISO(),ventasIds:[]};
-  save(); syncTurnoSheets(); cerrarModalTurno(); renderTurnoPill(); showToast(`✓ Turno abierto — ${op}`);
+  save();syncTurnoSheets();cerrarModalTurno();renderTurnoPill();showToast(`✓ Turno abierto — ${op}`);
 }
+
 function mostrarResumenTurno(){
   $('turno-modal-titulo').textContent='Turno activo';
   const vt=turno.ventasIds?ventas.filter(v=>turno.ventasIds.includes(v.id)):[];
@@ -1197,8 +1295,10 @@ function mostrarResumenTurno(){
   const tot=ef+mp;
   const cafe=vt.filter(v=>getCat(v.cat).seccion==='cafeteria').reduce((s,v)=>s+v.total,0);
   const cocina=vt.filter(v=>getCat(v.cat).seccion==='cocina').reduce((s,v)=>s+v.total,0);
+  // Por operador
+  const porOp={};vt.forEach(v=>{if(!porOp[v.operador])porOp[v.operador]=0;porOp[v.operador]+=v.total;});
   $('turno-modal-body').innerHTML=`
-    <p style="font-size:12px;color:var(--ink3);margin-bottom:14px">Abierto: ${fmtFull(new Date(turno.apertura))}<br>Operador: <strong>${turno.operador}</strong></p>
+    <p style="font-size:12px;color:var(--ink3);margin-bottom:14px">Abierto: ${fmtFull(new Date(turno.apertura))}<br>Operador principal: <strong>${turno.operador}</strong></p>
     <div class="turno-resumen-grid">
       <div class="turno-stat"><div class="turno-stat-lbl">Fondo inicial</div><div class="turno-stat-val">${fmt(turno.fondoCaja)}</div></div>
       <div class="turno-stat"><div class="turno-stat-lbl">Total vendido</div><div class="turno-stat-val" style="color:var(--orange)">${fmt(tot)}</div></div>
@@ -1207,6 +1307,7 @@ function mostrarResumenTurno(){
       <div class="turno-stat"><div class="turno-stat-lbl">☕ Cafetería</div><div class="turno-stat-val">${fmt(cafe)}</div></div>
       <div class="turno-stat"><div class="turno-stat-lbl">🍳 Cocina</div><div class="turno-stat-val">${fmt(cocina)}</div></div>
     </div>
+    ${Object.keys(porOp).length>1?`<div style="margin-bottom:14px;font-size:12px">${Object.entries(porOp).map(([op,t])=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)"><span>${op}</span><span style="font-weight:500">${fmt(t)}</span></div>`).join('')}</div>`:''}
     <div class="modal-actions">
       <button class="btn-cancel" onclick="cerrarModalTurno()">Seguir</button>
       <button class="btn-save" style="background:var(--green)" onclick="pedirCerrarTurno(${ef},${mp},${tot},${cafe},${cocina})">Cerrar turno</button>
@@ -1214,32 +1315,32 @@ function mostrarResumenTurno(){
 }
 function pedirCerrarTurno(ef,mp,tot,cafe,cocina){
   cerrarModalTurno();
-  pedirConfirm(`Cerrar turno de ${turno.operador} — total ${fmt(tot)}`, ()=>cerrarTurno(ef,mp,tot,cafe,cocina), 'Cerrar turno','var(--green)','🏁');
+  pedirConfirm(`Cerrar turno de ${turno.operador} — total ${fmt(tot)}`,()=>cerrarTurno(ef,mp,tot,cafe,cocina),'Cerrar turno','var(--green)','🏁');
 }
 async function cerrarTurno(ef,mp,tot,cafe,cocina){
   const r={fecha:today(),operador:turno.operador,apertura:turno.apertura,cierre:nowISO(),fondoCaja:turno.fondoCaja,totalEf:ef,totalMp:mp,total:tot,totalCafeteria:cafe,totalCocina:cocina};
   await sheetsPost({action:'addTurno',row:r});
-  turno=null; save(); renderTurnoPill(); showToast('✓ Turno cerrado');
+  turno=null;save();renderTurnoPill();showToast('✓ Turno cerrado');
 }
 
 // ══════════════════════════════════════════════════
 //  SHEETS
 // ══════════════════════════════════════════════════
 async function sheetsPost(payload){
-  if(!config.webappUrl) return false;
-  try{ await fetch(config.webappUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),mode:'no-cors'}); return true; }
-  catch(e){ return false; }
+  if(!config.webappUrl)return false;
+  try{await fetch(config.webappUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),mode:'no-cors'});return true;}
+  catch(e){return false;}
 }
-async function syncVentasSheets(rows){ await sheetsPost({action:'addVentas',rows}); }
-async function syncMenuSheets(){ await sheetsPost({action:'updateMenu',rows:menu.map(p=>({id:p.id,name:p.name,cat:getCat(p.cat).name,seccion:getCat(p.cat).seccion,price:p.price,stock:p.stock,ilimitado:p.ilimitado}))}); }
-async function syncClientesSheets(){ await sheetsPost({action:'updateClientes',rows:clientes}); }
-async function syncReservasSheets(){ await sheetsPost({action:'updateReservas',rows:reservas}); }
-async function syncTurnoSheets(){ await sheetsPost({action:'syncTurno',turno}); }
-async function syncMesasSheets(){ await sheetsPost({action:'syncMesas',mesas}); }
+async function syncVentasSheets(rows){await sheetsPost({action:'addVentas',rows});}
+async function syncMenuSheets(){await sheetsPost({action:'updateMenu',rows:menu.map(p=>({id:p.id,name:p.name,cat:getCat(p.cat).name,seccion:getCat(p.cat).seccion,price:p.price,stock:p.stock,ilimitado:p.ilimitado}))});}
+async function syncClientesSheets(){await sheetsPost({action:'updateClientes',rows:clientes});}
+async function syncReservasSheets(){await sheetsPost({action:'updateReservas',rows:reservas});}
+async function syncTurnoSheets(){await sheetsPost({action:'syncTurno',turno});}
+async function syncMesasSheets(){await sheetsPost({action:'syncMesas',mesas});}
+async function syncGastosSheets(){await sheetsPost({action:'updateGastos',rows:gastos});}
 async function inicializarSheets(){
-  if(!config.webappUrl){ showToast('Configurá la URL primero'); return; }
-  showToast('Inicializando…');
-  const ok=await sheetsPost({action:'initSheets'});
+  if(!config.webappUrl){showToast('Configurá la URL primero');return;}
+  showToast('Inicializando…');const ok=await sheetsPost({action:'initSheets'});
   showToast(ok?'✓ Hojas creadas':'Error al conectar');
 }
 
@@ -1247,63 +1348,86 @@ async function inicializarSheets(){
 //  CONFIG
 // ══════════════════════════════════════════════════
 function renderSetupBanner(){
-  const connected=!!config.webappUrl;
-  $('gs-dot').classList.toggle('on',connected);
-  $('gs-txt').textContent=connected?'Sheets':'Sin conexión';
-  const d2=$('gs-dot2'); if(d2) d2.classList.toggle('on',connected);
-  const sb=$('setup-banner'); if(sb) sb.innerHTML=connected?'':
+  const c=!!config.webappUrl;
+  $('gs-dot').classList.toggle('on',c);$('gs-txt').textContent=c?'Sheets':'Sin conexión';
+  const d2=$('gs-dot2');if(d2)d2.classList.toggle('on',c);
+  const sb=$('setup-banner');if(sb)sb.innerHTML=c?'':
     `<div class="setup-banner" onclick="goTab('ajustes');setTimeout(()=>toggleAccordion('sheets'),200)">⚡ Conectá Google Sheets — ir a Ajustes</div>`;
-  const am=$('acc-sheets-meta'); if(am) am.textContent=connected?'Conectado':'Sin configurar';
+  const am=$('acc-sheets-meta');if(am)am.textContent=c?'Conectado':'Sin configurar';
 }
 function guardarConfigAdj(){
-  const sheetId=($('cfg-sheet-adj')?.value||'').trim(), webappUrl=($('cfg-url-adj')?.value||'').trim();
-  if(!webappUrl){ showToast('Pegá la URL'); return; }
-  config={sheetId,webappUrl}; localStorage.setItem('config',JSON.stringify(config));
-  renderSetupBanner(); showToast('✓ Configuración guardada'); syncMenuSheets();
+  const sheetId=($('cfg-sheet-adj')?.value||'').trim(),webappUrl=($('cfg-url-adj')?.value||'').trim();
+  if(!webappUrl){showToast('Pegá la URL');return;}
+  config={sheetId,webappUrl};localStorage.setItem('config',JSON.stringify(config));
+  renderSetupBanner();showToast('✓ Guardado');syncMenuSheets();
 }
 function renderAjustesConfig(){
-  if($('cfg-sheet-adj')&&config.sheetId) $('cfg-sheet-adj').value=config.sheetId;
-  if($('cfg-url-adj')&&config.webappUrl) $('cfg-url-adj').value=config.webappUrl;
+  if($('cfg-sheet-adj')&&config.sheetId)$('cfg-sheet-adj').value=config.sheetId;
+  if($('cfg-url-adj')&&config.webappUrl)$('cfg-url-adj').value=config.webappUrl;
 }
-function limpiarVentas(){ ventas=[]; save(); renderDashboard(); renderHistorial(); showToast('✓ Historial limpiado'); }
-
-// ══════════════════════════════════════════════════
-//  STOCK ALERTS (por producto)
-// ══════════════════════════════════════════════════
+function limpiarVentas(){ventas=[];gastos=[];save();renderDashboard();renderHistorial();showToast('✓ Limpiado');}
 function renderStockAlerts(){
-  const el=$('stock-alerts'); if(!el) return;
-  const out=menu.filter(p=>!p.ilimitado&&p.stock<=0);
-  const low=menu.filter(p=>!p.ilimitado&&p.stock>0&&p.stock<=5);
+  const el=$('stock-alerts');if(!el)return;
+  const out=menu.filter(p=>!p.ilimitado&&p.stock<=0),low=menu.filter(p=>!p.ilimitado&&p.stock>0&&p.stock<=5);
   el.innerHTML=(out.length?`<div class="alert-banner crit">⛔ Sin stock: ${out.map(p=>p.name).join(', ')}</div>`:'')
     +(low.length?`<div class="alert-banner">⚠️ Stock bajo: ${low.map(p=>`${p.name} (${p.stock})`).join(', ')}</div>`:'');
 }
 
 // ══════════════════════════════════════════════════
-//  VENTAS (Mesas + Reservas unificado)
+//  GASTOS
+// ══════════════════════════════════════════════════
+function openGastoModal(){
+  $('gasto-desc').value='';$('gasto-monto').value='';
+  $('gasto-fecha').value=today();$('gasto-pago').value='efectivo';
+  $('modal-gasto').classList.add('open');
+  setTimeout(()=>$('gasto-desc').focus(),100);
+}
+function cerrarModalGasto(){$('modal-gasto').classList.remove('open');}
+function closeModalGasto(e){if(e.target===$('modal-gasto'))cerrarModalGasto();}
+function guardarGasto(){
+  const desc=($('gasto-desc').value||'').trim();
+  const monto=parseFloat($('gasto-monto').value)||0;
+  if(!desc||!monto){showToast('Completá descripción y monto');return;}
+  const g={id:'g_'+Date.now(),fecha:$('gasto-fecha').value,hora:nowT(),desc,monto,pago:$('gasto-pago').value};
+  gastos.push(g);save();cerrarModalGasto();renderGastos();syncGastosSheets();
+  showToast('✓ Gasto registrado');
+}
+function renderGastos(){
+  const el=$('gastos-lista');if(!el)return;
+  const lista=[...gastos].sort((a,b)=>b.fecha.localeCompare(a.fecha)||(b.hora||'').localeCompare(a.hora||''));
+  if(!lista.length){el.innerHTML='<div class="empty">No hay gastos registrados</div>';return;}
+  el.innerHTML=lista.map(g=>`<div class="gasto-row">
+    <div class="gasto-info">
+      <div class="gasto-desc">${g.desc}</div>
+      <div class="gasto-meta">${g.fecha} · ${g.pago==='efectivo'?'Efectivo':'Transferencia'}</div>
+    </div>
+    <div class="gasto-monto">−${fmt(g.monto)}</div>
+  </div>`).join('');
+}
+
+// ══════════════════════════════════════════════════
+//  VENTAS (Mesas + Reservas)
 // ══════════════════════════════════════════════════
 function renderVentas(){
-  $('view-mesas').style.display='block'; $('view-pedido').style.display='none';
-  mesaActivaId=null; carrito={};
-  renderStockAlerts(); renderSetupBanner();
-  renderVentasFiltroChips();
-  renderMesasSection();
-  renderReservasSection();
+  $('view-mesas').style.display='block';$('view-pedido').style.display='none';
+  mesaActivaId=null;carrito={};
+  renderStockAlerts();renderSetupBanner();
+  renderVentasFiltroChips();renderMesasSection();renderReservasSection();
 }
-
 function renderVentasFiltroChips(){
-  const tipos=['todos','salon','delivery','takeaway'];
-  const el=$('ventas-filtro-chips'); if(!el) return;
-  el.innerHTML=tipos.map(t=>`<div class="chip${ventasFiltroTipo===t?' active':''}" onclick="setVentasFiltro('${t}')">
-    ${t==='todos'?'Todos':tipoLabel(t)}</div>`).join('');
+  const el=$('ventas-filtro-chips');if(!el)return;
+  ['todos','salon','delivery','takeaway'].forEach(t=>{
+    el.innerHTML=['todos','salon','delivery','takeaway'].map(t=>`<div class="chip${ventasFiltroTipo===t?' active':''}" onclick="setVentasFiltro('${t}')">${t==='todos'?'Todos':tipoLabel(t)}</div>`).join('');
+  });
 }
-function setVentasFiltro(t){ ventasFiltroTipo=t; renderVentasFiltroChips(); renderMesasSection(); renderReservasSection(); }
+function setVentasFiltro(t){ventasFiltroTipo=t;renderVentasFiltroChips();renderMesasSection();renderReservasSection();}
 
 function renderMesasSection(){
-  const container=$('mesas-container'), empty=$('mesas-empty'); if(!container) return;
-  const filtradas=ventasFiltroTipo==='todos'?mesas:mesas.filter(m=>m.tipo===ventasFiltroTipo);
-  if(!filtradas.length){ container.innerHTML=''; empty.style.display='block'; return; }
-  empty.style.display='none';
-  container.innerHTML=`<div class="mesas-grid">${filtradas.map(m=>{
+  const c=$('mesas-container'),e=$('mesas-empty');if(!c)return;
+  const f=ventasFiltroTipo==='todos'?mesas:mesas.filter(m=>m.tipo===ventasFiltroTipo);
+  if(!f.length){c.innerHTML='';e.style.display='block';return;}
+  e.style.display='none';
+  c.innerHTML=`<div class="mesas-grid">${f.map(m=>{
     const items=Object.values(m.items||{}).reduce((s,v)=>s+(v.qty||0),0);
     const total=Object.values(m.items||{}).reduce((s,v)=>s+carritoItemTotal(v),0);
     return `<div class="mesa-card ${items>0?'con-items':'sin-items'}" onclick="abrirMesa('${m.id}')">
@@ -1317,19 +1441,19 @@ function renderMesasSection(){
 }
 
 function renderReservasSection(){
-  const container=$('reservas-container'), empty=$('reservas-empty'); if(!container) return;
+  const c=$('reservas-container'),e=$('reservas-empty');if(!c)return;
   let lista=ventasFiltroTipo==='todos'?reservas:reservas.filter(r=>r.tipo===ventasFiltroTipo);
-  lista=[...lista].sort((a,b)=>{ const fe=a.estado==='cancelada'?1:0,fb=b.estado==='cancelada'?1:0; return fe-fb||(a.fecha||'').localeCompare(b.fecha||''); });
-  if(!lista.length){ container.innerHTML=''; empty.style.display='block'; return; }
-  empty.style.display='none';
-  container.innerHTML=lista.map(r=>{
-    const prodNames=(r.items||[]).map(i=>{ const p=menu.find(x=>x.id==i.prodId); return p?`${p.name}×${i.qty}`:'?'; }).join(', ');
+  lista=[...lista].sort((a,b)=>{const fa=a.estado==='cancelada'?1:0,fb=b.estado==='cancelada'?1:0;return fa-fb||(a.fecha||'').localeCompare(b.fecha||'');});
+  if(!lista.length){c.innerHTML='';e.style.display='block';return;}
+  e.style.display='none';
+  c.innerHTML=lista.map(r=>{
+    const prods=(r.items||[]).map(i=>{const p=menu.find(x=>x.id==i.prodId);return p?`${p.name}×${i.qty}`:'?';}).join(', ');
     const total=(r.items||[]).reduce((s,i)=>s+carritoItemTotal(i),0);
     return `<div class="reserva-card ${r.estado||'pendiente'}">
       <div style="flex-shrink:0"><span class="mesa-tipo-badge ${tipoBadgeClass(r.tipo||'salon')}">${tipoLabel(r.tipo||'salon')}</span></div>
       <div class="reserva-info" style="flex:1;min-width:0">
         <div class="reserva-cliente">${r.nombre||'Sin nombre'}</div>
-        ${prodNames?`<div class="reserva-items">${prodNames}</div>`:''}
+        ${prods?`<div class="reserva-items">${prods}</div>`:''}
         ${total>0?`<div class="reserva-total">${fmt(total)}</div>`:''}
         ${r.fecha?`<div style="font-size:11px;color:var(--ink3)">📅 ${r.fecha}</div>`:''}
         ${r.nota?`<div class="reserva-nota">${r.nota}</div>`:''}
@@ -1343,181 +1467,175 @@ function renderReservasSection(){
   }).join('');
 }
 
-// ── Nueva mesa ──
 function abrirNuevaMesa(){
-  tipoNuevaMesa='salon'; $('nueva-mesa-input').value='';
-  ['salon','delivery','takeaway'].forEach(t=>{ $(`tipo-btn-${t}`).className=`tipo-btn${t===tipoNuevaMesa?' sel-'+t:''}`; });
-  $('modal-nueva-mesa').classList.add('open'); setTimeout(()=>$('nueva-mesa-input').focus(),120);
+  tipoNuevaMesa='salon';$('nueva-mesa-input').value='';
+  ['salon','delivery','takeaway'].forEach(t=>{$(`tipo-btn-${t}`).className=`tipo-btn${t===tipoNuevaMesa?' sel-'+t:''}`;});
+  $('modal-nueva-mesa').classList.add('open');setTimeout(()=>$('nueva-mesa-input').focus(),120);
 }
-function selTipo(t){ tipoNuevaMesa=t; ['salon','delivery','takeaway'].forEach(x=>{ $(`tipo-btn-${x}`).className=`tipo-btn${x===t?' sel-'+x:''}`; }); }
-function cerrarModalNuevaMesa(){ $('modal-nueva-mesa').classList.remove('open'); }
-function closeModalNuevaMesa(e){ if(e.target===$('modal-nueva-mesa')) cerrarModalNuevaMesa(); }
+function selTipo(t){tipoNuevaMesa=t;['salon','delivery','takeaway'].forEach(x=>{$(`tipo-btn-${x}`).className=`tipo-btn${x===t?' sel-'+x:''}`;});}
+function cerrarModalNuevaMesa(){$('modal-nueva-mesa').classList.remove('open');}
+function closeModalNuevaMesa(e){if(e.target===$('modal-nueva-mesa'))cerrarModalNuevaMesa();}
 function confirmarNuevaMesa(){
-  const nombre=$('nueva-mesa-input').value.trim(); if(!nombre){ showToast('Ingresá un nombre'); return; }
+  const nombre=$('nueva-mesa-input').value.trim();if(!nombre){showToast('Ingresá un nombre');return;}
   const m={id:'m_'+Date.now(),nombre,tipo:tipoNuevaMesa,items:{},pago:'ef',apertura:nowISO()};
-  mesas.push(m); save(); syncMesasSheets(); cerrarModalNuevaMesa(); abrirMesa(m.id);
+  mesas.push(m);save();syncMesasSheets();cerrarModalNuevaMesa();abrirMesa(m.id);
 }
 document.addEventListener('DOMContentLoaded',()=>{
-  const el=$('nueva-mesa-input'); if(el) el.addEventListener('keydown',e=>{ if(e.key==='Enter') confirmarNuevaMesa(); });
+  const el=$('nueva-mesa-input');if(el)el.addEventListener('keydown',e=>{if(e.key==='Enter')confirmarNuevaMesa();});
 });
-
 function pedirEliminarMesa(id){
-  const m=mesas.find(x=>x.id===id); if(!m) return;
-  pedirConfirm(`¿Eliminar la mesa "${m.nombre}"? Se perderán los ítems.`,()=>{ mesas=mesas.filter(x=>x.id!==id); save(); syncMesasSheets(); renderVentas(); showToast('Mesa eliminada'); });
+  const m=mesas.find(x=>x.id===id);if(!m)return;
+  pedirConfirm(`¿Eliminar "${m.nombre}"? Se perderán los ítems.`,()=>{mesas=mesas.filter(x=>x.id!==id);save();syncMesasSheets();renderVentas();showToast('Mesa eliminada');});
 }
-
 function abrirMesa(id){
-  const m=mesas.find(x=>x.id===id); if(!m) return;
-  mesaActivaId=id; carrito={};
-  Object.entries(m.items||{}).forEach(([k,v])=>{ carrito[k]={...v}; });
+  const m=mesas.find(x=>x.id===id);if(!m)return;
+  mesaActivaId=id;carrito={};
+  Object.entries(m.items||{}).forEach(([k,v])=>{carrito[k]={...v};});
   pago=m.pago||'ef';
   $('mesa-titulo').textContent=m.nombre;
-  const badge=$('mesa-tipo-badge'); badge.textContent=tipoLabel(m.tipo||'salon'); badge.className=`mesa-tipo-badge ${tipoBadgeClass(m.tipo||'salon')}`;
+  const badge=$('mesa-tipo-badge');badge.textContent=tipoLabel(m.tipo||'salon');badge.className=`mesa-tipo-badge ${tipoBadgeClass(m.tipo||'salon')}`;
   $('btn-confirm').textContent='Cerrar y cobrar';
-  $('view-mesas').style.display='none'; $('view-pedido').style.display='block';
-  renderCargaCats(); renderProdGrid(); renderCart(); setPago(pago);
+  $('view-mesas').style.display='none';$('view-pedido').style.display='block';
+  renderCargaCats();renderProdGrid();renderCart();setPago(pago);
 }
-
 function abrirReservaComoVenta(id){
-  const r=reservas.find(x=>x.id===id); if(!r) return;
-  // Open the pedido view pre-loaded with the reservation items
-  mesaActivaId='reserva_'+id;
-  carrito={};
-  (r.items||[]).forEach((item,i)=>{ carrito[`res_${i}`]={...item}; });
+  const r=reservas.find(x=>x.id===id);if(!r)return;
+  mesaActivaId='reserva_'+id;carrito={};
+  (r.items||[]).forEach((item,i)=>{carrito[`res_${i}`]={...item};});
   pago=r.pago||'ef';
   $('mesa-titulo').textContent=r.nombre;
-  const badge=$('mesa-tipo-badge'); badge.textContent=tipoLabel(r.tipo||'salon'); badge.className=`mesa-tipo-badge ${tipoBadgeClass(r.tipo||'salon')}`;
+  const badge=$('mesa-tipo-badge');badge.textContent=tipoLabel(r.tipo||'salon');badge.className=`mesa-tipo-badge ${tipoBadgeClass(r.tipo||'salon')}`;
   $('btn-confirm').textContent='Cobrar reserva';
-  $('view-mesas').style.display='none'; $('view-pedido').style.display='block';
-  renderCargaCats(); renderProdGrid(); renderCart(); setPago(pago);
+  $('view-mesas').style.display='none';$('view-pedido').style.display='block';
+  renderCargaCats();renderProdGrid();renderCart();setPago(pago);
 }
-
 function volverAMesas(){
-  if(mesaActivaId && !mesaActivaId.startsWith('reserva_')){
-    const m=mesas.find(x=>x.id===mesaActivaId); if(m){ m.items={...carrito}; m.pago=pago; save(); syncMesasSheets(); }
+  if(mesaActivaId&&!mesaActivaId.startsWith('reserva_')){
+    const m=mesas.find(x=>x.id===mesaActivaId);if(m){m.items={...carrito};m.pago=pago;save();syncMesasSheets();}
   }
   renderVentas();
 }
-
 function saveMesaCarrito(){
-  if(!mesaActivaId||mesaActivaId.startsWith('reserva_')) return;
-  const m=mesas.find(x=>x.id===mesaActivaId); if(m){ m.items={...carrito}; save(); syncMesasSheets(); }
+  if(!mesaActivaId||mesaActivaId.startsWith('reserva_'))return;
+  const m=mesas.find(x=>x.id===mesaActivaId);if(m){m.items={...carrito};save();syncMesasSheets();}
 }
 
-async function cerrarMesaOReserva(){
+// ── Operador al cobrar ─────────────────────────────
+function cerrarMesaOReserva(){
+  const items=Object.values(carrito);
+  if(!items.length){showToast('El pedido está vacío');return;}
+  // Ask which operator served this table
+  const sel=$('cobro-operador-sel');if(!sel)return;
+  sel.innerHTML=getOperadoresOpts(true);
+  $('cobro-nuevo-op-wrap').style.display='none';
+  // Store pending data and show operator modal
+  pendingCobroCallback=()=>ejecutarCobro();
+  $('modal-operador-cobro').classList.add('open');
+}
+function onCobroOperadorChange(){
+  const sel=$('cobro-operador-sel');
+  $('cobro-nuevo-op-wrap').style.display=sel?.value==='__nuevo__'?'block':'none';
+}
+function cerrarModalOperadorCobro(){$('modal-operador-cobro').classList.remove('open');pendingCobroCallback=null;}
+function confirmarOperadorCobro(){
+  const sel=$('cobro-operador-sel');
+  let op='';
+  if(sel?.value==='__nuevo__'){op=($('cobro-nuevo-op')?.value||'').trim();}
+  else{op=sel?.value||'';}
+  if(!op){showToast('Seleccioná o ingresá un operador');return;}
+  if(!operadores.includes(op)){operadores.push(op);save();syncOperadoresSheets();}
+  $('modal-operador-cobro').classList.remove('open');
+  ejecutarCobro(op);
+}
+async function ejecutarCobro(operadorCobro){
   const esReserva=mesaActivaId&&mesaActivaId.startsWith('reserva_');
   const items=Object.values(carrito);
-  if(!items.length){ showToast('El pedido está vacío'); return; }
-  const btn=$('btn-confirm'); btn.disabled=true; btn.textContent='Cerrando…';
-  const fecha=today(), hora=nowT(), ts=nowISO();
-  const operador=(turno&&turno.abierto)?turno.operador:'Sin turno';
+  const btn=$('btn-confirm');btn.disabled=true;btn.textContent='Cerrando…';
+  const fecha=today(),hora=nowT(),ts=nowISO();
+  const operador=operadorCobro||(turno&&turno.abierto?turno.operador:'Sin turno');
   const ventaIds=[];
-  let tipoVenta='salon', nombreMesa='';
-
-  if(esReserva){
-    const rid=mesaActivaId.replace('reserva_','');
-    const r=reservas.find(x=>x.id===rid);
-    if(r){ tipoVenta=r.tipo||'salon'; nombreMesa=r.nombre; }
-  } else {
-    const m=mesas.find(x=>x.id===mesaActivaId);
-    if(m){ tipoVenta=m.tipo||'salon'; nombreMesa=m.nombre; }
-  }
-
+  let tipoVenta='salon',nombreMesa='';
+  if(esReserva){const r=reservas.find(x=>x.id===mesaActivaId.replace('reserva_',''));if(r){tipoVenta=r.tipo||'salon';nombreMesa=r.nombre;}}
+  else{const m=mesas.find(x=>x.id===mesaActivaId);if(m){tipoVenta=m.tipo||'salon';nombreMesa=m.nombre;}}
   const nuevas=items.map(item=>{
     const p=menu.find(x=>x.id==item.prodId);
     const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
     const ventaId='v_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
     ventaIds.push(ventaId);
-    // Descontar stock
-    if(p&&!p.ilimitado) p.stock=Math.max(0,(p.stock||0)-item.qty);
-    return {id:ventaId,fecha,hora,timestamp:ts,operador,mesa:nombreMesa,tipo:tipoVenta,
+    if(p&&!p.ilimitado)p.stock=Math.max(0,(p.stock||0)-item.qty);
+    return{id:ventaId,fecha,hora,timestamp:ts,operador,mesa:nombreMesa,tipo:tipoVenta,
       producto:p?p.name:'?',variantes:(item.vars||[]).map(v=>v.nombre).join(', '),
       nota:item.nota||'',categoria:getCat(p?.cat).name,seccion:getCat(p?.cat).seccion,
       cantidad:item.qty,precioBase:item.precio,precioVars:varsExtra,
       total:(item.precio+varsExtra)*item.qty,pago,cat:p?.cat};
   });
-
   ventas.push(...nuevas);
-  if(turno&&turno.abierto) turno.ventasIds=[...(turno.ventasIds||[]),...ventaIds];
-
-  if(esReserva){
-    const rid=mesaActivaId.replace('reserva_','');
-    const r=reservas.find(x=>x.id===rid);
-    if(r){ r.estado='pagada'; r.pago=pago; }
-  } else {
-    mesas=mesas.filter(x=>x.id!==mesaActivaId);
-  }
-
-  save(); syncMesasSheets(); if(turno&&turno.abierto) syncTurnoSheets();
+  if(turno&&turno.abierto)turno.ventasIds=[...(turno.ventasIds||[]),...ventaIds];
+  if(esReserva){const r=reservas.find(x=>x.id===mesaActivaId.replace('reserva_',''));if(r){r.estado='pagada';r.pago=pago;}}
+  else{mesas=mesas.filter(x=>x.id!==mesaActivaId);}
+  save();syncMesasSheets();if(turno&&turno.abierto)syncTurnoSheets();
   const ok=await syncVentasSheets(nuevas);
   showToast(ok?'✓ Venta guardada en Sheets':(config.webappUrl?'✓ Registrada (sin internet)':'✓ Venta registrada'));
-  btn.disabled=false; btn.textContent='Cerrar y cobrar';
+  btn.disabled=false;btn.textContent='Cerrar y cobrar';
   renderVentas();
 }
 
 // ══════════════════════════════════════════════════
-//  CARRITO + VARIANTES (al agregar)
+//  CARRITO + VARIANTES
 // ══════════════════════════════════════════════════
 function renderCargaCats(){
-  const el=$('carga-cats'); if(!el) return;
+  const el=$('carga-cats');if(!el)return;
   const all=[{id:'todos',name:'Todos',color:'#888'},...cats];
-  el.innerHTML=all.map(c=>`<div class="chip${catCarga===c.id?' active':''}" onclick="setCargaCat('${c.id}')">
-    ${c.id!=='todos'?`<span class="chip-dot" style="background:${c.color}"></span>`:''}${c.name}</div>`).join('');
+  el.innerHTML=all.map(c=>`<div class="chip${catCarga===c.id?' active':''}" onclick="setCargaCat('${c.id}')">${c.id!=='todos'?`<span class="chip-dot" style="background:${c.color}"></span>`:''}${c.name}</div>`).join('');
 }
-function setCargaCat(id){ catCarga=id; renderCargaCats(); renderProdGrid(); }
-
+function setCargaCat(id){catCarga=id;renderCargaCats();renderProdGrid();}
 function renderProdGrid(){
-  const el=$('prod-grid'); if(!el) return;
+  const el=$('prod-grid');if(!el)return;
   const list=catCarga==='todos'?menu:menu.filter(p=>p.cat===catCarga);
-  if(!list.length){ el.innerHTML='<div class="empty">No hay productos</div>'; return; }
-  const qtyMap={};
-  Object.values(carrito).forEach(item=>{ qtyMap[item.prodId]=(qtyMap[item.prodId]||0)+item.qty; });
+  if(!list.length){el.innerHTML='<div class="empty">No hay productos</div>';return;}
+  const qtyMap={};Object.values(carrito).forEach(item=>{qtyMap[item.prodId]=(qtyMap[item.prodId]||0)+item.qty;});
   el.innerHTML=list.map(p=>{
-    const qty=qtyMap[p.id]||0; const cat=getCat(p.cat);
-    const st=stockStatus(p); const hasVars=(p.variantes||[]).length>0;
+    const qty=qtyMap[p.id]||0,cat=getCat(p.cat),st=stockStatus(p),hasVars=(p.variantes||[]).length>0;
     return `<div class="prod-card${qty>0?' in-cart':''}${st==='out'?' disabled':''}" onclick="addItem(${p.id})">
       <div class="cat-dot" style="background:${cat.color}"></div>
       <div class="prod-name">${p.name}</div>
       <div class="prod-price">${fmt(p.price)}</div>
-      ${!p.ilimitado&&st==='low'?`<div class="prod-low-txt">⚠ ${p.stock} restantes</div>`:''}
+      ${!p.ilimitado&&st==='low'?`<div class="prod-low-txt">⚠ ${p.stock} restantes`:''}
       ${!p.ilimitado&&st==='out'?'<div class="out-lbl">Agotado</div>':''}
       ${hasVars?`<div class="prod-mods-hint">🔧 Variantes</div>`:''}
       ${qty>0?`<div class="prod-badge">${qty}</div>`:''}
     </div>`;
   }).join('');
 }
-
 function addItem(id){
-  const p=menu.find(x=>x.id===id); if(!p) return;
-  if(!p.ilimitado&&p.stock<=0){ showToast(`Sin stock: ${p.name}`); return; }
-  if((p.variantes||[]).length>0){ abrirModalVariantes(p); }
-  else {
+  const p=menu.find(x=>x.id===id);if(!p)return;
+  if(!p.ilimitado&&p.stock<=0){showToast(`Sin stock: ${p.name}`);return;}
+  if((p.variantes||[]).length>0){abrirModalVariantes(p);}
+  else{
     const key=`${id}_plain`;
-    if(!p.ilimitado&&carrito[key]&&carrito[key].qty>=p.stock){ showToast(`Solo ${p.stock} disponibles`); return; }
-    carrito[key] ? carrito[key].qty++ : (carrito[key]={prodId:id,qty:1,vars:[],nota:'',precio:p.price});
-    saveMesaCarrito(); renderProdGrid(); renderCart();
+    if(!p.ilimitado&&carrito[key]&&carrito[key].qty>=p.stock){showToast(`Solo ${p.stock} disponibles`);return;}
+    carrito[key]?carrito[key].qty++:(carrito[key]={prodId:id,qty:1,vars:[],nota:'',precio:p.price});
+    saveMesaCarrito();renderProdGrid();renderCart();
   }
 }
 function changeQty(key,d){
-  if(!carrito[key]) return; carrito[key].qty+=d;
-  if(carrito[key].qty<=0) delete carrito[key];
-  saveMesaCarrito(); renderProdGrid(); renderCart();
+  if(!carrito[key])return;carrito[key].qty+=d;
+  if(carrito[key].qty<=0)delete carrito[key];
+  saveMesaCarrito();renderProdGrid();renderCart();
 }
-
 function renderCart(){
   const items=Object.entries(carrito);
   const ct=$('cart-total'),ce=$('cart-empty'),cr=$('cart-rows'),bc=$('btn-confirm');
-  if(!ct) return;
-  if(!items.length){ ce.style.display='block'; cr.style.display='none'; ct.textContent='$0'; if(bc) bc.disabled=true; return; }
-  if(bc) bc.disabled=false; ce.style.display='none'; cr.style.display='flex';
+  if(!ct)return;
+  if(!items.length){ce.style.display='block';cr.style.display='none';ct.textContent='$0';if(bc)bc.disabled=true;return;}
+  if(bc)bc.disabled=false;ce.style.display='none';cr.style.display='flex';
   cr.innerHTML=items.map(([key,item])=>{
-    const p=menu.find(x=>x.id==item.prodId); if(!p) return '';
+    const p=menu.find(x=>x.id==item.prodId);if(!p)return'';
     const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
     const sub=(item.precio+varsExtra)*item.qty;
-    const varsStr=(item.vars||[]).map(v=>v.nombre+(v.precio?` +${fmt(v.precio)}`:'')  ).join(' · ');
+    const varsStr=(item.vars||[]).map(v=>v.nombre+(v.precio?` +${fmt(v.precio)}`:'')).join(' · ');
     return `<div class="cart-row">
-      <div class="c-name-wrap">
-        <div class="c-name">${p.name}</div>
+      <div class="c-name-wrap"><div class="c-name">${p.name}</div>
         ${varsStr?`<div class="c-mods">${varsStr}</div>`:''}
         ${item.nota?`<div class="c-nota">${item.nota}</div>`:''}
       </div>
@@ -1531,20 +1649,16 @@ function renderCart(){
   }).join('');
   ct.textContent=fmt(carritoTotalFn(carrito));
 }
-
 function setPago(t){
   pago=t;
-  if(mesaActivaId&&!mesaActivaId.startsWith('reserva_')){ const m=mesas.find(x=>x.id===mesaActivaId); if(m){ m.pago=t; save(); } }
+  if(mesaActivaId&&!mesaActivaId.startsWith('reserva_')){const m=mesas.find(x=>x.id===mesaActivaId);if(m){m.pago=t;save();}}
   $('popt-ef').className='pago-opt'+(t==='ef'?' active':'');
   $('popt-mp').className='pago-opt'+(t==='mp'?' active':'');
 }
-
-// ── Modal variantes (al agregar al carrito) ──
 function abrirModalVariantes(p){
-  prodParaVariantes=p; variantesSeleccionadas={};
-  $('modal-variantes-titulo').textContent=p.name; $('modal-variantes-nota').value='';
-  const el=$('modal-variantes-grupos');
-  el.innerHTML=(p.variantes||[]).map((grupo,gi)=>`
+  prodParaVariantes=p;variantesSeleccionadas={};
+  $('modal-variantes-titulo').textContent=p.name;$('modal-variantes-nota').value='';
+  $('modal-variantes-grupos').innerHTML=(p.variantes||[]).map((grupo,gi)=>`
     <div class="mod-sel-grupo">
       <div class="mod-sel-titulo">${grupo.grupo} <span style="font-size:10px;color:var(--ink3)">${grupo.tipo==='unico'?'(elegí uno)':'(varios)'}</span></div>
       <div class="mod-sel-opciones">${(grupo.opciones||[]).map((op,oi)=>`
@@ -1554,106 +1668,123 @@ function abrirModalVariantes(p){
         </div>`).join('')}
       </div>
     </div>`).join('');
-  actualizarTotalVariantes(); $('modal-variantes').classList.add('open');
+  actualizarTotalVariantes();$('modal-variantes').classList.add('open');
 }
-function cerrarModalVariantes(){ $('modal-variantes').classList.remove('open'); prodParaVariantes=null; }
-function closeModalVariantes(e){ if(e.target===$('modal-variantes')) cerrarModalVariantes(); }
+function cerrarModalVariantes(){$('modal-variantes').classList.remove('open');prodParaVariantes=null;}
+function closeModalVariantes(e){if(e.target===$('modal-variantes'))cerrarModalVariantes();}
 function toggleVariante(gi,oi,tipo){
-  const grupo=(prodParaVariantes.variantes||[])[gi]; if(!grupo) return;
+  const grupo=(prodParaVariantes.variantes||[])[gi];if(!grupo)return;
   const op=grupo.opciones[oi];
-  if(!variantesSeleccionadas[gi]) variantesSeleccionadas[gi]=[];
+  if(!variantesSeleccionadas[gi])variantesSeleccionadas[gi]=[];
   if(tipo==='unico'){
     grupo.opciones.forEach((_,x)=>document.getElementById(`vop-${gi}-${x}`)?.classList.remove('sel'));
     variantesSeleccionadas[gi]=[{nombre:op.nombre,precio:op.precio||0}];
     document.getElementById(`vop-${gi}-${oi}`)?.classList.add('sel');
-  } else {
+  }else{
     const el=document.getElementById(`vop-${gi}-${oi}`);
     const idx=variantesSeleccionadas[gi].findIndex(x=>x.nombre===op.nombre);
-    if(idx>=0){ variantesSeleccionadas[gi].splice(idx,1); el?.classList.remove('sel'); }
-    else { variantesSeleccionadas[gi].push({nombre:op.nombre,precio:op.precio||0}); el?.classList.add('sel'); }
+    if(idx>=0){variantesSeleccionadas[gi].splice(idx,1);el?.classList.remove('sel');}
+    else{variantesSeleccionadas[gi].push({nombre:op.nombre,precio:op.precio||0});el?.classList.add('sel');}
   }
   actualizarTotalVariantes();
 }
 function actualizarTotalVariantes(){
-  if(!prodParaVariantes) return;
+  if(!prodParaVariantes)return;
   const extra=Object.values(variantesSeleccionadas).flat().reduce((s,v)=>s+v.precio,0);
   $('modal-variantes-total').textContent=fmt(prodParaVariantes.price+extra);
 }
 function confirmarVariantes(){
-  if(!prodParaVariantes) return;
+  if(!prodParaVariantes)return;
   const vars=Object.values(variantesSeleccionadas).flat();
   const nota=$('modal-variantes-nota').value.trim();
   const key=`${prodParaVariantes.id}_${vars.map(v=>v.nombre).sort().join(',')}_${Date.now()}`;
   carrito[key]={prodId:prodParaVariantes.id,qty:1,vars,nota,precio:prodParaVariantes.price};
-  cerrarModalVariantes(); saveMesaCarrito(); renderProdGrid(); renderCart();
+  cerrarModalVariantes();saveMesaCarrito();renderProdGrid();renderCart();
 }
 
 // ══════════════════════════════════════════════════
-//  RESERVAS (múltiples productos)
+//  RESERVAS
 // ══════════════════════════════════════════════════
-function popularClienteSelectReserva(){
-  const sel=$('res-cliente'); if(!sel) return;
-  sel.innerHTML=`<option value="">Sin cliente</option>`+clientes.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+function popularClienteSelectReserva(selId){
+  const sel=$('res-cliente');if(!sel)return;
+  sel.innerHTML=`<option value="">Sin cliente</option>`+clientes.map(c=>`<option value="${c.id}"${c.id===selId?' selected':''}>${c.nombre}</option>`).join('');
 }
-function selReservaTipo(t){ tipoNuevaMesaReserva=t; ['salon','delivery','takeaway'].forEach(x=>{ $(`rtipo-btn-${x}`).className=`tipo-btn${x===t?' sel-'+x:''}`; }); }
-function setReservaPago(t){ reservaPago=t; $('rpopt-ef').className='pago-opt'+(t==='ef'?' active':''); $('rpopt-mp').className='pago-opt'+(t==='mp'?' active':''); }
+function selReservaTipo(t){tipoNuevaMesaReserva=t;['salon','delivery','takeaway'].forEach(x=>{$(`rtipo-btn-${x}`).className=`tipo-btn${x===t?' sel-'+x:''}`;});}
+function setReservaPago(t){reservaPago=t;$('rpopt-ef').className='pago-opt'+(t==='ef'?' active':'');$('rpopt-mp').className='pago-opt'+(t==='mp'?' active':'');}
 
 function openReservaModal(id){
-  editReservaId=id; tipoNuevaMesaReserva='salon'; reservaCarrito={}; catReserva='todos';
+  editReservaId=id;tipoNuevaMesaReserva='salon';reservaCarrito={};catReserva='todos';
   popularClienteSelectReserva();
-  ['salon','delivery','takeaway'].forEach(t=>{ $(`rtipo-btn-${t}`).className='tipo-btn'; });
+  ['salon','delivery','takeaway'].forEach(t=>{$(`rtipo-btn-${t}`).className='tipo-btn';});
   $('rtipo-btn-salon').className='tipo-btn sel-salon';
-
   if(id){
-    const r=reservas.find(x=>x.id===id); if(!r) return;
+    const r=reservas.find(x=>x.id===id);if(!r)return;
     tipoNuevaMesaReserva=r.tipo||'salon';
-    ['salon','delivery','takeaway'].forEach(t=>{ $(`rtipo-btn-${t}`).className=`tipo-btn${t===tipoNuevaMesaReserva?' sel-'+t:''}`; });
-    $('res-nombre').value=r.nombre||''; $('res-cliente').value=r.clienteId||'';
-    $('res-fecha').value=r.fecha||''; $('res-estado').value=r.estado||'pendiente';
+    ['salon','delivery','takeaway'].forEach(t=>{$(`rtipo-btn-${t}`).className=`tipo-btn${t===tipoNuevaMesaReserva?' sel-'+t:''}`;});
+    $('res-nombre').value=r.nombre||'';popularClienteSelectReserva(r.clienteId);
+    $('res-fecha').value=r.fecha||'';$('res-estado').value=r.estado||'pendiente';
     $('res-nota').value=r.nota||'';
-    // Restaurar carrito de la reserva
-    (r.items||[]).forEach((item,i)=>{ reservaCarrito[`ri_${i}`]={...item}; });
+    (r.items||[]).forEach((item,i)=>{reservaCarrito[`ri_${i}`]={...item};});
     $('reserva-modal-titulo').textContent='Editar reserva';
     $('reserva-modal-actions').innerHTML=`<button class="btn-cancel" onclick="pedirEliminarReserva('${id}')">Eliminar</button><button class="btn-save" onclick="guardarReserva()">Guardar</button>`;
-  } else {
+  }else{
     $('reserva-modal-titulo').textContent='Nueva reserva';
     ['res-nombre','res-nota'].forEach(fid=>$(fid).value='');
-    $('res-fecha').value=today(); $('res-estado').value='pendiente'; $('res-cliente').value='';
+    $('res-fecha').value=today();$('res-estado').value='pendiente';$('res-cliente').value='';
     $('reserva-modal-actions').innerHTML=`<button class="btn-cancel" onclick="cerrarModalReserva()">Cancelar</button><button class="btn-save" onclick="guardarReserva()">Guardar</button>`;
   }
-
-  renderReservaProductoGrid();
-  renderReservaProdChips();
-  renderReservaCarritoChips();
+  renderReservaProductoGrid();renderReservaProdChips();
   $('modal-reserva').classList.add('open');
+}
+
+// Capturar snapshot del estado del modal reserva para restaurar después de crear cliente
+function captureReservaSnapshot(){
+  return{
+    editReservaId,tipoNuevaMesaReserva,reservaCarrito:{...reservaCarrito},catReserva,
+    nombre:$('res-nombre')?.value||'',clienteId:$('res-cliente')?.value||'',
+    fecha:$('res-fecha')?.value||'',estado:$('res-estado')?.value||'pendiente',
+    nota:$('res-nota')?.value||''
+  };
+}
+function restoreReservaSnapshot(snap){
+  if(!snap)return;
+  editReservaId=snap.editReservaId;tipoNuevaMesaReserva=snap.tipoNuevaMesaReserva;
+  reservaCarrito={...snap.reservaCarrito};catReserva=snap.catReserva;
+  ['salon','delivery','takeaway'].forEach(t=>{$(`rtipo-btn-${t}`).className=`tipo-btn${t===tipoNuevaMesaReserva?' sel-'+t:''}`;});
+  $('res-nombre').value=snap.nombre;
+  $('res-fecha').value=snap.fecha;
+  $('res-estado').value=snap.estado;
+  $('res-nota').value=snap.nota;
+  renderReservaProductoGrid();renderReservaProdChips();
+}
+
+function openClienteDesdeReserva(){
+  // Save reserva state, close reserva modal, open cliente modal
+  reservaSnapshot=captureReservaSnapshot();
+  cerrarModalReserva();
+  openClienteModal(null,'reserva');
 }
 
 function pedirEliminarReserva(id){
   const r=reservas.find(x=>x.id===id);
   cerrarModalReserva();
-  pedirConfirm(`¿Eliminar la reserva "${r?.nombre||''}"?`, ()=>{
-    reservas=reservas.filter(x=>x.id!==id); save(); syncReservasSheets(); renderVentas(); showToast('✓ Reserva eliminada');
-  });
+  pedirConfirm(`¿Eliminar la reserva "${r?.nombre||''}"?`,()=>{reservas=reservas.filter(x=>x.id!==id);save();syncReservasSheets();renderVentas();showToast('✓ Reserva eliminada');});
 }
-
 function renderReservaProdChips(){
-  const el=$('res-prod-chips'); if(!el) return;
-  const reservableCats=cats.filter(c=>c.reservable).sort((a,b)=>a.name.localeCompare(b.name,'es'));
-  const all=[{id:'todos',name:'Todos',color:'#888'},...reservableCats];
-  el.innerHTML=all.map(c=>`<div class="chip${catReserva===c.id?' active':''}" onclick="setCatReserva('${c.id}')">
-    ${c.id!=='todos'?`<span class="chip-dot" style="background:${c.color}"></span>`:''}${c.name}</div>`).join('');
+  const el=$('res-prod-chips');if(!el)return;
+  const rc=cats.filter(c=>c.reservable).sort((a,b)=>a.name.localeCompare(b.name,'es'));
+  const all=[{id:'todos',name:'Todos',color:'#888'},...rc];
+  el.innerHTML=all.map(c=>`<div class="chip${catReserva===c.id?' active':''}" onclick="setCatReserva('${c.id}')">${c.id!=='todos'?`<span class="chip-dot" style="background:${c.color}"></span>`:''}${c.name}</div>`).join('');
 }
-function setCatReserva(id){ catReserva=id; renderReservaProdChips(); renderReservaProductoGrid(); }
-
+function setCatReserva(id){catReserva=id;renderReservaProdChips();renderReservaProductoGrid();}
 function renderReservaProductoGrid(){
-  const el=$('res-prod-grid'); if(!el) return;
-  // Only show products from reservable categories
-  const reservableCatIds=cats.filter(c=>c.reservable).map(c=>c.id);
-  const baseList=menu.filter(p=>reservableCatIds.includes(p.cat));
-  const list=catReserva==='todos'?baseList:baseList.filter(p=>p.cat===catReserva);
-  const qtyMap={}; Object.values(reservaCarrito).forEach(item=>{ qtyMap[item.prodId]=(qtyMap[item.prodId]||0)+item.qty; });
+  const el=$('res-prod-grid');if(!el)return;
+  const rcIds=cats.filter(c=>c.reservable).map(c=>c.id);
+  const base=menu.filter(p=>rcIds.includes(p.cat));
+  const list=catReserva==='todos'?base:base.filter(p=>p.cat===catReserva);
+  const qtyMap={};Object.values(reservaCarrito).forEach(item=>{qtyMap[item.prodId]=(qtyMap[item.prodId]||0)+item.qty;});
   el.innerHTML=list.map(p=>{
-    const qty=qtyMap[p.id]||0; const cat=getCat(p.cat);
+    const qty=qtyMap[p.id]||0,cat=getCat(p.cat);
     return `<div class="prod-card${qty>0?' in-cart':''}" onclick="addItemReserva(${p.id})" style="cursor:pointer">
       <div class="cat-dot" style="background:${cat.color}"></div>
       <div class="prod-name">${p.name}</div>
@@ -1661,82 +1792,77 @@ function renderReservaProductoGrid(){
       ${qty>0?`<div class="prod-badge">${qty}</div>`:''}
     </div>`;
   }).join('');
-  renderReservaCarritoChips();
   $('res-total').textContent=fmt(carritoTotalFn(reservaCarrito));
 }
-
 function addItemReserva(id){
-  const p=menu.find(x=>x.id===id); if(!p) return;
+  const p=menu.find(x=>x.id===id);if(!p)return;
   const key=`${id}_plain`;
   reservaCarrito[key]?reservaCarrito[key].qty++:(reservaCarrito[key]={prodId:id,qty:1,vars:[],nota:'',precio:p.price});
   renderReservaProductoGrid();
 }
-
-function renderReservaCarritoChips(){
-  // Show selected items as small pills above the grid
-}
-
-function cerrarModalReserva(){ $('modal-reserva').classList.remove('open'); }
-function closeModalReserva(e){ if(e.target===$('modal-reserva')) cerrarModalReserva(); }
-
+function cerrarModalReserva(){$('modal-reserva').classList.remove('open');}
+function closeModalReserva(e){if(e.target===$('modal-reserva'))cerrarModalReserva();}
 function guardarReserva(){
-  const nombre=$('res-nombre').value.trim(); if(!nombre){ showToast('Ingresá un nombre'); return; }
-  const clienteId=$('res-cliente').value;
+  const nombre=($('res-nombre')?.value||'').trim();if(!nombre){showToast('Ingresá un nombre');return;}
+  const clienteId=$('res-cliente')?.value;
   const cli=clientes.find(c=>c.id===clienteId);
   const items=Object.values(reservaCarrito).filter(i=>i.qty>0);
   const data={tipo:tipoNuevaMesaReserva,nombre,clienteId,clienteNombre:cli?cli.nombre:'',
-    fecha:$('res-fecha').value,estado:$('res-estado').value,nota:$('res-nota').value.trim(),
+    fecha:$('res-fecha')?.value,estado:$('res-estado')?.value,nota:$('res-nota')?.value.trim(),
     items,pago:reservaPago};
-  if(editReservaId){ Object.assign(reservas.find(x=>x.id===editReservaId),data); }
-  else { reservas.push({id:'res_'+Date.now(),...data}); }
-  save(); cerrarModalReserva(); syncReservasSheets(); renderVentas();
+  if(editReservaId){Object.assign(reservas.find(x=>x.id===editReservaId),data);}
+  else{reservas.push({id:'res_'+Date.now(),...data});}
+  save();cerrarModalReserva();syncReservasSheets();renderVentas();
   showToast(editReservaId?'✓ Reserva actualizada':'✓ Reserva creada');
 }
 
 // ══════════════════════════════════════════════════
-//  DASHBOARD con filtros de fecha
+//  DASHBOARD
 // ══════════════════════════════════════════════════
 function setDashFiltro(f){
   dashFiltro=f;
-  ['hoy','semana','mes','custom'].forEach(x=>{ $(`dfiltro-${x}`)?.classList.toggle('active',x===f); });
+  ['hoy','semana','mes','custom'].forEach(x=>{$(`dfiltro-${x}`)?.classList.toggle('active',x===f);});
   $('dash-custom-range').style.display=f==='custom'?'flex':'none';
-  if(f!=='custom') renderDashboard();
+  if(f!=='custom')renderDashboard();
 }
-
 function renderDashboard(){
-  const {desde,hasta}=dashRango();
+  const{desde,hasta}=dashRango();
   const vh=ventas.filter(v=>v.fecha>=desde&&v.fecha<=hasta);
-  const totalP=vh.reduce((s,v)=>s+v.total,0);
-  const txP=vh.length, promP=txP?Math.round(totalP/txP):0;
+  const vg=gastos.filter(g=>g.fecha>=desde&&g.fecha<=hasta);
+  const totalV=vh.reduce((s,v)=>s+v.total,0);
+  const totalG=vg.reduce((s,g)=>s+g.monto,0);
+  const ganancia=totalV-totalG;
+  const txP=vh.length,promP=txP?Math.round(totalV/txP):0;
+  const ayer=new Date();ayer.setDate(ayer.getDate()-1);
+  const va=ventas.filter(v=>v.fecha===ayer.toISOString().split('T')[0]);
+  const totalAyer=va.reduce((s,v)=>s+v.total,0);
+  const difPct=totalAyer>0?Math.round((totalV-totalAyer)/totalAyer*100):null;
 
-  // Label for bar chart
-  const barTtl=$('bar-chart-titulo');
-  if(barTtl) barTtl.textContent=dashFiltro==='hoy'?'Ventas por hora':dashFiltro==='semana'?'Últimos 7 días':dashFiltro==='mes'?'Últimos 30 días':'Período seleccionado';
-
+  // KPIs
   $('kpi-grid').innerHTML=`
-    <div class="kpi"><div class="kpi-lbl">Total ventas</div><div class="kpi-val">${fmt(totalP)}</div><div class="kpi-sub">${desde===hasta?desde:`${desde} → ${hasta}`}</div></div>
-    <div class="kpi"><div class="kpi-lbl">Transacciones</div><div class="kpi-val">${txP}</div><div class="kpi-sub">prom. ${fmt(promP)}</div></div>
-    <div class="kpi"><div class="kpi-lbl">Clientes</div><div class="kpi-val">${clientes.length}</div><div class="kpi-sub">${reservas.filter(r=>r.fecha>=desde&&r.fecha<=hasta).length} reservas</div></div>
-    <div class="kpi"><div class="kpi-lbl">Reservas período</div><div class="kpi-val">${reservas.filter(r=>r.fecha>=desde&&r.fecha<=hasta&&r.estado==='pagada').length}</div><div class="kpi-sub">pagadas</div></div>`;
+    <div class="kpi"><div class="kpi-lbl">Total ventas</div><div class="kpi-val">${fmt(totalV)}</div><div class="kpi-sub ${difPct!==null?(difPct>=0?'kpi-up':'kpi-dn'):''}">${difPct!==null?(difPct>=0?'+':'')+difPct+'%':''} vs ayer</div></div>
+    <div class="kpi"><div class="kpi-lbl">Gastos</div><div class="kpi-val" style="color:var(--red)">${fmt(totalG)}</div><div class="kpi-sub">${vg.length} registros</div></div>
+    <div class="kpi"><div class="kpi-lbl">Ganancia neta</div><div class="kpi-val" style="color:${ganancia>=0?'var(--green)':'var(--red)'}">${fmt(ganancia)}</div><div class="kpi-sub">ventas − gastos</div></div>
+    <div class="kpi"><div class="kpi-lbl">Ticket promedio</div><div class="kpi-val">${fmt(promP)}</div><div class="kpi-sub">${txP} transacciones</div></div>`;
 
-  const cafe=vh.filter(v=>getCat(v.cat).seccion==='cafeteria').reduce((s,v)=>s+v.total,0);
-  const cocina=vh.filter(v=>getCat(v.cat).seccion==='cocina').reduce((s,v)=>s+v.total,0);
+  // Resultado financiero
   $('seccion-split').innerHTML=`
-    <div class="seccion-card"><div class="seccion-lbl">☕ Cafetería</div><div class="seccion-val">${fmt(cafe)}</div><div class="seccion-sub">${vh.filter(v=>getCat(v.cat).seccion==='cafeteria').length} ítems</div></div>
-    <div class="seccion-card"><div class="seccion-lbl">🍳 Cocina</div><div class="seccion-val">${fmt(cocina)}</div><div class="seccion-sub">${vh.filter(v=>getCat(v.cat).seccion==='cocina').length} ítems</div></div>`;
+    <div class="seccion-card"><div class="seccion-lbl">☕ Cafetería</div><div class="seccion-val">${fmt(vh.filter(v=>getCat(v.cat).seccion==='cafeteria').reduce((s,v)=>s+v.total,0))}</div><div class="seccion-sub">${vh.filter(v=>getCat(v.cat).seccion==='cafeteria').length} ítems</div></div>
+    <div class="seccion-card"><div class="seccion-lbl">🍳 Cocina</div><div class="seccion-val">${fmt(vh.filter(v=>getCat(v.cat).seccion==='cocina').reduce((s,v)=>s+v.total,0))}</div><div class="seccion-sub">${vh.filter(v=>getCat(v.cat).seccion==='cocina').length} ítems</div></div>`;
 
-  // Bar chart: 7 días o período
-  const dias7=[]; const lbls7=[];
-  for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); dias7.push(d.toISOString().split('T')[0]); lbls7.push(i===0?'Hoy':['D','L','M','X','J','V','S'][d.getDay()]); }
+  // Bar chart 7 días
+  const dias7=[],lbls7=[];
+  for(let i=6;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);dias7.push(d.toISOString().split('T')[0]);lbls7.push(i===0?'Hoy':['D','L','M','X','J','V','S'][d.getDay()]);}
   const sem=dias7.map(f=>ventas.filter(v=>v.fecha===f).reduce((s,v)=>s+v.total,0));
   const maxV=Math.max(...sem,1);
+  const barTtl=$('bar-chart-titulo');if(barTtl)barTtl.textContent='Últimos 7 días';
   $('bar-semana').innerHTML=sem.map((v,i)=>`<div class="bar-col" style="gap:3px">
     ${v>0?`<span class="bar-monto">${fmtK(v)}</span>`:'<span class="bar-monto"></span>'}
     <div class="bar-fill${i===6?' today':v===maxV&&v>0?' hi':''}" style="height:${Math.round(v/maxV*60)}px"></div>
     <span class="bar-lbl">${lbls7[i]}</span></div>`).join('');
 
   // Top productos
-  const conteo={}; vh.forEach(v=>{conteo[v.producto]=(conteo[v.producto]||0)+v.cantidad});
+  const conteo={};vh.forEach(v=>{conteo[v.producto]=(conteo[v.producto]||0)+v.cantidad;});
   const top=Object.entries(conteo).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([n,c])=>({n,c}));
   const maxC=top[0]?.c||1;
   $('top-list').innerHTML=top.length?top.map((t,i)=>`<div class="top-row"><span class="top-rank">${i+1}</span><span class="top-name">${t.n}</span>
@@ -1746,47 +1872,52 @@ function renderDashboard(){
   // Ef vs MP
   const ef=vh.filter(v=>v.pago==='ef').reduce((s,v)=>s+v.total,0);
   const mp=vh.filter(v=>v.pago==='mp').reduce((s,v)=>s+v.total,0);
-  const tot2=ef+mp||1, pE=Math.round(ef/tot2*100);
+  const tot2=ef+mp||1,pE=Math.round(ef/tot2*100);
   $('split-track').innerHTML=`<div class="split-ef" style="width:${pE}%"></div><div class="split-mp" style="width:${100-pE}%"></div>`;
   $('split-stats').innerHTML=`
     <div class="split-stat"><div class="split-lbl"><span class="sdot" style="background:var(--orange)"></span>Efectivo</div><div class="split-pct">${pE}%</div><div class="split-monto">${fmt(ef)}</div></div>
     <div class="split-stat"><div class="split-lbl"><span class="sdot" style="background:var(--orange-mid)"></span>Mercado Pago</div><div class="split-pct">${100-pE}%</div><div class="split-monto">${fmt(mp)}</div></div>`;
 
   // Ventas por cat
-  const catRev={}; vh.forEach(v=>{catRev[v.cat]=(catRev[v.cat]||0)+v.total});
-  const catData=Object.entries(catRev).sort((a,b)=>b[1]-a[1]).map(([c,t])=>({cat:c,t}));
-  const maxT=catData[0]?.t||1;
-  $('cat-rev').innerHTML=catData.length?catData.map(d=>{ const c=getCat(d.cat); return `<div class="cat-rev-row"><div class="cdot2" style="background:${c.color}"></div><span class="cat-rev-name">${c.name}</span>
-    <div class="cat-bar-bg"><div class="cat-bar-fill" style="width:${Math.round(d.t/maxT*100)}%;background:${c.color}"></div></div>
-    <span class="cat-rev-monto">${fmt(d.t)}</span></div>`; }).join(''):'<div style="font-size:12px;color:var(--ink3);text-align:center;padding:12px">Sin datos</div>';
+  const catRev={};vh.forEach(v=>{catRev[v.cat]=(catRev[v.cat]||0)+v.total;});
+  const catData=Object.entries(catRev).sort((a,b)=>b[1]-a[1]);const maxT=catData[0]?.[1]||1;
+  $('cat-rev').innerHTML=catData.length?catData.map(([c,t])=>{const cat=getCat(c);return`<div class="cat-rev-row"><div class="cdot2" style="background:${cat.color}"></div><span class="cat-rev-name">${cat.name}</span>
+    <div class="cat-bar-bg"><div class="cat-bar-fill" style="width:${Math.round(t/maxT*100)}%;background:${cat.color}"></div></div>
+    <span class="cat-rev-monto">${fmt(t)}</span></div>`;}).join(''):'<div style="font-size:12px;color:var(--ink3);text-align:center;padding:12px">Sin datos</div>';
 
   // Ingeniería de menú
-  const prodStats={}; vh.forEach(v=>{if(!prodStats[v.producto])prodStats[v.producto]={nombre:v.producto,qty:0,rev:0,cat:v.cat};prodStats[v.producto].qty+=v.cantidad;prodStats[v.producto].rev+=v.total;});
+  const prodStats={};vh.forEach(v=>{if(!prodStats[v.producto])prodStats[v.producto]={nombre:v.producto,qty:0,rev:0,cat:v.cat};prodStats[v.producto].qty+=v.cantidad;prodStats[v.producto].rev+=v.total;});
   const vals=Object.values(prodStats);
   const avgQty=vals.reduce((s,p)=>s+p.qty,0)/(vals.length||1);
   const avgRev=vals.reduce((s,p)=>s+(p.qty?p.rev/p.qty:0),0)/(vals.length||1);
   const quads={estrellas:[],caballos:[],rompecabezas:[],perros:[]};
-  vals.forEach(p=>{ const hi=p.qty>=avgQty, hr=(p.qty?p.rev/p.qty:0)>=avgRev;
-    quads[hi&&hr?'estrellas':hi?'caballos':hr?'rompecabezas':'perros'].push({n:p.nombre,qty:p.qty}); });
+  vals.forEach(p=>{const hi=p.qty>=avgQty,hr=(p.qty?p.rev/p.qty:0)>=avgRev;quads[hi&&hr?'estrellas':hi?'caballos':hr?'rompecabezas':'perros'].push({n:p.nombre,qty:p.qty});});
   const quadDef=[{key:'estrellas',emoji:'⭐',label:'Estrellas',bg:'var(--green-bg)'},{key:'caballos',emoji:'🐴',label:'Caballos',bg:'var(--blue-bg)'},{key:'rompecabezas',emoji:'🧩',label:'Rompecabezas',bg:'var(--amber-bg)'},{key:'perros',emoji:'🐶',label:'Perros',bg:'var(--red-bg)'}];
   $('menu-eng-grid').innerHTML=quadDef.map(q=>`<div class="menu-eng-quad" style="background:${q.bg};border-color:transparent">
     <div class="quad-titulo">${q.emoji} ${q.label}</div>
     ${quads[q.key].length?quads[q.key].slice(0,5).map(p=>`<div class="quad-item"><span>${p.n}</span><span>${p.qty}ud</span></div>`).join(''):'<div style="font-size:11px;color:var(--ink3)">Sin datos</div>'}
   </div>`).join('');
+
+  // Resultado financiero
+  const resEl=$('dash-resultado');
+  if(resEl)resEl.innerHTML=`
+    <div class="resultado-row"><span class="resultado-lbl">💰 Ventas</span><span class="resultado-val pos">${fmt(totalV)}</span></div>
+    <div class="resultado-row"><span class="resultado-lbl">💸 Gastos</span><span class="resultado-val neg">−${fmt(totalG)}</span></div>
+    <div class="resultado-row"><span class="resultado-lbl" style="font-weight:500">Ganancia neta</span><span class="resultado-val total ${ganancia>=0?'pos':'neg'}">${fmt(ganancia)}</span></div>`;
 }
 
 // ══════════════════════════════════════════════════
 //  HISTORIAL
 // ══════════════════════════════════════════════════
-function renderHistorial(){
-  const byF={};
-  ventas.forEach(v=>{if(!byF[v.fecha])byF[v.fecha]=[];byF[v.fecha].push(v);});
+function renderHistorial(){renderHistVentas();}
+function renderHistVentas(){
+  const byF={};ventas.forEach(v=>{if(!byF[v.fecha])byF[v.fecha]=[];byF[v.fecha].push(v);});
   const entries=Object.entries(byF).sort((a,b)=>b[0].localeCompare(a[0]));
-  if(!entries.length){ $('hist-list').innerHTML='<div class="empty">No hay ventas registradas</div>'; return; }
+  if(!entries.length){$('hist-list').innerHTML='<div class="empty">No hay ventas registradas</div>';return;}
   $('hist-list').innerHTML=entries.map(([fecha,rows],i)=>{
     const total=rows.reduce((s,v)=>s+v.total,0);
-    const ef=rows.filter(v=>v.pago==='ef').length, mp=rows.filter(v=>v.pago==='mp').length;
-    const items={}; rows.forEach(v=>{items[v.producto]=(items[v.producto]||0)+v.cantidad;});
+    const ef=rows.filter(v=>v.pago==='ef').length,mp=rows.filter(v=>v.pago==='mp').length;
+    const items={};rows.forEach(v=>{items[v.producto]=(items[v.producto]||0)+v.cantidad;});
     const d=new Date(fecha+'T12:00:00');
     return `<div class="hist-item">
       <div class="hist-hdr" onclick="toggleHist(${i})">
@@ -1794,22 +1925,21 @@ function renderHistorial(){
         <div class="hist-right"><span class="hist-total">${fmt(total)}</span><span class="hist-arr" id="ha-${i}">▾</span></div>
       </div>
       <div class="hist-detail" id="hd-${i}">
-        ${Object.entries(items).map(([prod,qty])=>{ const sub=rows.filter(v=>v.producto===prod).reduce((s,v)=>s+(v.total||0),0);
-          return `<div class="hist-row2"><span>${prod} ×${qty}</span><span>${fmt(sub)}</span></div>`;}).join('')}
+        ${Object.entries(items).map(([prod,qty])=>{const sub=rows.filter(v=>v.producto===prod).reduce((s,v)=>s+(v.total||0),0);return`<div class="hist-row2"><span>${prod} ×${qty}</span><span>${fmt(sub)}</span></div>`;}).join('')}
       </div>
     </div>`;
   }).join('');
 }
-function toggleHist(i){ const d=$('hd-'+i),a=$('ha-'+i); const open=d.classList.toggle('open'); a.classList.toggle('open',open); }
+function toggleHist(i){const d=$('hd-'+i),a=$('ha-'+i);const open=d.classList.toggle('open');a.classList.toggle('open',open);}
 
 // ══════════════════════════════════════════════════
 //  CLIENTES
 // ══════════════════════════════════════════════════
 function renderClientesTab(){
-  const el=$('clientes-lista-tab'); if(!el) return;
+  const el=$('clientes-lista-tab');if(!el)return;
   const q=($('cliente-search')?.value||'').toLowerCase();
   const lista=clientes.filter(c=>!q||(c.nombre||'').toLowerCase().includes(q)||(c.telefono||'').includes(q));
-  if(!lista.length){ el.innerHTML='<div class="empty">No hay clientes</div>'; return; }
+  if(!lista.length){el.innerHTML='<div class="empty">No hay clientes</div>';return;}
   el.innerHTML=lista.map(c=>`<div class="cliente-row" onclick="openClienteModal('${c.id}')">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div class="cliente-nombre">${c.nombre}</div>
@@ -1819,35 +1949,52 @@ function renderClientesTab(){
     ${c.preferencias?`<div style="font-size:11px;color:var(--blue);margin-top:3px">★ ${c.preferencias}</div>`:''}
   </div>`).join('');
 }
-
 function openClienteModal(id,retorno){
-  editClienteId=id; clienteModalRetorno=retorno||null;
+  editClienteId=id;clienteModalRetorno=retorno||null;
   if(id){
-    const c=clientes.find(x=>x.id===id); if(!c) return;
+    const c=clientes.find(x=>x.id===id);if(!c)return;
     $('cliente-modal-titulo').textContent='Editar cliente';
-    $('cli-nombre').value=c.nombre||''; $('cli-tel').value=c.telefono||''; $('cli-email').value=c.email||''; $('cli-alergias').value=c.alergias||''; $('cli-prefs').value=c.preferencias||'';
+    $('cli-nombre').value=c.nombre||'';$('cli-tel').value=c.telefono||'';$('cli-email').value=c.email||'';$('cli-alergias').value=c.alergias||'';$('cli-prefs').value=c.preferencias||'';
     $('cliente-modal-actions').innerHTML=`<button class="btn-cancel" onclick="pedirEliminarCliente('${id}')">Eliminar</button><button class="btn-save" onclick="guardarCliente()">Guardar</button>`;
-  } else {
+  }else{
     $('cliente-modal-titulo').textContent='Nuevo cliente';
     ['cli-nombre','cli-tel','cli-email','cli-alergias','cli-prefs'].forEach(fid=>$(fid).value='');
     $('cliente-modal-actions').innerHTML=`<button class="btn-cancel" onclick="cerrarModalCliente()">Cancelar</button><button class="btn-save" onclick="guardarCliente()">Guardar</button>`;
   }
-  $('modal-cliente').classList.add('open'); setTimeout(()=>$('cli-nombre').focus(),100);
+  $('modal-cliente').classList.add('open');setTimeout(()=>$('cli-nombre').focus(),100);
 }
 function pedirEliminarCliente(id){
-  const c=clientes.find(x=>x.id===id);
-  cerrarModalCliente();
-  pedirConfirm(`¿Eliminar a "${c?.nombre||''}"?`, ()=>{ clientes=clientes.filter(x=>x.id!==id); save(); renderClientesTab(); syncClientesSheets(); showToast('✓ Cliente eliminado'); });
+  const c=clientes.find(x=>x.id===id);cerrarModalCliente();
+  pedirConfirm(`¿Eliminar a "${c?.nombre||''}"?`,()=>{clientes=clientes.filter(x=>x.id!==id);save();renderClientesTab();syncClientesSheets();showToast('✓ Cliente eliminado');});
 }
-function cerrarModalCliente(){ $('modal-cliente').classList.remove('open'); clienteModalRetorno=null; }
-function closeModalCliente(e){ if(e.target===$('modal-cliente')) cerrarModalCliente(); }
+function cerrarModalCliente(){$('modal-cliente').classList.remove('open');clienteModalRetorno=null;}
+function closeModalCliente(e){if(e.target===$('modal-cliente'))cerrarModalCliente();}
 function guardarCliente(){
-  const nombre=$('cli-nombre').value.trim(); if(!nombre){ showToast('Ingresá el nombre'); return; }
+  const nombre=($('cli-nombre')?.value||'').trim();if(!nombre){showToast('Ingresá el nombre');return;}
   const data={nombre,telefono:$('cli-tel').value.trim(),email:$('cli-email').value.trim(),alergias:$('cli-alergias').value.trim(),preferencias:$('cli-prefs').value.trim()};
-  if(editClienteId){ Object.assign(clientes.find(x=>x.id===editClienteId),data); }
-  else { clientes.push({id:'cli_'+Date.now(),...data,visitas:[]}); }
-  save(); cerrarModalCliente(); renderClientesTab(); syncClientesSheets();
-  if(clienteModalRetorno==='reserva'){ popularClienteSelectReserva(); $('modal-reserva').classList.add('open'); }
+  let newId=null;
+  if(editClienteId){Object.assign(clientes.find(x=>x.id===editClienteId),data);}
+  else{newId='cli_'+Date.now();clientes.push({id:newId,...data,visitas:[]});}
+  save();cerrarModalCliente();renderClientesTab();syncClientesSheets();
+  // Si venía de reserva: reabrir modal reserva con datos restaurados
+  if(clienteModalRetorno==='reserva'&&reservaSnapshot){
+    const snap=reservaSnapshot;reservaSnapshot=null;
+    // Reopen reserva modal
+    editReservaId=snap.editReservaId;tipoNuevaMesaReserva=snap.tipoNuevaMesaReserva;
+    reservaCarrito={...snap.reservaCarrito};catReserva=snap.catReserva;
+    $('res-nombre').value=snap.nombre;
+    $('res-fecha').value=snap.fecha;
+    $('res-estado').value=snap.estado;
+    $('res-nota').value=snap.nota;
+    popularClienteSelectReserva(newId||snap.clienteId);
+    renderReservaProductoGrid();renderReservaProdChips();
+    $('reserva-modal-titulo').textContent=snap.editReservaId?'Editar reserva':'Nueva reserva';
+    $('reserva-modal-actions').innerHTML=snap.editReservaId?
+      `<button class="btn-cancel" onclick="pedirEliminarReserva('${snap.editReservaId}')">Eliminar</button><button class="btn-save" onclick="guardarReserva()">Guardar</button>`:
+      `<button class="btn-cancel" onclick="cerrarModalReserva()">Cancelar</button><button class="btn-save" onclick="guardarReserva()">Guardar</button>`;
+    ['salon','delivery','takeaway'].forEach(t=>{$(`rtipo-btn-${t}`).className=`tipo-btn${t===tipoNuevaMesaReserva?' sel-'+t:''}`;});
+    $('modal-reserva').classList.add('open');
+  }
   showToast(editClienteId?'✓ Cliente actualizado':'✓ Cliente agregado');
 }
 
@@ -1855,15 +2002,13 @@ function guardarCliente(){
 //  AJUSTES
 // ══════════════════════════════════════════════════
 function renderAjustes(){
-  renderCatMgr(); renderMenuAdm(); renderAjustesConfig(); renderSetupBanner();
-  const am=$('acc-menu-meta'); if(am) am.textContent=`${menu.length} productos · ${cats.length} categorías`;
+  renderCatMgr();renderMenuAdm();renderAjustesConfig();renderSetupBanner();
+  const am=$('acc-menu-meta');if(am)am.textContent=`${menu.length} productos · ${cats.length} categorías`;
 }
-
-// ── CATEGORÍAS ──
 function renderCatMgr(){
-  // Sort alphabetically but render with original index for editing
+  const el=$('cat-mgr');if(!el)return;
   const sorted=[...cats].map((c,i)=>({...c,_i:i})).sort((a,b)=>a.name.localeCompare(b.name,'es'));
-  $('cat-mgr').innerHTML=sorted.map(c=>`
+  el.innerHTML=sorted.map(c=>`
     <div>
       <div class="cat-mgr-row">
         <div class="cat-swatch" style="background:${c.color}" onclick="toggleCP(${c._i})"></div>
@@ -1873,125 +2018,97 @@ function renderCatMgr(){
           <option value="cocina"${c.seccion==='cocina'?' selected':''}>🍳 Cocina</option>
         </select>
         <label class="cat-reserva-toggle" title="Aparece en Reservas">
-          <input type="checkbox" ${c.reservable?'checked':''} onchange="setCatReservable(${c._i},this.checked)">
-          📋
+          <input type="checkbox" ${c.reservable?'checked':''} onchange="setCatReservable(${c._i},this.checked)"> 📋
         </label>
         <button class="cat-del" onclick="pedirConfirm('¿Eliminar categoría ${c.name}?',()=>deleteCat(${c._i}))">×</button>
       </div>
-      <div class="color-picker-wrap" id="cp-${i}">
-        <div class="color-dots">${PRESET_COLORS.map(col=>`<div class="cdot${c.color===col?' sel':''}" style="background:${col}" onclick="setCatColor(${i},'${col}')"></div>`).join('')}</div>
+      <div class="color-picker-wrap" id="cp-${c._i}">
+        <div class="color-dots">${PRESET_COLORS.map(col=>`<div class="cdot${c.color===col?' sel':''}" style="background:${col}" onclick="setCatColor(${c._i},'${col}')"></div>`).join('')}</div>
       </div>
     </div>`).join('');
 }
-function toggleCP(i){ document.querySelectorAll('.color-picker-wrap').forEach((el,j)=>{if(j!==i)el.classList.remove('open');}); document.getElementById('cp-'+i).classList.toggle('open'); }
-function setCatColor(i,col){ cats[i].color=col; save(); renderCatMgr(); renderCargaCats(); document.getElementById('cp-'+i).classList.remove('open'); showToast('Color actualizado'); }
-function renameCat(i,val){ const v=val.trim(); if(!v||cats[i].name===v) return; cats[i].name=v; save(); renderCargaCats(); populateCatSelect(); }
-function setSeccion(i,val){ cats[i].seccion=val; save(); }
-function deleteCat(i){ const c=cats[i]; if(menu.some(p=>p.cat===c.id)){ showToast(`No se puede — tiene productos`); return; } cats.splice(i,1); save(); renderCatMgr(); renderCargaCats(); showToast('Categoría eliminada'); }
-function addCat(){ const id='cat_'+Date.now(); cats.push({id,name:'Nueva categoría',color:PRESET_COLORS[cats.length%PRESET_COLORS.length],seccion:'cafeteria'}); save(); renderCatMgr(); renderCargaCats(); setTimeout(()=>{ const ins=document.querySelectorAll('.cat-name-in'); const last=ins[ins.length-1]; if(last){last.focus();last.select();} },50); }
-function addCatFromModal(){ const n=prompt('Nombre de la nueva categoría:',''); if(!n?.trim()) return; const id='cat_'+Date.now(); cats.push({id,name:n.trim(),color:PRESET_COLORS[cats.length%PRESET_COLORS.length],seccion:'cafeteria'}); save(); populateCatSelect(); $('m-cat').value=id; }
-
-// ── PRODUCTOS ──
-
-function adjProdStock(id, d){
-  const p=menu.find(x=>x.id===id); if(!p||p.ilimitado) return;
-  p.stock=Math.max(0,(p.stock||0)+d); save(); renderMenuAdm(); renderStockAlerts(); syncMenuSheets();
+function toggleCP(i){document.querySelectorAll('.color-picker-wrap').forEach((el,j)=>{if(j!==i)el.classList.remove('open');});document.getElementById('cp-'+i)?.classList.toggle('open');}
+function setCatColor(i,col){cats[i].color=col;save();renderCatMgr();renderCargaCats();document.getElementById('cp-'+i)?.classList.remove('open');showToast('Color actualizado');}
+function renameCat(i,val){const v=val.trim();if(!v||cats[i]?.name===v)return;cats[i].name=v;save();renderCargaCats();populateCatSelect();}
+function setSeccion(i,val){if(cats[i])cats[i].seccion=val;save();}
+function setCatReservable(i,checked){if(cats[i])cats[i].reservable=checked;save();showToast(checked?'✓ Categoría reservable':'Categoría sin reserva');}
+function deleteCat(i){const c=cats[i];if(menu.some(p=>p.cat===c.id)){showToast('No se puede — tiene productos');return;}cats.splice(i,1);save();renderCatMgr();renderCargaCats();showToast('Categoría eliminada');}
+function addCat(){
+  // Open accordion if closed
+  const body=$('acc-body-menu');if(body&&!body.classList.contains('open')){toggleAccordion('menu');}
+  // Switch to cats tab
+  switchMenuTab('cats');
+  const id='cat_'+Date.now();cats.push({id,name:'Nueva categoría',color:PRESET_COLORS[cats.length%PRESET_COLORS.length],seccion:'cafeteria',reservable:false});
+  save();renderCatMgr();renderCargaCats();
+  setTimeout(()=>{const ins=document.querySelectorAll('.cat-name-in');const last=ins[ins.length-1];if(last){last.focus();last.select();}},100);
 }
-function setProdStock(id, val){
-  const p=menu.find(x=>x.id===id); if(!p) return;
-  p.stock=Math.max(0,parseInt(val)||0); save(); renderMenuAdm(); renderStockAlerts(); syncMenuSheets();
-}
-function toggleProdIlimitado(id, checked){
-  const p=menu.find(x=>x.id===id); if(!p) return;
-  p.ilimitado=checked; save(); renderMenuAdm(); renderStockAlerts(); syncMenuSheets();
-}
-function setCatReservable(i, checked){
-  cats[i].reservable=checked; save(); showToast(checked?'✓ Categoría reservable':'Categoría sin reserva');
-}
-function populateCatSelect(){ $('m-cat').innerHTML=cats.map(c=>`<option value="${c.id}">${c.name}</option>`).join(''); }
-function toggleIlimitado(){ const ilim=$('m-ilimitado')?.checked; $('m-stock-wrap').style.display=ilim?'none':'block'; }
+function addCatFromModal(){const n=prompt('Nombre de la nueva categoría:','');if(!n?.trim())return;const id='cat_'+Date.now();cats.push({id,name:n.trim(),color:PRESET_COLORS[cats.length%PRESET_COLORS.length],seccion:'cafeteria',reservable:false});save();populateCatSelect();$('m-cat').value=id;}
+function populateCatSelect(){const el=$('m-cat');if(el)el.innerHTML=cats.sort((a,b)=>a.name.localeCompare(b.name,'es')).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');}
+function toggleIlimitado(){const ilim=$('m-ilimitado')?.checked;$('m-stock-wrap').style.display=ilim?'none':'block';}
+function adjProdStock(id,d){const p=menu.find(x=>x.id===id);if(!p||p.ilimitado)return;p.stock=Math.max(0,(p.stock||0)+d);save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
+function setProdStock(id,val){const p=menu.find(x=>x.id===id);if(!p)return;p.stock=Math.max(0,parseInt(val)||0);save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
+function toggleProdIlimitado(id,checked){const p=menu.find(x=>x.id===id);if(!p)return;p.ilimitado=checked;save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
 
 function renderMenuAdm(){
+  const el=$('menu-adm');if(!el)return;
   const sorted=[...menu].sort((a,b)=>a.name.localeCompare(b.name,'es'));
-  $('menu-adm').innerHTML=sorted.map(p=>{ const cat=getCat(p.cat); return `<div class="prod-adm-row">
+  el.innerHTML=sorted.map(p=>{const cat=getCat(p.cat);return`<div class="prod-adm-row">
     <div style="width:8px;height:8px;border-radius:50%;background:${cat.color};flex-shrink:0"></div>
     <span class="prod-adm-nombre">${p.name}</span>
     <span class="prod-adm-precio">${fmt(p.price)}</span>
     <div class="prod-adm-stock-ctrl" style="${p.ilimitado?'display:none':''}">
       <button class="qty-btn" onclick="adjProdStock(${p.id},-1)">−</button>
-      <input class="prod-adm-stock-num" type="number" value="${p.stock}" min="0"
-        onchange="setProdStock(${p.id},this.value)" onblur="setProdStock(${p.id},this.value)">
+      <input class="prod-adm-stock-num" type="number" value="${p.stock}" min="0" onchange="setProdStock(${p.id},this.value)" onblur="setProdStock(${p.id},this.value)">
       <button class="qty-btn" onclick="adjProdStock(${p.id},1)">+</button>
     </div>
-    <label class="ilim-toggle" title="Stock ilimitado">
-      <input type="checkbox" ${p.ilimitado?'checked':''} onchange="toggleProdIlimitado(${p.id},this.checked)"> ∞
-    </label>
+    <label class="ilim-toggle"><input type="checkbox" ${p.ilimitado?'checked':''} onchange="toggleProdIlimitado(${p.id},this.checked)"> ∞</label>
     <div class="icon-btn" onclick="openProdModal(${p.id})">
       <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2l3 3L5 14H2v-3L11 2z"/></svg>
     </div>
-  </div>`; }).join('');
+  </div>`;}).join('');
 }
 
-// Variantes locales al modal de producto
 let _variantesEdit=[];
-
 function openProdModal(id){
-  editId=id; populateCatSelect(); _variantesEdit=[];
-  // Reset variantes UI
-  $('variantes-arr').className='variantes-toggle-arr';
-  $('variantes-body').className='variantes-body';
-
+  editId=id;populateCatSelect();_variantesEdit=[];
+  $('variantes-arr').className='variantes-toggle-arr';$('variantes-body').className='variantes-body';
   if(id){
-    const p=menu.find(x=>x.id===id); if(!p) return;
+    const p=menu.find(x=>x.id===id);if(!p)return;
     $('prod-modal-title').textContent='Editar producto';
-    $('m-nombre').value=p.name||''; $('m-precio').value=p.price; $('m-cat').value=p.cat;
-    $('m-stock').value=p.stock||0; $('m-ilimitado').checked=!!p.ilimitado;
+    $('m-nombre').value=p.name||'';$('m-precio').value=p.price;$('m-cat').value=p.cat;
+    $('m-stock').value=p.stock||0;$('m-ilimitado').checked=!!p.ilimitado;
     $('m-stock-wrap').style.display=p.ilimitado?'none':'block';
     _variantesEdit=JSON.parse(JSON.stringify(p.variantes||[]));
     $('prod-modal-actions').innerHTML=`<button class="btn-cancel" onclick="pedirEliminarProducto(${id})">Eliminar</button><button class="btn-save" onclick="guardarProducto()">Guardar</button>`;
-  } else {
+  }else{
     $('prod-modal-title').textContent='Nuevo producto';
     ['m-nombre','m-precio','m-stock'].forEach(fid=>$(fid).value='');
-    $('m-cat').value=cats[0]?.id||''; $('m-ilimitado').checked=false; $('m-stock-wrap').style.display='block';
+    $('m-cat').value=cats[0]?.id||'';$('m-ilimitado').checked=false;$('m-stock-wrap').style.display='block';
     $('prod-modal-actions').innerHTML=`<button class="btn-cancel" onclick="closeProdModal()">Cancelar</button><button class="btn-save" onclick="guardarProducto()">Guardar</button>`;
   }
-  renderVariantesModalBody();
-  updateVariantesBadge();
-  $('modal-prod').classList.add('open'); setTimeout(()=>$('m-nombre').focus(),100);
+  renderVariantesModalBody();updateVariantesBadge();
+  $('modal-prod').classList.add('open');setTimeout(()=>$('m-nombre').focus(),100);
 }
-
-function pedirEliminarProducto(id){
-  const p=menu.find(x=>x.id===id);
-  closeProdModal();
-  pedirConfirm(`¿Eliminar "${p?.name||''}"?`, ()=>{ menu=menu.filter(x=>x.id!==id); save(); renderMenuAdm(); renderProdGrid(); syncMenuSheets(); showToast('✓ Producto eliminado'); });
-}
-
-function closeProdModal(){ $('modal-prod').classList.remove('open'); }
-function closeProdModalOutside(e){ if(e.target===$('modal-prod')) closeProdModal(); }
+function pedirEliminarProducto(id){const p=menu.find(x=>x.id===id);closeProdModal();pedirConfirm(`¿Eliminar "${p?.name||''}"?`,()=>{menu=menu.filter(x=>x.id!==id);save();renderMenuAdm();renderProdGrid();syncMenuSheets();showToast('✓ Producto eliminado');});}
+function closeProdModal(){$('modal-prod').classList.remove('open');}
+function closeProdModalOutside(e){if(e.target===$('modal-prod'))closeProdModal();}
 function guardarProducto(){
-  const name=$('m-nombre').value.trim(), price=parseInt($('m-precio').value), cat=$('m-cat').value;
-  if(!name||!price){ showToast('Completá nombre y precio'); return; }
-  const ilimitado=!!$('m-ilimitado').checked;
-  const stock=ilimitado?0:parseInt($('m-stock').value)||0;
-  if(editId){ Object.assign(menu.find(x=>x.id===editId),{name,price,cat,stock,ilimitado,variantes:_variantesEdit}); }
-  else { menu.push({id:menu.reduce((m,p)=>Math.max(m,p.id),0)+1,name,price,cat,stock,ilimitado,variantes:_variantesEdit}); }
-  save(); renderMenuAdm(); renderProdGrid(); renderCargaCats(); syncMenuSheets(); closeProdModal(); showToast(editId?'✓ Actualizado':'✓ Agregado');
+  const name=($('m-nombre')?.value||'').trim(),price=parseInt($('m-precio')?.value),cat=$('m-cat')?.value;
+  if(!name||!price){showToast('Completá nombre y precio');return;}
+  const ilimitado=!!$('m-ilimitado')?.checked;
+  const stock=ilimitado?0:parseInt($('m-stock')?.value)||0;
+  if(editId){Object.assign(menu.find(x=>x.id===editId),{name,price,cat,stock,ilimitado,variantes:_variantesEdit});}
+  else{menu.push({id:menu.reduce((m,p)=>Math.max(m,p.id),0)+1,name,price,cat,stock,ilimitado,variantes:_variantesEdit});}
+  save();renderMenuAdm();renderProdGrid();renderCargaCats();syncMenuSheets();closeProdModal();showToast(editId?'✓ Actualizado':'✓ Agregado');
 }
-
-// ── Variantes dentro del modal de producto ──
-function toggleVariantesModal(){
-  const arr=$('variantes-arr'), body=$('variantes-body');
-  const open=body.classList.toggle('open'); arr.classList.toggle('open',open);
-}
-function updateVariantesBadge(){
-  const el=$('variantes-count-badge'); if(el) el.textContent=_variantesEdit.length?`(${_variantesEdit.length} grupos)`:'';
-}
+function toggleVariantesModal(){const arr=$('variantes-arr'),body=$('variantes-body');const open=body.classList.toggle('open');arr.classList.toggle('open',open);}
+function updateVariantesBadge(){const el=$('variantes-count-badge');if(el)el.textContent=_variantesEdit.length?`(${_variantesEdit.length} grupos)`:''}
 function renderVariantesModalBody(){
-  const el=$('variantes-grupos-modal'); if(!el) return;
+  const el=$('variantes-grupos-modal');if(!el)return;
   el.innerHTML=_variantesEdit.map((g,gi)=>`
     <div class="variante-grupo">
       <div class="variante-grupo-hdr">
-        <input value="${g.grupo||''}" placeholder="Nombre del grupo (ej: Tipo de leche)" oninput="_variantesEdit[${gi}].grupo=this.value">
+        <input value="${g.grupo||''}" placeholder="Nombre del grupo" oninput="_variantesEdit[${gi}].grupo=this.value">
         <select class="variante-grupo-tipo" onchange="_variantesEdit[${gi}].tipo=this.value">
           <option value="unico"${g.tipo==='unico'?' selected':''}>Único</option>
           <option value="multiple"${g.tipo==='multiple'?' selected':''}>Múltiple</option>
@@ -2000,7 +2117,7 @@ function renderVariantesModalBody(){
       </div>
       ${(g.opciones||[]).map((op,oi)=>`
         <div class="variante-opcion">
-          <input class="variante-op-nombre" placeholder="Opción (ej: Almendras)" value="${op.nombre||''}" oninput="_variantesEdit[${gi}].opciones[${oi}].nombre=this.value">
+          <input class="variante-op-nombre" placeholder="Opción" value="${op.nombre||''}" oninput="_variantesEdit[${gi}].opciones[${oi}].nombre=this.value">
           <input class="variante-op-precio" type="number" min="0" placeholder="$0" value="${op.precio||0}" oninput="_variantesEdit[${gi}].opciones[${oi}].precio=parseInt(this.value)||0">
           <button class="qty-btn" onclick="delVarianteOpcion(${gi},${oi})">×</button>
         </div>`).join('')}
@@ -2008,55 +2125,37 @@ function renderVariantesModalBody(){
     </div>`).join('');
   updateVariantesBadge();
 }
-function addVarianteGrupo(){ _variantesEdit.push({grupo:'',tipo:'unico',opciones:[]}); renderVariantesModalBody(); }
-function delVarianteGrupo(gi){ _variantesEdit.splice(gi,1); renderVariantesModalBody(); }
-function addVarianteOpcion(gi){ _variantesEdit[gi].opciones.push({nombre:'',precio:0}); renderVariantesModalBody(); }
-function delVarianteOpcion(gi,oi){ _variantesEdit[gi].opciones.splice(oi,1); renderVariantesModalBody(); }
+function addVarianteGrupo(){_variantesEdit.push({grupo:'',tipo:'unico',opciones:[]});renderVariantesModalBody();}
+function delVarianteGrupo(gi){_variantesEdit.splice(gi,1);renderVariantesModalBody();}
+function addVarianteOpcion(gi){_variantesEdit[gi].opciones.push({nombre:'',precio:0});renderVariantesModalBody();}
+function delVarianteOpcion(gi,oi){_variantesEdit[gi].opciones.splice(oi,1);renderVariantesModalBody();}
 
-// ── CONFIG ──
-function renderAjustesConfig(){
-  if($('cfg-sheet-adj')&&config.sheetId) $('cfg-sheet-adj').value=config.sheetId;
-  if($('cfg-url-adj')&&config.webappUrl) $('cfg-url-adj').value=config.webappUrl;
-}
+function renderAjustesConfig(){if($('cfg-sheet-adj')&&config.sheetId)$('cfg-sheet-adj').value=config.sheetId;if($('cfg-url-adj')&&config.webappUrl)$('cfg-url-adj').value=config.webappUrl;}
 
-
-// ── PRODUCTO RÁPIDO (desde pedido) ──────────────────────────
+// ── Producto rápido ─────────────────────────────
 function openProdRapidoModal(){
-  $('pr-nombre').value=''; $('pr-precio').value='';
+  $('pr-nombre').value='';$('pr-precio').value='';
   $('pr-cat').innerHTML=cats.sort((a,b)=>a.name.localeCompare(b.name,'es')).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
-  $('modal-prod-rapido').classList.add('open');
-  setTimeout(()=>$('pr-nombre').focus(),100);
+  $('modal-prod-rapido').classList.add('open');setTimeout(()=>$('pr-nombre').focus(),100);
 }
-function cerrarModalProdRapido(){ $('modal-prod-rapido').classList.remove('open'); }
-function closeModalProdRapido(e){ if(e.target===$('modal-prod-rapido')) cerrarModalProdRapido(); }
+function cerrarModalProdRapido(){$('modal-prod-rapido').classList.remove('open');}
+function closeModalProdRapido(e){if(e.target===$('modal-prod-rapido'))cerrarModalProdRapido();}
 function guardarProdRapido(){
-  const name=$('pr-nombre').value.trim();
-  const price=parseInt($('pr-precio').value)||0;
-  const cat=$('pr-cat').value;
-  if(!name||!price){ showToast('Completá nombre y precio'); return; }
+  const name=($('pr-nombre')?.value||'').trim(),price=parseInt($('pr-precio')?.value)||0,cat=$('pr-cat')?.value;
+  if(!name||!price){showToast('Completá nombre y precio');return;}
   const newId=menu.reduce((m,p)=>Math.max(m,p.id),0)+1;
-  const newProd={id:newId,name,price,cat,stock:99,ilimitado:false,variantes:[]};
-  menu.push(newProd);
-  // Add directly to current cart
-  const key=`${newId}_plain`;
-  carrito[key]={prodId:newId,qty:1,vars:[],nota:'',precio:price};
-  save(); saveMesaCarrito(); syncMenuSheets();
-  cerrarModalProdRapido(); renderProdGrid(); renderCart();
+  menu.push({id:newId,name,price,cat,stock:99,ilimitado:false,variantes:[]});
+  const key=`${newId}_plain`;carrito[key]={prodId:newId,qty:1,vars:[],nota:'',precio:price};
+  save();saveMesaCarrito();syncMenuSheets();cerrarModalProdRapido();renderProdGrid();renderCart();
   showToast(`✓ "${name}" creado y agregado`);
 }
 
 // ══════════════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════════════
-renderSetupBanner();
-renderStockAlerts();
-renderTurnoPill();
-renderVentas();
-// Inicializar fecha del filtro custom
+renderSetupBanner();renderStockAlerts();renderTurnoPill();renderVentas();
 const hoy=today();
-const dashDesde=$('dash-desde'), dashHasta=$('dash-hasta');
-if(dashDesde) dashDesde.value=hoy;
-if(dashHasta) dashHasta.value=hoy;
+const dD=$('dash-desde'),dH=$('dash-hasta');if(dD)dD.value=hoy;if(dH)dH.value=hoy;
 
 </script>
 </body>
