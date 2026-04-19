@@ -1391,6 +1391,7 @@ async function loadFromSheets(){
   const data=await sheetsGet();
   if(!data||!data.ok){showToast('⚠️ No se pudo leer el Sheet');return;}
   let changed=false;
+  if(data.ventas&&data.ventas.length>0){ventas=data.ventas;changed=true;}
   if(data.menu&&data.menu.length>0){
     menu=data.menu.map(p=>({...p,cat:(cats.find(c=>c.name===p.catNombre)||cats[0]||{}).id||cats[0]?.id,variantes:p.variantes||[]}));
     changed=true;
