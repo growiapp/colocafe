@@ -523,7 +523,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
     <div class="turno-pill" id="turno-pill" onclick="openTurnoModal()">
       <span class="turno-dot" id="turno-dot"></span>Sin turno
     </div>
-    <div class="gs-pill" id="gs-pill">
+    <div class="gs-pill" id="gs-pill" onclick="if(config.webappUrl)loadFromSheets();else goTab('ajustes');" style="cursor:pointer" title="Tap para sincronizar">
       <div class="gs-dot" id="gs-dot"></div>
       <span id="gs-txt">Sin conexión</span>
     </div>
@@ -720,6 +720,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
         <div style="display:flex;gap:8px">
           <button class="btn-cfg" style="flex:1" onclick="guardarConfigAdj()">Guardar y conectar</button>
           <button class="btn-sm" onclick="inicializarSheets()">⚡ Crear hojas</button>
+          <button class="btn-sm" onclick="loadFromSheets()" style="background:#1a7a4a;color:#fff">🔄 Sincronizar</button>
         </div>
       </div>
     </div>
@@ -1374,6 +1375,34 @@ async function sheetsPost(payload){
   if(!config.webappUrl)return false;
   try{await fetch(config.webappUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),mode:'no-cors'});return true;}
   catch(e){return false;}
+}
+async function sheetsGet(){
+  if(!config.webappUrl)return null;
+  try{
+    const url=config.webappUrl+'?action=getData';
+    const res=await fetch(url,{method:'GET'});
+    if(!res.ok)return null;
+    return await res.json();
+  }catch(e){return null;}
+}
+async function loadFromSheets(){
+  if(!config.webappUrl)return;
+  showToast('Sincronizando datos…',3000);
+  const data=await sheetsGet();
+  if(!data||!data.ok){showToast('⚠️ No se pudo leer el Sheet');return;}
+  let changed=false;
+  if(data.menu&&data.menu.length>0){
+    menu=data.menu.map(p=>({...p,cat:(cats.find(c=>c.name===p.catNombre)||cats[0]||{}).id||cats[0]?.id,variantes:p.variantes||[]}));
+    changed=true;
+  }
+  if(data.clientes&&data.clientes.length>0){clientes=data.clientes;changed=true;}
+  if(data.reservas&&data.reservas.length>0){reservas=data.reservas;changed=true;}
+  if(data.gastos&&data.gastos.length>0){gastos=data.gastos;changed=true;}
+  if(data.operadores&&data.operadores.length>0){operadores=data.operadores;changed=true;}
+  if(data.mesas&&data.mesas.length>0){mesas=data.mesas;changed=true;}
+  if(data.turno){turno=data.turno;changed=true;}
+  if(changed){save();renderSetupBanner();renderStockAlerts();renderTurnoPill();renderVentas();showToast('✓ Datos sincronizados');}
+  else{showToast('✓ Conectado (sin datos nuevos)');}
 }
 async function syncVentasSheets(rows){await sheetsPost({action:'addVentas',rows});}
 async function syncMenuSheets(){await sheetsPost({action:'updateMenu',rows:menu.map(p=>({id:p.id,name:p.name,cat:getCat(p.cat).name,seccion:getCat(p.cat).seccion,price:p.price,stock:p.stock,ilimitado:p.ilimitado}))});}
@@ -2436,6 +2465,8 @@ function pedirEliminarProductoInline(id){
 renderSetupBanner();renderStockAlerts();renderTurnoPill();renderVentas();
 const hoy=today();
 const dD=$('dash-desde'),dH=$('dash-hasta');if(dD)dD.value=hoy;if(dH)dH.value=hoy;
+// Auto-sincronizar desde Sheets al cargar la app (si hay URL configurada)
+if(config.webappUrl){loadFromSheets();}
 
 </script>
 </body>
