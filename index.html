@@ -1841,21 +1841,27 @@ async function ejecutarCobro(operadorCobro){
   const ventaIds=[];
   const ticketId='t_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
   let tipoVenta='salon',nombreMesa='';
-  if(esReserva){const r=reservas.find(x=>x.id===mesaActivaId.replace('reserva_',''));if(r){tipoVenta=r.tipo||'salon';nombreMesa=r.nombre;}}
+  let reservaActiva=null,clienteReserva=null;
+  if(esReserva){const r=reservas.find(x=>x.id===mesaActivaId.replace('reserva_',''));if(r){reservaActiva=r;tipoVenta=r.tipo||'salon';nombreMesa=r.nombre;clienteReserva=customers.find(c=>String(c.id||'')===String(r.clienteId||''))||null;}}
   else{const m=mesas.find(x=>x.id===mesaActivaId);if(m){tipoVenta=m.tipo||'salon';nombreMesa=m.nombre;}}
   const nuevas=items.map(item=>{
-    const p=menu.find(x=>x.id==item.prodId);
-    const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
-    const ventaId='v_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
-    ventaIds.push(ventaId);
-    if(p&&!p.ilimitado)p.stock=Math.max(0,(p.stock||0)-item.qty);
-    return{id:ventaId,fecha,hora,timestamp:ts,operador,mesa:nombreMesa,tipo:tipoVenta,
-      ticket_id:ticketId,payment_mode:paymentState.payment_mode,pagos:paymentState.pagos,
-      producto:p?p.name:'?',variantes:(item.vars||[]).map(v=>v.nombre).join(', '),
-      nota:item.nota||'',categoria:getCat(p?.cat).name,seccion:getCat(p?.cat).seccion,
-      cantidad:item.qty,precioBase:item.precio,precioVars:varsExtra,
-      total:(item.precio+varsExtra)*item.qty,pago:paymentState.pago,cat:p?.cat};
-  });
+     const p=menu.find(x=>x.id==item.prodId);
+     const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
+     const ventaId='v_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+     ventaIds.push(ventaId);
+     if(p&&!p.ilimitado)p.stock=Math.max(0,(p.stock||0)-item.qty);
+     return{id:ventaId,fecha,hora,timestamp:ts,operador,mesa:nombreMesa,tipo:tipoVenta,
+       ticket_id:ticketId,payment_mode:paymentState.payment_mode,pagos:paymentState.pagos,
+       producto:p?p.name:'?',variantes:(item.vars||[]).map(v=>v.nombre).join(', '),
+       nota:item.nota||'',categoria:getCat(p?.cat).name,seccion:getCat(p?.cat).seccion,
+       cantidad:item.qty,precioBase:item.precio,precioVars:varsExtra,
+       total:(item.precio+varsExtra)*item.qty,pago:paymentState.pago,cat:p?.cat,
+       prodId:item.prodId,_product_sb_id:p?._sb_id||null,_product_legacy_id:p?.legacy_id||(!window.isValidUuid?.(String(p?.id||''))?String(p?.id||''):''),
+       _shift_sb_id:turnoActivo?turnoActivo._sb_id||null:null,
+       _reservation_local_id:reservaActiva?.id||null,_reservation_sb_id:reservaActiva?._sb_id||null,
+       _customer_local_id:reservaActiva?.clienteId||null,_customer_sb_id:clienteReserva?._sb_id||null,
+       _source_kind:esReserva?'reserva':'mesa'};
+   });
   ventas.push(...nuevas);
   if(turnoActivo)turnoActivo.ventasIds=[...(turnoActivo.ventasIds||[]),...ventaIds];
   if(esReserva){const r=reservas.find(x=>x.id===mesaActivaId.replace('reserva_',''));if(r){r.estado='pagada';r.pago=paymentState.pago;r.payment_mode=paymentState.payment_mode;r.pagos=paymentState.pagos;}}
@@ -1863,6 +1869,12 @@ async function ejecutarCobro(operadorCobro){
   save();if(esReserva)syncReservasSheets();else syncMesasSheets();if(turnoActivo&&turno===turnoActivo)syncTurnoSheets();
   const ok=await syncVentasSheets(nuevas);
   showToast(ok?'✓ Venta guardada en Sheets':(config.webappUrl?'✓ Registrada (sin internet)':'✓ Venta registrada'));
+  try{
+    const salesSync=await window.saveSaleRowsToSupabase?.(nuevas);
+    if(salesSync?.ok)showToast('Venta sincronizada con Supabase');
+  }catch(err){
+    showToast(`Venta guardada local, pero Supabase falló: ${err?.message||String(err)}`);
+  }
   btn.disabled=false;btn.textContent='Cerrar y cobrar';
   renderVentas();
 }
@@ -6387,6 +6399,603 @@ if(config.webappUrl){loadFromSheets();}
 
   renderShiftsSupabaseUi();
   setTimeout(()=>window.reloadActiveShiftFromSupabase?.(true),340);
+})();
+</script>
+<script>
+(()=>{
+  let salesWriteState='local';
+  let salesLastError='';
+  let salesLastSyncAt='';
+  let salesLastProbeAt='';
+  let salesLastTicket='';
+  let salesCurrentRole='';
+  let salesCurrentStoreName='';
+  let salesSupabaseCounts={sales:0,items:0,payments:0};
+
+  window.isValidUuid=window.isValidUuid||function isValidUuid(value){
+    return typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  };
+  const isValidUuid=window.isValidUuid;
+
+  function getSalesConfig(){
+    const cfg=(typeof config==='object'&&config)?config:JSON.parse(localStorage.getItem('config')||'{}');
+    return{
+      supabaseUrl:cfg.supabaseUrl||localStorage.getItem('supabase_url')||'',
+      supabaseAnonKey:cfg.supabaseAnonKey||localStorage.getItem('supabase_anon_key')||'',
+      activeStoreId:cfg.activeStoreId||''
+    };
+  }
+  function getSalesStoreId(){return currentStore?.id||getSalesConfig().activeStoreId||'';}
+  function getSalesStoreName(){return currentStore?.name||salesCurrentStoreName||'';}
+  function hasSalesSupabaseReady(){
+    const cfg=getSalesConfig();
+    return !!(cfg.supabaseUrl&&cfg.supabaseAnonKey&&window.getSupabaseClient?.()&&getSalesStoreId());
+  }
+  function getSalesSupabaseClient(){return window.getSupabaseClient?.()||window.__coloSupabaseClient||null;}
+  async function getSalesSession(client){
+    const {data,error}=await client.auth.getSession();
+    if(error) throw error;
+    return data.session||null;
+  }
+  function stampSalesMoment(){return `${getLocalDateString()} ${getLocalTimeString()}`;}
+  function setSalesWriteState(state,error=''){
+    salesWriteState=state;
+    salesLastError=error||'';
+    renderSalesSupabaseUi();
+  }
+  function getSalesSourceLabel(){
+    if(salesWriteState==='syncing') return 'Fuente ventas: sincronizando write-through…';
+    if(salesWriteState==='error') return `Fuente ventas: fallback local · ${salesLastError||'Error Supabase'}`;
+    return 'Fuente ventas: Local + Supabase write-through';
+  }
+  function ensureSalesSupabaseUi(){
+    const body=$('acc-body-menu');
+    if(!body||body.querySelector('[data-sales-sb-tools="true"]')) return;
+    const box=document.createElement('div');
+    box.setAttribute('data-sales-sb-tools','true');
+    box.style.cssText='display:flex;flex-direction:column;gap:10px;padding:0 0 12px 0;';
+    box.innerHTML=`
+      <div id="sales-sb-status" style="font-size:12px;color:var(--ink3)">Fuente ventas: Local + Supabase write-through</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn ghost" type="button" onclick="debugSalesWritePermissions()">Probar permisos write sales</button>
+        <button class="btn ghost" type="button" onclick="debugSalesSupabase()">Debug ventas</button>
+        <button class="btn ghost" type="button" onclick="retryLastSaleSync()">Reintentar sync última venta local</button>
+      </div>
+      <div id="sales-sb-diag" style="font-size:12px;color:var(--ink2);background:var(--surf2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;line-height:1.5"></div>
+    `;
+    body.insertBefore(box, body.firstChild);
+  }
+  function renderSalesSupabaseUi(){
+    ensureSalesSupabaseUi();
+    const statusEl=$('sales-sb-status');
+    if(statusEl) statusEl.textContent=getSalesSourceLabel();
+    const diag=$('sales-sb-diag');
+    if(diag){
+      const ticketCount=groupLocalSaleRowsByTicket(ventas||[]).length;
+      diag.innerHTML=`
+        <div><strong>Fuente ventas:</strong> ${salesWriteState==='error'?'Fallback':salesWriteState==='syncing'?'Sincronizando':'Local + Supabase write-through'}</div>
+        <div><strong>Store activa:</strong> ${getSalesStoreName()||'Sin store activa'}</div>
+        <div><strong>Store ID:</strong> ${getSalesStoreId()||'—'}</div>
+        <div><strong>Rol:</strong> ${salesCurrentRole||'—'}</div>
+        <div><strong>Ventas locales:</strong> ${ticketCount} tickets · ${(ventas||[]).length} filas</div>
+        <div><strong>Conteos Supabase:</strong> ${salesSupabaseCounts.sales} sales · ${salesSupabaseCounts.items} items · ${salesSupabaseCounts.payments} payments</div>
+        <div><strong>Última sync ventas:</strong> ${salesLastSyncAt||'—'}</div>
+        <div><strong>Último ticket sincronizado:</strong> ${salesLastTicket||'—'}</div>
+        <div><strong>Último error ventas:</strong> ${salesLastError||'—'}</div>
+        <div><strong>Última lectura:</strong> ${salesLastProbeAt||'—'}</div>
+      `;
+    }
+  }
+
+  function getSaleFallbackKey(ref){
+    return [ref?.timestamp||'',ref?.operador||'',ref?.mesa||'',ref?.pago||''].join('|');
+  }
+  window.getStableSaleLegacyId=function(group){
+    if(group?.ref?.ticket_id) return String(group.ref.ticket_id);
+    return getSaleFallbackKey(group?.ref||{});
+  };
+  window.getStableSaleItemLegacyId=function(row){return String(row?.id||'');};
+  window.groupLocalSaleRowsByTicket=function(rows){
+    const map={};
+    (Array.isArray(rows)?rows:[]).forEach(raw=>{
+      const row=normalizeVentaRecord(raw);
+      const key=row.ticket_id||getSaleFallbackKey(row);
+      if(!map[key]) map[key]={key,rows:[],ref:row,total:0,payments:[]};
+      map[key].rows.push(row);
+      map[key].total=money2(map[key].total+(Number(row.total)||0));
+      if((row.timestamp||'')>(map[key].ref?.timestamp||'')) map[key].ref=row;
+    });
+    return Object.values(map).map(group=>{
+      group.payments=getTicketPayments(group);
+      group.legacyId=getStableSaleLegacyId(group);
+      group.fallbackKey=!group.ref?.ticket_id?group.legacyId:'';
+      return group;
+    });
+  };
+  window.getStableSalePaymentLegacyId=function(group,payment,index){
+    const base=getStableSaleLegacyId(group);
+    const method=normalizePaymentMethod(payment?.metodo);
+    const repeated=(group?.payments||[]).filter(p=>normalizePaymentMethod(p?.metodo)===method).length>1;
+    return repeated?`${base}:payment:${index}`:`${base}:${method}`;
+  };
+
+  async function fetchSalesDiagnostics(){
+    const cfg=getSalesConfig();
+    const base={
+      storeId:getSalesStoreId(),
+      storeName:getSalesStoreName(),
+      role:'',
+      counts:{sales:0,items:0,payments:0},
+      error:''
+    };
+    if(!(cfg.supabaseUrl&&cfg.supabaseAnonKey)) return {...base,error:'Supabase no configurado'};
+    if(!base.storeId) return {...base,error:'No hay tienda activa'};
+    if(!isValidUuid(base.storeId)) return {...base,error:'Store ID inválido'};
+    const client=getSalesSupabaseClient();
+    if(!client) return {...base,error:'Cliente Supabase no disponible'};
+    try{
+      const session=await getSalesSession(client);
+      if(!session) return {...base,error:'No hay sesión activa'};
+      const [
+        {data:storeRow,error:storeErr},
+        {data:roleRow,error:roleErr},
+        {count:salesCount,error:salesErr},
+        {count:itemsCount,error:itemsErr},
+        {count:paymentsCount,error:paymentsErr}
+      ]=await Promise.all([
+        client.from('stores').select('id,name').eq('id',base.storeId).maybeSingle(),
+        client.from('store_users').select('role').eq('store_id',base.storeId).eq('user_id',session.user.id).maybeSingle(),
+        client.from('sales').select('id',{count:'exact',head:true}).eq('store_id',base.storeId),
+        client.from('sale_items').select('id',{count:'exact',head:true}).eq('store_id',base.storeId),
+        client.from('sale_payments').select('id',{count:'exact',head:true}).eq('store_id',base.storeId)
+      ]);
+      if(storeErr) throw storeErr;
+      if(roleErr) throw roleErr;
+      if(salesErr) throw salesErr;
+      if(itemsErr) throw itemsErr;
+      if(paymentsErr) throw paymentsErr;
+      return{
+        ...base,
+        storeName:storeRow?.name||base.storeName,
+        role:roleRow?.role||'',
+        counts:{sales:salesCount||0,items:itemsCount||0,payments:paymentsCount||0}
+      };
+    }catch(err){
+      return {...base,error:err?.message||String(err)};
+    }
+  }
+  async function refreshSalesDiagnostics({silent=true}={}){
+    const diag=await fetchSalesDiagnostics();
+    salesCurrentStoreName=diag.storeName||salesCurrentStoreName;
+    salesCurrentRole=diag.role||salesCurrentRole;
+    salesSupabaseCounts=diag.counts||salesSupabaseCounts;
+    salesLastProbeAt=stampSalesMoment();
+    if(diag.error){
+      setSalesWriteState('error',diag.error);
+      if(!silent) showToast(`Ventas Supabase: ${diag.error}`);
+      return false;
+    }
+    if(salesWriteState!=='syncing') setSalesWriteState('ready');
+    renderSalesSupabaseUi();
+    return true;
+  }
+
+  function getSalesErrorMessage(prefix,err){
+    const msg=err?.message||String(err)||'Error desconocido';
+    return `${prefix}: ${msg}`;
+  }
+  function inferSalesPolicyMessage(err){
+    const msg=(err?.message||'').toLowerCase();
+    if(msg.includes('row-level security')||msg.includes('permission denied')) return 'Revisá policies sales/sale_items/sale_payments para owner/admin/operator.';
+    return '';
+  }
+  async function resolveSaleProductId(row,client,storeId,cache){
+    cache=cache||{};
+    const direct=row?._product_sb_id;
+    if(isValidUuid(String(direct||''))) return String(direct);
+    const refs=[
+      row?._product_legacy_id,
+      row?.prodId,
+      !isValidUuid(String(row?.prodId||''))?String(row?.prodId||''):'',
+      !isValidUuid(String(row?.id||''))?String(row?.id||''):''
+    ].filter(Boolean);
+    for(const ref of refs){
+      const key=String(ref);
+      if(cache.products?.[key]) return cache.products[key];
+      const {data,error}=await client.from('products').select('id').eq('store_id',storeId).eq('legacy_id',key).maybeSingle();
+      if(error) throw error;
+      if(data?.id){
+        cache.products=cache.products||{};
+        cache.products[key]=data.id;
+        return data.id;
+      }
+    }
+    return null;
+  }
+  async function resolveSaleReservationId(group,client,storeId,cache){
+    cache=cache||{};
+    const ref=group?.ref||{};
+    if(isValidUuid(String(ref._reservation_sb_id||''))) return String(ref._reservation_sb_id);
+    const localId=String(ref._reservation_local_id||'');
+    if(!localId) return null;
+    const local=reservas.find(r=>String(r.id||'')===localId);
+    if(isValidUuid(String(local?._sb_id||''))) return String(local._sb_id);
+    if(cache.reservations?.[localId]) return cache.reservations[localId];
+    const {data,error}=await client.from('reservations').select('id').eq('store_id',storeId).eq('legacy_id',localId).maybeSingle();
+    if(error) throw error;
+    if(data?.id){
+      cache.reservations=cache.reservations||{};
+      cache.reservations[localId]=data.id;
+      return data.id;
+    }
+    return null;
+  }
+  async function resolveSaleCustomerId(group,client,storeId,cache){
+    cache=cache||{};
+    const ref=group?.ref||{};
+    if(isValidUuid(String(ref._customer_sb_id||''))) return String(ref._customer_sb_id);
+    const localId=String(ref._customer_local_id||'');
+    if(!localId) return null;
+    const local=customers.find(c=>String(c.id||'')===localId);
+    if(isValidUuid(String(local?._sb_id||''))) return String(local._sb_id);
+    const legacyId=String(local?.legacy_id||local?.id||localId||'');
+    if(cache.customers?.[legacyId]) return cache.customers[legacyId];
+    const {data,error}=await client.from('customers').select('id').eq('store_id',storeId).eq('legacy_id',legacyId).maybeSingle();
+    if(error) throw error;
+    if(data?.id){
+      cache.customers=cache.customers||{};
+      cache.customers[legacyId]=data.id;
+      return data.id;
+    }
+    return null;
+  }
+  async function findExistingSaleRow(client,storeId,group){
+    const sbId=(group?.rows||[]).map(r=>r?._sb_sale_id).find(v=>isValidUuid(String(v||'')));
+    if(sbId){
+      const {data,error}=await client.from('sales').select('id,legacy_id').eq('id',sbId).eq('store_id',storeId).maybeSingle();
+      if(error) throw error;
+      if(data) return data;
+    }
+    const legacyId=getStableSaleLegacyId(group);
+    const {data,error}=await client.from('sales').select('id,legacy_id').eq('store_id',storeId).eq('legacy_id',legacyId).maybeSingle();
+    if(error) throw error;
+    return data||null;
+  }
+
+  window.mapSaleGroupToSupabaseSale=async function(group,ctx={}){
+    const ref=group?.ref||{};
+    const storeId=ctx.storeId||getSalesStoreId();
+    const client=ctx.client||getSalesSupabaseClient();
+    const relationCache=ctx.cache||{};
+    const shiftRef=ref._shift_sb_id||((typeof turno==='object'&&turno)?turno._sb_id:'')||'';
+    const shiftId=isValidUuid(String(shiftRef))?String(shiftRef):null;
+    const reservationId=await resolveSaleReservationId(group,client,storeId,relationCache).catch(err=>{console.warn('[Sales reservation resolve failed]',err);return null;});
+    const customerId=await resolveSaleCustomerId(group,client,storeId,relationCache).catch(err=>{console.warn('[Sales customer resolve failed]',err);return null;});
+    return{
+      store_id:storeId,
+      legacy_id:getStableSaleLegacyId(group),
+      legacy_source:'frontend_local',
+      shift_id:shiftId,
+      customer_id:customerId,
+      reservation_id:reservationId,
+      open_order_id:null,
+      business_date:normalizeBusinessDate(ref.fecha,ref.timestamp),
+      sold_at:ref.timestamp||getLocalTimestamp(),
+      operator_user_id:null,
+      operator_name:ref.operador||'Sin operador',
+      service_type:ref.tipo||'salon',
+      table_label:ref.mesa||null,
+      payment_mode:normalizePaymentMode(ref.payment_mode,group.payments),
+      subtotal_amount:money2(group.total),
+      total_amount:money2(group.total),
+      notes:null,
+      metadata:{
+        ticket_id:ref.ticket_id||null,
+        fallback_key:group.fallbackKey||null,
+        legacy_pago:ref.pago||null,
+        ventas_ids:(group.rows||[]).map(r=>r.id),
+        source_kind:ref._source_kind||'mesa',
+        reservation_local_id:ref._reservation_local_id||null,
+        customer_local_id:ref._customer_local_id||null
+      }
+    };
+  };
+  window.mapSaleItemToSupabaseItem=async function(row,saleId,ctx={}){
+    const storeId=ctx.storeId||getSalesStoreId();
+    const client=ctx.client||getSalesSupabaseClient();
+    const productId=await resolveSaleProductId(row,client,storeId,ctx.cache||{}).catch(err=>{console.warn('[Sales product resolve failed]',err);return null;});
+    return{
+      store_id:storeId,
+      sale_id:saleId,
+      legacy_id:getStableSaleItemLegacyId(row),
+      product_id:productId,
+      product_name:row.producto||'Sin producto',
+      category_name:row.categoria||null,
+      section:row.seccion||null,
+      variant_summary:row.variantes||null,
+      note:row.nota||null,
+      quantity:Number(row.cantidad)||1,
+      unit_price:money2(row.precioBase),
+      variants_price:money2(row.precioVars),
+      line_total:money2(row.total),
+      metadata:{
+        cat:row.cat??null,
+        prodId:row.prodId??null,
+        product_legacy_id:row._product_legacy_id||null,
+        unresolved_product:!productId
+      }
+    };
+  };
+  window.mapSalePaymentToSupabasePayment=function(payment,saleId,group,index){
+    const ref=group?.ref||{};
+    return{
+      store_id:getSalesStoreId(),
+      sale_id:saleId,
+      legacy_id:getStableSalePaymentLegacyId(group,payment,index),
+      method:normalizePaymentMethod(payment?.metodo),
+      amount:money2(payment?.monto),
+      business_date:normalizeBusinessDate(ref.fecha,ref.timestamp),
+      paid_at:ref.timestamp||getLocalTimestamp(),
+      metadata:{
+        ticket_id:ref.ticket_id||null,
+        payment_mode:normalizePaymentMode(ref.payment_mode,group.payments),
+        legacy_pago:ref.pago||null
+      }
+    };
+  };
+
+  function markLocalSaleRowsSync(rows,{saleId,status,error=''}={}){
+    const ids=new Set((rows||[]).map(r=>String(r.id||'')));
+    let changed=false;
+    ventas=(ventas||[]).map(v=>{
+      if(!ids.has(String(v.id||''))) return v;
+      changed=true;
+      return{
+        ...v,
+        _sb_sale_id:saleId||v._sb_sale_id||null,
+        _sb_sync_status:status||v._sb_sync_status||'pending',
+        _sb_sync_error:error||''
+      };
+    });
+    if(changed) save();
+  }
+
+  window.saveSaleGroupToSupabase=async function(group){
+    if(!hasSalesSupabaseReady()) throw new Error('Supabase no configurado para ventas');
+    const storeId=getSalesStoreId();
+    if(!storeId) throw new Error('No hay tienda activa');
+    if(!isValidUuid(storeId)) throw new Error('Store ID inválido');
+    const client=getSalesSupabaseClient();
+    if(!client) throw new Error('Cliente Supabase no disponible');
+    const session=await getSalesSession(client);
+    if(!session) throw new Error('No hay sesión activa');
+    const relationCache={products:{},customers:{},reservations:{}};
+    salesCurrentStoreName=getSalesStoreName();
+    salesLastTicket=getStableSaleLegacyId(group);
+    setSalesWriteState('syncing');
+    console.group('[Sales -> Supabase]');
+    console.log('group',group);
+    try{
+      const existingRow=await findExistingSaleRow(client,storeId,group);
+      const salePayload=await mapSaleGroupToSupabaseSale(group,{client,storeId,cache:relationCache});
+      console.log('sale payload',salePayload);
+      const saleRes=existingRow
+        ? await client.from('sales').update(salePayload).eq('id',existingRow.id).eq('store_id',storeId).select('id,legacy_id').single()
+        : await client.from('sales').upsert(salePayload,{onConflict:'store_id,legacy_id'}).select('id,legacy_id').single();
+      if(saleRes.error) throw saleRes.error;
+      console.log('sale result',saleRes.data);
+      const saleId=saleRes.data.id;
+      const itemsPayload=await Promise.all((group.rows||[]).map(row=>mapSaleItemToSupabaseItem(row,saleId,{client,storeId,cache:relationCache})));
+      console.log('items payload',itemsPayload);
+      const itemsRes=itemsPayload.length
+        ? await client.from('sale_items').upsert(itemsPayload,{onConflict:'store_id,legacy_id'}).select('id,legacy_id')
+        : {data:[],error:null};
+      if(itemsRes.error) throw itemsRes.error;
+      console.log('items result',itemsRes.data);
+      const paymentsPayload=(group.payments||[]).map((payment,index)=>mapSalePaymentToSupabasePayment(payment,saleId,group,index));
+      console.log('payments payload',paymentsPayload);
+      const paymentsRes=paymentsPayload.length
+        ? await client.from('sale_payments').upsert(paymentsPayload,{onConflict:'store_id,legacy_id'}).select('id,legacy_id')
+        : {data:[],error:null};
+      if(paymentsRes.error) throw paymentsRes.error;
+      console.log('payments result',paymentsRes.data);
+      markLocalSaleRowsSync(group.rows,{saleId,status:'ok',error:''});
+      salesLastSyncAt=stampSalesMoment();
+      setSalesWriteState('ready');
+      await refreshSalesDiagnostics({silent:true});
+      console.groupEnd();
+      return{ok:true,saleId,legacyId:saleRes.data.legacy_id||salesLastTicket};
+    }catch(err){
+      console.error('sale result/error',{
+        message:err?.message||String(err),
+        code:err?.code||'',
+        details:err?.details||'',
+        hint:err?.hint||'',
+        policyHint:inferSalesPolicyMessage(err)
+      });
+      markLocalSaleRowsSync(group.rows,{saleId:null,status:'error',error:err?.message||String(err)});
+      setSalesWriteState('error',err?.message||String(err));
+      console.groupEnd();
+      throw err;
+    }
+  };
+
+  window.saveSaleRowsToSupabase=async function(localRows){
+    if(!Array.isArray(localRows)||!localRows.length) return{ok:false};
+    const groups=groupLocalSaleRowsByTicket(localRows);
+    let okCount=0;
+    let lastResult=null;
+    for(const group of groups){
+      lastResult=await saveSaleGroupToSupabase(group);
+      if(lastResult?.ok) okCount++;
+    }
+    return{ok:okCount===groups.length,groups:okCount,last:lastResult};
+  };
+
+  window.retryLastSaleSync=async function(){
+    if(!ventas?.length){showToast('No hay ventas locales para reintentar');return;}
+    const lastRow=ventas[ventas.length-1];
+    const key=lastRow.ticket_id||getSaleFallbackKey(lastRow);
+    const rows=ventas.filter(v=>(v.ticket_id||getSaleFallbackKey(v))===key);
+    try{
+      const res=await saveSaleRowsToSupabase(rows);
+      if(res?.ok) showToast('Última venta sincronizada con Supabase');
+    }catch(err){
+      showToast(`No se pudo sincronizar la última venta: ${err?.message||String(err)}`);
+    }
+  };
+
+  window.debugSalesWritePermissions=async function(){
+    const storeId=getSalesStoreId();
+    const client=getSalesSupabaseClient();
+    if(!hasSalesSupabaseReady()||!client){showToast('Configurá Supabase y una store activa primero');return;}
+    console.group('[Sales Supabase write permissions]');
+    try{
+      const session=await getSalesSession(client);
+      if(!session) throw new Error('No hay sesión activa');
+      const token=`debug_sale_${Date.now()}`;
+      const businessDate=getLocalDateString();
+      const soldAt=getLocalTimestamp();
+      const salePayload={
+        store_id:storeId,
+        legacy_id:token,
+        legacy_source:'debug',
+        business_date:businessDate,
+        sold_at:soldAt,
+        operator_name:'Debug',
+        service_type:'salon',
+        payment_mode:'single',
+        subtotal_amount:1,
+        total_amount:1,
+        metadata:{debug:true}
+      };
+      const {count:salesCount,error:salesSelectErr}=await client.from('sales').select('id',{count:'exact',head:true}).eq('store_id',storeId);
+      if(salesSelectErr) throw salesSelectErr;
+      const saleInsert=await client.from('sales').insert(salePayload).select('id,legacy_id').single();
+      if(saleInsert.error) throw saleInsert.error;
+      const saleId=saleInsert.data.id;
+      const itemInsert=await client.from('sale_items').insert({
+        store_id:storeId,
+        sale_id:saleId,
+        legacy_id:`${token}:item:0`,
+        product_id:null,
+        product_name:'Debug item',
+        quantity:1,
+        unit_price:1,
+        variants_price:0,
+        line_total:1,
+        metadata:{debug:true}
+      }).select('id').single();
+      if(itemInsert.error) throw itemInsert.error;
+      const paymentInsert=await client.from('sale_payments').insert({
+        store_id:storeId,
+        sale_id:saleId,
+        legacy_id:`${token}:efectivo`,
+        method:'efectivo',
+        amount:1,
+        business_date:businessDate,
+        paid_at:soldAt,
+        metadata:{debug:true}
+      }).select('id').single();
+      if(paymentInsert.error) throw paymentInsert.error;
+      const saleUpdate=await client.from('sales').update({notes:'debug ok'}).eq('id',saleId).eq('store_id',storeId).select('id').single();
+      if(saleUpdate.error) throw saleUpdate.error;
+      const saleDelete=await client.from('sales').delete().eq('id',saleId).eq('store_id',storeId);
+      if(saleDelete.error) console.warn('[Sales debug cleanup failed]',saleDelete.error);
+      console.log({
+        currentRole:salesCurrentRole||'',
+        error:null,
+        salesSelectOk:true,
+        salesCount:salesCount||0,
+        salesInsertOk:true,
+        saleItemsInsertOk:true,
+        salePaymentsInsertOk:true,
+        salesUpdateOk:true
+      });
+      console.groupEnd();
+      showToast('Permisos write sales OK');
+    }catch(err){
+      console.error('[Sales debug permissions failed]',{
+        message:err?.message||String(err),
+        code:err?.code||'',
+        details:err?.details||'',
+        hint:err?.hint||'',
+        policyHint:inferSalesPolicyMessage(err)
+      });
+      console.groupEnd();
+      showToast(`Write sales falló: ${err?.message||String(err)}`);
+    }
+  };
+
+  window.debugSalesSupabase=async function(){
+    const diag=await fetchSalesDiagnostics();
+    console.group('[Sales Supabase debug]');
+    console.log({
+      currentStore:{id:getSalesStoreId(),name:getSalesStoreName()},
+      currentRole:salesCurrentRole||diag.role||'',
+      localRows:(ventas||[]).length,
+      localTickets:groupLocalSaleRowsByTicket(ventas||[]).length,
+      salesCounts:diag.counts,
+      error:diag.error||null,
+      lastTicket:salesLastTicket||null,
+      lastSyncAt:salesLastSyncAt||null
+    });
+    console.groupEnd();
+    if(diag.error) showToast(`Debug ventas: ${diag.error}`);
+    else showToast(`Debug ventas OK · ${diag.counts.sales} sales`);
+  };
+
+  const _renderAjustesSales=window.renderAjustes;
+  if(typeof _renderAjustesSales==='function'){
+    window.renderAjustes=function(...args){
+      const result=_renderAjustesSales.apply(this,args);
+      renderSalesSupabaseUi();
+      return result;
+    };
+  }
+  const _safeInitSupabaseAccessSales=window.safeInitSupabaseAccess;
+  if(typeof _safeInitSupabaseAccessSales==='function'){
+    window.safeInitSupabaseAccess=async function(...args){
+      const result=await _safeInitSupabaseAccessSales.apply(this,args);
+      renderSalesSupabaseUi();
+      refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics init failed]',err));
+      return result;
+    };
+  }
+  const _guardarSupabaseConfigAdjSales=window.guardarSupabaseConfigAdj;
+  if(typeof _guardarSupabaseConfigAdjSales==='function'){
+    window.guardarSupabaseConfigAdj=async function(...args){
+      const result=await _guardarSupabaseConfigAdjSales.apply(this,args);
+      refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics config failed]',err));
+      return result;
+    };
+  }
+  const _reconectarSupabaseSales=window.reconectarSupabase;
+  if(typeof _reconectarSupabaseSales==='function'){
+    window.reconectarSupabase=async function(...args){
+      const result=await _reconectarSupabaseSales.apply(this,args);
+      refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics reconnect failed]',err));
+      return result;
+    };
+  }
+  const _supabaseSignInSales=window.supabaseSignIn;
+  if(typeof _supabaseSignInSales==='function'){
+    window.supabaseSignIn=async function(...args){
+      const result=await _supabaseSignInSales.apply(this,args);
+      refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics sign-in failed]',err));
+      return result;
+    };
+  }
+  const _onSupabaseStoreChangeSales=window.onSupabaseStoreChange;
+  if(typeof _onSupabaseStoreChangeSales==='function'){
+    window.onSupabaseStoreChange=async function(...args){
+      const result=await _onSupabaseStoreChangeSales.apply(this,args);
+      refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics store change failed]',err));
+      return result;
+    };
+  }
+
+  renderSalesSupabaseUi();
 })();
 </script>
 </body>
