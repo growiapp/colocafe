@@ -4180,5 +4180,670 @@ if(config.webappUrl){loadFromSheets();}
   renderCatalogSupabaseUi();
 })();
 </script>
+<script>
+(()=>{
+  let crLoadState='local';
+  let crLastError='';
+  let crLastReadAt='';
+  let crLastSyncAt='';
+  let crCurrentRole='';
+  let crCurrentStoreName='';
+  let crSupabaseCounts={customers:0,reservations:0};
+  let crWarnings=[];
+
+  function getCrStoreId(){
+    try{
+      const cfg=(typeof config==='object'&&config)?config:JSON.parse(localStorage.getItem('config')||'{}');
+      return cfg.activeStoreId||'';
+    }catch(_){ return ''; }
+  }
+  function hasCrSupabaseReady(){
+    const cfg=(typeof config==='object'&&config)?config:JSON.parse(localStorage.getItem('config')||'{}');
+    return !!(cfg.supabaseUrl&&cfg.supabaseAnonKey&&cfg.activeStoreId&&window.getSupabaseClient?.());
+  }
+  function stampCrMoment(){ return `${getLocalDateString()} ${getLocalTimeString()}`; }
+  function setCrState(state,error=''){
+    crLoadState=state;
+    crLastError=error||'';
+    renderCrSupabaseUi();
+  }
+  function getCrSourceLabel(){
+    if(crLoadState==='supabase') return 'Fuente clientes/reservas: Supabase';
+    if(crLoadState==='syncing') return 'Sincronizando clientes/reservas…';
+    if(crLoadState==='error') return `Clientes/Reservas local · ${crLastError||'Error Supabase'}`;
+    return 'Fuente clientes/reservas: local / fallback';
+  }
+  function ensureCrSupabasePanel(){
+    const body=$('acc-body-menu');
+    if(!body) return;
+    if(body.querySelector('[data-cr-sb-tools="true"]')) return;
+    const box=document.createElement('div');
+    box.setAttribute('data-cr-sb-tools','true');
+    box.style.cssText='display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:0 0 12px 0;border-top:1px dashed var(--border);margin-top:10px;padding-top:12px;';
+    box.innerHTML=`
+      <div id="cr-sb-status" style="font-size:12px;color:var(--ink3)">Fuente clientes/reservas: local / fallback</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn ghost" type="button" onclick="probeCustomersReservationsSupabase()">Probar lectura clientes/reservas Supabase</button>
+        <button class="btn ghost" type="button" onclick="reloadCustomersReservationsFromSupabase()">Recargar clientes/reservas desde Supabase</button>
+        <button class="btn ghost" type="button" onclick="syncLocalCustomersReservationsToSupabase()">Subir clientes/reservas actuales a Supabase</button>
+        <button class="btn ghost" type="button" onclick="debugCustomersReservationsSupabase()">Debug clientes/reservas</button>
+      </div>
+      <div id="cr-sb-diag" style="font-size:12px;color:var(--ink2);background:var(--surf2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;line-height:1.5"></div>
+    `;
+    body.appendChild(box);
+  }
+  function renderCrSupabaseUi(){
+    ensureCrSupabasePanel();
+    const status=$('cr-sb-status');
+    if(status) status.textContent=getCrSourceLabel();
+    const diag=$('cr-sb-diag');
+    if(diag){
+      diag.innerHTML=`
+        <div><strong>Fuente actual:</strong> ${crLoadState==='error'?'Fallback':crLoadState==='supabase'?'Supabase':'Local'}</div>
+        <div><strong>Store activa:</strong> ${crCurrentStoreName||'Sin store activa'}</div>
+        <div><strong>Store ID:</strong> ${getCrStoreId()||'—'}</div>
+        <div><strong>Rol:</strong> ${crCurrentRole||'—'}</div>
+        <div><strong>Cantidad local:</strong> ${clientes.length} clientes · ${reservas.length} reservas</div>
+        <div><strong>Cantidad Supabase:</strong> ${crSupabaseCounts.customers} clientes · ${crSupabaseCounts.reservations} reservas</div>
+        <div><strong>Último error:</strong> ${crLastError||'—'}</div>
+        <div><strong>Última lectura:</strong> ${crLastReadAt||'—'}</div>
+        <div><strong>Última sincronización:</strong> ${crLastSyncAt||'—'}</div>
+        <div><strong>Warnings:</strong> ${crWarnings.length?crWarnings.join(' | '):'—'}</div>
+      `;
+    }
+  }
+  function customerVisitCount(c){ return Number(c?.total_visits ?? (Array.isArray(c?.visitas)?c.visitas.length:0))||0; }
+  function mapCustomerFromSupabase(row){
+    return{
+      id: normalizeLegacyFrontId(row.legacy_id || row.id),
+      _sb_id: row.id,
+      legacy_id: row.legacy_id || null,
+      nombre: row.full_name || 'Sin nombre',
+      telefono: row.phone || '',
+      email: row.email || '',
+      alergias: row.allergies || '',
+      preferencias: row.preferences || '',
+      nota: row.notes || '',
+      total_visits: Number(row.total_visits)||0,
+      visitas: Array.from({length:Number(row.total_visits)||0},()=>null)
+    };
+  }
+  function mapCustomerToSupabase(customer,storeId,existingRow){
+    const payload={
+      store_id: storeId,
+      legacy_id: customer.legacy_id || (!isUuidLike(String(customer.id||'')) ? String(customer.id) : null),
+      full_name: customer.nombre || 'Sin nombre',
+      phone: customer.telefono || null,
+      email: customer.email || null,
+      allergies: customer.alergias || null,
+      preferences: customer.preferencias || null,
+      notes: customer.nota || null,
+      total_visits: customerVisitCount(customer)
+    };
+    const sbId=existingRow?.id || customer._sb_id || (isUuidLike(String(customer.id||''))?String(customer.id):'');
+    if(sbId) payload.id=sbId;
+    return payload;
+  }
+  function resolveCustomerSupabaseId(customerRef,customerRows){
+    const rows=Array.isArray(customerRows)?customerRows:[];
+    const ref=String(customerRef||'');
+    const found=rows.find(r=>String(r.id||'')===ref || String(r._sb_id||'')===ref || String(r.legacy_id||'')===ref);
+    return found?(found._sb_id||found.id):null;
+  }
+  function resolveCustomerFrontId(customerId,customerLegacyId,customerRows){
+    const rows=Array.isArray(customerRows)?customerRows:[];
+    const found=rows.find(r=>String(r._sb_id||r.id||'')===String(customerId||'') || String(r.legacy_id||'')===String(customerLegacyId||''));
+    return found?found.id:'';
+  }
+  function getReservationItemsSummary(items){
+    return(Array.isArray(items)?items:[]).map(item=>{
+      const p=menu.find(x=>sameId(x.id,item.prodId));
+      return `${p?.name||item.nombre||'Item'} x${item.qty||1}`;
+    }).join(' · ');
+  }
+  function getReservationTotal(items){
+    return money2((Array.isArray(items)?items:[]).reduce((sum,item)=>sum+((Number(item.precio)||0)*(Number(item.qty)||0)),0));
+  }
+  function mapReservationFromSupabase(row,customerRows){
+    const raw=row.legacy_raw||{};
+    const items=Array.isArray(raw.items)?raw.items:[];
+    const localCustomerId=resolveCustomerFrontId(row.customer_id,row.legacy_customer_id,customerRows);
+    if(row.customer_id && !localCustomerId){
+      const warning=`Reserva "${row.customer_name||row.legacy_id||row.id}" sin customer_id local resoluble`;
+      if(!crWarnings.includes(warning)) crWarnings.push(warning);
+      console.warn('[Customers/Reservations mapping warning]',warning,row);
+    }
+    return{
+      id: normalizeLegacyFrontId(row.legacy_id || row.id),
+      _sb_id: row.id,
+      legacy_id: row.legacy_id || null,
+      tipo: row.service_type || raw.tipo || 'salon',
+      nombre: raw.nombre || row.customer_name || 'Reserva',
+      clienteId: localCustomerId || '',
+      clienteNombre: row.customer_name || raw.clienteNombre || '',
+      fecha: row.reservation_date || raw.fecha || '',
+      estado: row.status || raw.estado || 'pendiente',
+      nota: row.notes || raw.nota || '',
+      items,
+      pago: raw.pago || (row.payment_method==='mercado_pago'?'mp':row.payment_method||'ef'),
+      payment_mode: row.payment_mode || raw.payment_mode || 'single',
+      pagos: Array.isArray(raw.pagos)?raw.pagos:[]
+    };
+  }
+  function mapReservationToSupabase(reservation,storeId,existingRow,customerRows){
+    const customerSbId=resolveCustomerSupabaseId(reservation.clienteId,customerRows);
+    if(reservation.clienteId && !customerSbId){
+      const warning=`Reserva "${reservation.nombre||reservation.id}" sin customer_id Supabase resoluble`;
+      if(!crWarnings.includes(warning)) crWarnings.push(warning);
+      console.warn('[Customers/Reservations save warning]',warning,reservation);
+    }
+    const items=Array.isArray(reservation.items)?reservation.items:[];
+    const paymentMethod=normalizePaymentMethod(reservation.payment_mode==='mixed' ? (reservation.pagos?.[0]?.metodo||reservation.pago||'ef') : (reservation.pago||'ef'));
+    const payload={
+      store_id: storeId,
+      legacy_id: reservation.legacy_id || (!isUuidLike(String(reservation.id||'')) ? String(reservation.id) : null),
+      customer_id: customerSbId || null,
+      legacy_customer_id: reservation.clienteId ? String(reservation.clienteId) : null,
+      customer_name: reservation.clienteNombre || reservation.nombre || null,
+      service_type: reservation.tipo || 'salon',
+      reservation_date: reservation.fecha || null,
+      reservation_at: reservation.fecha ? getLocalTimestamp(parseLocalDateSafe(reservation.fecha)) : null,
+      status: reservation.estado || 'pendiente',
+      products_text: getReservationItemsSummary(items) || null,
+      total_amount: getReservationTotal(items),
+      payment_mode: normalizePaymentMode(reservation.payment_mode,reservation.pagos),
+      payment_method: paymentMethod==='mixed' ? 'efectivo' : paymentMethod,
+      notes: reservation.nota || null,
+      legacy_raw:{
+        ...existingRow?.legacy_raw,
+        tipo: reservation.tipo || 'salon',
+        nombre: reservation.nombre || '',
+        fecha: reservation.fecha || '',
+        estado: reservation.estado || 'pendiente',
+        nota: reservation.nota || '',
+        clienteNombre: reservation.clienteNombre || '',
+        items,
+        pago: reservation.pago || 'ef',
+        payment_mode: reservation.payment_mode || 'single',
+        pagos: Array.isArray(reservation.pagos)?reservation.pagos:[]
+      }
+    };
+    const sbId=existingRow?.id || reservation._sb_id || (isUuidLike(String(reservation.id||''))?String(reservation.id):'');
+    if(sbId) payload.id=sbId;
+    return payload;
+  }
+  async function getCrSession(client){
+    const {data,error}=await client.auth.getSession();
+    if(error) throw error;
+    return data.session||null;
+  }
+  async function queryStoreCustomers(client,storeId){
+    const {data,error}=await client.from('customers').select('id,store_id,legacy_id,full_name,phone,email,allergies,preferences,notes,first_visit_date,total_visits,created_at').eq('store_id',storeId).order('full_name');
+    if(error) throw error;
+    return data||[];
+  }
+  async function queryStoreReservations(client,storeId){
+    const {data,error}=await client.from('reservations').select('id,store_id,legacy_id,customer_id,legacy_customer_id,customer_name,service_type,reservation_date,reservation_at,status,products_text,total_amount,payment_mode,payment_method,notes,legacy_raw,metadata,created_at').eq('store_id',storeId).order('created_at',{ascending:false});
+    if(error) throw error;
+    return data||[];
+  }
+  async function fetchCrDiagnostics({includeRows=false}={}){
+    const storeId=getCrStoreId();
+    const base={storeId,storeName:'',role:'',customers:[],reservations:[],counts:{customers:0,reservations:0},error:'',warnings:[]};
+    if(!hasCrSupabaseReady()) return base;
+    if(!storeId || !isUuidLike(storeId)) return {...base,error:'Store ID inválido o ausente'};
+    const client=window.getSupabaseClient?.();
+    if(!client) return {...base,error:'Cliente Supabase no disponible'};
+    try{
+      const session=await getCrSession(client);
+      if(!session) return {...base,error:'No hay sesión activa'};
+      const [{data:storeRow,error:storeErr},{data:roleRow,error:roleErr},customerRows,reservationRows]=await Promise.all([
+        client.from('stores').select('id,name').eq('id',storeId).maybeSingle(),
+        client.from('store_users').select('role').eq('store_id',storeId).eq('user_id',session.user.id).maybeSingle(),
+        queryStoreCustomers(client,storeId),
+        queryStoreReservations(client,storeId)
+      ]);
+      if(storeErr) throw storeErr;
+      if(roleErr) throw roleErr;
+      return{
+        ...base,
+        storeName:storeRow?.name||'',
+        role:roleRow?.role||'',
+        customers:includeRows?customerRows:[],
+        reservations:includeRows?reservationRows:[],
+        counts:{customers:customerRows.length,reservations:reservationRows.length}
+      };
+    }catch(err){
+      return {...base,error:err.message||String(err)};
+    }
+  }
+  function refreshCrUi(){
+    try{renderClientesTab();}catch(_){}
+    try{renderVentas();}catch(_){}
+    try{popularClienteSelectReserva();}catch(_){}
+    try{renderAjustes();}catch(_){}
+  }
+  window.loadCustomersFromSupabase=async function({silent=false,customerRowsOverride=null}={}){
+    if(!hasCrSupabaseReady()) return false;
+    try{
+      const diag=customerRowsOverride?null:await fetchCrDiagnostics({includeRows:true});
+      if(diag){
+        crCurrentStoreName=diag.storeName||crCurrentStoreName;
+        crCurrentRole=diag.role||crCurrentRole;
+        crSupabaseCounts.customers=diag.counts.customers;
+        crLastReadAt=stampCrMoment();
+        if(diag.error){
+          setCrState('error',diag.error);
+          if(!silent) showToast('Clientes locales activos · Supabase no respondió');
+          return false;
+        }
+      }
+      const rows=customerRowsOverride || diag.customers;
+      if(!rows.length){
+        if(!silent) showToast('Supabase sin clientes. Se mantiene local.');
+        setCrState('local');
+        renderCrSupabaseUi();
+        return false;
+      }
+      if(!Array.isArray(rows)) return false;
+      clientes=[...rows].map(mapCustomerFromSupabase).sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es'));
+      save();
+      renderClientesTab();
+      renderCrSupabaseUi();
+      return true;
+    }catch(err){
+      console.error('[Customers load failed]',err);
+      setCrState('error',err.message||String(err));
+      if(!silent) showToast('Clientes locales activos · Error Supabase');
+      return false;
+    }
+  };
+  window.loadReservationsFromSupabase=async function({silent=false,reservationRowsOverride=null,customerRowsForMap=null}={}){
+    if(!hasCrSupabaseReady()) return false;
+    try{
+      const diag=reservationRowsOverride?null:await fetchCrDiagnostics({includeRows:true});
+      if(diag){
+        crCurrentStoreName=diag.storeName||crCurrentStoreName;
+        crCurrentRole=diag.role||crCurrentRole;
+        crSupabaseCounts.reservations=diag.counts.reservations;
+        crSupabaseCounts.customers=diag.counts.customers;
+        crLastReadAt=stampCrMoment();
+        if(diag.error){
+          setCrState('error',diag.error);
+          if(!silent) showToast('Reservas locales activas · Supabase no respondió');
+          return false;
+        }
+      }
+      const reservationRows=reservationRowsOverride || diag.reservations;
+      if(!reservationRows.length){
+        if(!silent) showToast('Supabase sin reservas. Se mantiene local.');
+        setCrState('local');
+        renderCrSupabaseUi();
+        return false;
+      }
+      const customerRows=customerRowsForMap || clientes;
+      crWarnings=[];
+      reservas=[...reservationRows].map(r=>mapReservationFromSupabase(r,customerRows)).sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')));
+      save();
+      renderVentas();
+      renderCrSupabaseUi();
+      return true;
+    }catch(err){
+      console.error('[Reservations load failed]',err);
+      setCrState('error',err.message||String(err));
+      if(!silent) showToast('Reservas locales activas · Error Supabase');
+      return false;
+    }
+  };
+  async function findExistingCustomerRow(client,storeId,customer,customerRows){
+    const rows=Array.isArray(customerRows)&&customerRows.length?customerRows:await queryStoreCustomers(client,storeId);
+    const refLegacy=customer.legacy_id || (!isUuidLike(String(customer.id||'')) ? String(customer.id) : '');
+    return rows.find(r=>String(r.id||'')===String(customer._sb_id||'') || String(r.id||'')===String(customer.id||'') || (refLegacy && String(r.legacy_id||'')===String(refLegacy))) || null;
+  }
+  async function findExistingReservationRow(client,storeId,reservation,reservationRows){
+    const rows=Array.isArray(reservationRows)&&reservationRows.length?reservationRows:await queryStoreReservations(client,storeId);
+    const refLegacy=reservation.legacy_id || (!isUuidLike(String(reservation.id||'')) ? String(reservation.id) : '');
+    return rows.find(r=>String(r.id||'')===String(reservation._sb_id||'') || String(r.id||'')===String(reservation.id||'') || (refLegacy && String(r.legacy_id||'')===String(refLegacy))) || null;
+  }
+  function logCrWriteError(kind,meta,err){
+    console.error(`[Customers/Reservations write failed] ${kind}`,{
+      operation:meta.operation,
+      payload:meta.payload,
+      storeId:meta.storeId,
+      currentRole:crCurrentRole||'',
+      localEntity:meta.localEntity,
+      existingRow:meta.existingRow||null,
+      message:err?.message||String(err),
+      code:err?.code||'',
+      details:err?.details||'',
+      hint:err?.hint||''
+    });
+  }
+  window.saveCustomerToSupabase=async function(customer,opts={}){
+    if(!hasCrSupabaseReady()||!customer) return null;
+    const client=window.getSupabaseClient?.();
+    const storeId=getCrStoreId();
+    const session=await getCrSession(client);
+    if(!session) throw new Error('No hay sesión activa en Supabase');
+    const existingRow=await findExistingCustomerRow(client,storeId,customer,opts.customerRows);
+    const payload=mapCustomerToSupabase(customer,storeId,existingRow);
+    try{
+      const res=existingRow
+        ? await client.from('customers').update(payload).eq('id',existingRow.id).eq('store_id',storeId).select('id,store_id,legacy_id,full_name,phone,email,allergies,preferences,notes,total_visits,created_at').single()
+        : await client.from('customers').insert(payload).select('id,store_id,legacy_id,full_name,phone,email,allergies,preferences,notes,total_visits,created_at').single();
+      if(res.error) throw res.error;
+      customer._sb_id=res.data.id;
+      customer.legacy_id=res.data.legacy_id||customer.legacy_id||(!isUuidLike(String(customer.id||''))?String(customer.id):null);
+      customer.total_visits=Number(res.data.total_visits)||customerVisitCount(customer);
+      save();
+      return res.data;
+    }catch(err){
+      logCrWriteError('customer',{operation:existingRow?'update':'insert',payload,storeId,localEntity:{...customer},existingRow},err);
+      throw err;
+    }
+  };
+  window.deleteCustomerFromSupabase=async function(customer,opts={}){
+    if(!hasCrSupabaseReady()||!customer) return null;
+    const client=window.getSupabaseClient?.();
+    const storeId=getCrStoreId();
+    const existingRow=await findExistingCustomerRow(client,storeId,customer,opts.customerRows);
+    if(!existingRow) return null;
+    const {data,error}=await client.from('customers').delete().eq('id',existingRow.id).eq('store_id',storeId).select('id').single();
+    if(error) throw error;
+    return data;
+  };
+  window.syncLocalCustomersToSupabase=async function(){
+    if(!hasCrSupabaseReady()){showToast('Configurá Supabase y una store activa primero');return;}
+    try{
+      setCrState('syncing');
+      const client=window.getSupabaseClient?.();
+      const storeId=getCrStoreId();
+      const existingRows=await queryStoreCustomers(client,storeId);
+      const summary={local:clientes.length,inserted:0,updated:0,errors:[]};
+      for(const customer of clientes){
+        try{
+          const existing=await findExistingCustomerRow(client,storeId,customer,existingRows);
+          const row=await saveCustomerToSupabase(customer,{customerRows:existingRows});
+          if(row){
+            if(existing) summary.updated++;
+            else{ summary.inserted++; existingRows.push(row); }
+          }
+        }catch(err){ summary.errors.push(`${customer.nombre}: ${err.message||err}`); }
+      }
+      crLastSyncAt=`clientes ${stampCrMoment()}`;
+      setCrState('supabase');
+      renderCrSupabaseUi();
+      console.log('[Customers sync summary]',summary);
+      showToast(`✓ Clientes sync · ${summary.local} locales · ${summary.inserted} nuevos · ${summary.updated} actualizados${summary.errors.length?` · errores ${summary.errors.length}`:''}`);
+    }catch(err){
+      console.error('[Customers sync failed]',err);
+      setCrState('error',err.message||String(err));
+      showToast(`Clientes locales OK · Supabase rechazó sync: ${err.message||err}`);
+    }
+  };
+  window.saveReservationToSupabase=async function(reservation,opts={}){
+    if(!hasCrSupabaseReady()||!reservation) return null;
+    const client=window.getSupabaseClient?.();
+    const storeId=getCrStoreId();
+    const session=await getCrSession(client);
+    if(!session) throw new Error('No hay sesión activa en Supabase');
+    const existingRow=await findExistingReservationRow(client,storeId,reservation,opts.reservationRows);
+    const payload=mapReservationToSupabase(reservation,storeId,existingRow,opts.customerRows||clientes);
+    try{
+      const res=existingRow
+        ? await client.from('reservations').update(payload).eq('id',existingRow.id).eq('store_id',storeId).select('id,store_id,legacy_id,customer_id,legacy_customer_id,customer_name,service_type,reservation_date,status,notes,legacy_raw,payment_mode,payment_method,created_at').single()
+        : await client.from('reservations').insert(payload).select('id,store_id,legacy_id,customer_id,legacy_customer_id,customer_name,service_type,reservation_date,status,notes,legacy_raw,payment_mode,payment_method,created_at').single();
+      if(res.error) throw res.error;
+      reservation._sb_id=res.data.id;
+      reservation.legacy_id=res.data.legacy_id||reservation.legacy_id||(!isUuidLike(String(reservation.id||''))?String(reservation.id):null);
+      save();
+      return res.data;
+    }catch(err){
+      logCrWriteError('reservation',{operation:existingRow?'update':'insert',payload,storeId,localEntity:{...reservation},existingRow},err);
+      throw err;
+    }
+  };
+  window.deleteReservationFromSupabase=async function(reservation,opts={}){
+    if(!hasCrSupabaseReady()||!reservation) return null;
+    const client=window.getSupabaseClient?.();
+    const storeId=getCrStoreId();
+    const existingRow=await findExistingReservationRow(client,storeId,reservation,opts.reservationRows);
+    if(!existingRow) return null;
+    const notes=[existingRow.notes,reservation.nota,'[cancelled from frontend]'].filter(Boolean).join(' · ');
+    const {data,error}=await client.from('reservations').update({status:'cancelled',notes}).eq('id',existingRow.id).eq('store_id',storeId).select('id,status').single();
+    if(error) throw error;
+    return data;
+  };
+  window.syncLocalReservationsToSupabase=async function(){
+    if(!hasCrSupabaseReady()){showToast('Configurá Supabase y una store activa primero');return;}
+    try{
+      setCrState('syncing');
+      const client=window.getSupabaseClient?.();
+      const storeId=getCrStoreId();
+      const existingCustomerRows=await queryStoreCustomers(client,storeId);
+      const existingReservationRows=await queryStoreReservations(client,storeId);
+      const summary={local:reservas.length,inserted:0,updated:0,errors:[]};
+      for(const reservation of reservas){
+        try{
+          const existing=await findExistingReservationRow(client,storeId,reservation,existingReservationRows);
+          const row=await saveReservationToSupabase(reservation,{reservationRows:existingReservationRows,customerRows:existingCustomerRows.map(mapCustomerFromSupabase)});
+          if(row){
+            if(existing) summary.updated++;
+            else{ summary.inserted++; existingReservationRows.push(row); }
+          }
+        }catch(err){ summary.errors.push(`${reservation.nombre}: ${err.message||err}`); }
+      }
+      crLastSyncAt=`reservas ${stampCrMoment()}`;
+      setCrState('supabase');
+      renderCrSupabaseUi();
+      console.log('[Reservations sync summary]',summary);
+      showToast(`✓ Reservas sync · ${summary.local} locales · ${summary.inserted} nuevas · ${summary.updated} actualizadas${summary.errors.length?` · errores ${summary.errors.length}`:''}`);
+    }catch(err){
+      console.error('[Reservations sync failed]',err);
+      setCrState('error',err.message||String(err));
+      showToast(`Reservas locales OK · Supabase rechazó sync: ${err.message||err}`);
+    }
+  };
+  window.syncLocalCustomersReservationsToSupabase=async function(){
+    await syncLocalCustomersToSupabase();
+    await syncLocalReservationsToSupabase();
+  };
+  function warnCrSupabaseFailure(kind,err){
+    console.warn(`[Customers/Reservations sync failed] ${kind}`,err);
+    setCrState('error',err?.message||String(err));
+    showToast(`Supabase rechazó ${kind}: ${err?.message||err}`);
+  }
+  function scheduleCrLoad(){ setTimeout(()=>window.reloadCustomersReservationsFromSupabase?.(true),250); }
+  window.probeCustomersReservationsSupabase=async function(){
+    const diag=await fetchCrDiagnostics({includeRows:true});
+    crCurrentStoreName=diag.storeName||crCurrentStoreName;
+    crCurrentRole=diag.role||crCurrentRole;
+    crSupabaseCounts=diag.counts||crSupabaseCounts;
+    crLastReadAt=stampCrMoment();
+    if(diag.error){
+      setCrState('error',diag.error);
+      showToast(`Lectura clientes/reservas falló: ${diag.error}`);
+      return;
+    }
+    renderCrSupabaseUi();
+    showToast(`Lectura OK · ${diag.counts.customers} clientes y ${diag.counts.reservations} reservas`);
+  };
+  window.reloadCustomersReservationsFromSupabase=async function(silent=false){
+    if(!hasCrSupabaseReady()) return false;
+    const diag=await fetchCrDiagnostics({includeRows:true});
+    crCurrentStoreName=diag.storeName||crCurrentStoreName;
+    crCurrentRole=diag.role||crCurrentRole;
+    crSupabaseCounts=diag.counts||crSupabaseCounts;
+    crLastReadAt=stampCrMoment();
+    if(diag.error){
+      setCrState('error',diag.error);
+      if(!silent) showToast(`Fallback local · ${diag.error}`);
+      return false;
+    }
+    const customersOk=await loadCustomersFromSupabase({silent:true,customerRowsOverride:diag.customers});
+    const customerMapRows=diag.customers.map(mapCustomerFromSupabase);
+    const reservationsOk=await loadReservationsFromSupabase({silent:true,reservationRowsOverride:diag.reservations,customerRowsForMap:customerMapRows});
+    if(customersOk||reservationsOk){
+      setCrState('supabase');
+      if(!silent) showToast('✓ Clientes y reservas cargados desde Supabase');
+      return true;
+    }
+    return false;
+  };
+  window.debugCustomersReservationsSupabase=async function(){
+    const diag=await fetchCrDiagnostics({includeRows:true});
+    const customerMap=(diag.customers||[]).map(mapCustomerFromSupabase).map(c=>({localId:c.id,sbId:c._sb_id,legacyId:c.legacy_id,nombre:c.nombre}));
+    console.log('[debugCustomersReservationsSupabase]',{
+      currentStore:{id:diag.storeId,name:diag.storeName},
+      currentRole:diag.role,
+      localCounts:{customers:clientes.length,reservations:reservas.length},
+      customersSelect:diag.customers||[],
+      reservationsSelect:diag.reservations||[],
+      errors:diag.error||crLastError||'',
+      customerMapping:customerMap,
+      warnings:crWarnings
+    });
+    if(diag.error) showToast(`Debug clientes/reservas: ${diag.error}`);
+    else showToast('Debug clientes/reservas impreso en consola');
+  };
+
+  const _renderClientesTabCr=window.renderClientesTab;
+  if(typeof _renderClientesTabCr==='function'){
+    window.renderClientesTab=function(...args){
+      const res=_renderClientesTabCr.apply(this,args);
+      renderCrSupabaseUi();
+      return res;
+    };
+  }
+  const _renderAjustesCr=window.renderAjustes;
+  if(typeof _renderAjustesCr==='function'){
+    window.renderAjustes=function(...args){
+      const res=_renderAjustesCr.apply(this,args);
+      renderCrSupabaseUi();
+      return res;
+    };
+  }
+  const _safeInitSupabaseAccessCr=window.safeInitSupabaseAccess;
+  if(typeof _safeInitSupabaseAccessCr==='function'){
+    window.safeInitSupabaseAccess=async function(...args){
+      const res=await _safeInitSupabaseAccessCr.apply(this,args);
+      scheduleCrLoad();
+      return res;
+    };
+  }
+  const _guardarSupabaseConfigAdjCr=window.guardarSupabaseConfigAdj;
+  if(typeof _guardarSupabaseConfigAdjCr==='function'){
+    window.guardarSupabaseConfigAdj=async function(...args){
+      const res=await _guardarSupabaseConfigAdjCr.apply(this,args);
+      scheduleCrLoad();
+      return res;
+    };
+  }
+  const _reconectarSupabaseCr=window.reconectarSupabase;
+  if(typeof _reconectarSupabaseCr==='function'){
+    window.reconectarSupabase=async function(...args){
+      const res=await _reconectarSupabaseCr.apply(this,args);
+      scheduleCrLoad();
+      return res;
+    };
+  }
+  const _supabaseSignInCr=window.supabaseSignIn;
+  if(typeof _supabaseSignInCr==='function'){
+    window.supabaseSignIn=async function(...args){
+      const res=await _supabaseSignInCr.apply(this,args);
+      scheduleCrLoad();
+      return res;
+    };
+  }
+  const _onSupabaseStoreChangeCr=window.onSupabaseStoreChange;
+  if(typeof _onSupabaseStoreChangeCr==='function'){
+    window.onSupabaseStoreChange=function(...args){
+      const res=_onSupabaseStoreChangeCr.apply(this,args);
+      scheduleCrLoad();
+      return res;
+    };
+  }
+  const _loadFromSheetsCr=window.loadFromSheets;
+  if(typeof _loadFromSheetsCr==='function'){
+    window.loadFromSheets=async function(...args){
+      const res=await _loadFromSheetsCr.apply(this,args);
+      scheduleCrLoad();
+      return res;
+    };
+  }
+  const _guardarClienteCr=window.guardarCliente;
+  if(typeof _guardarClienteCr==='function'){
+    window.guardarCliente=function(...args){
+      const wasEdit=!!editClienteId;
+      const beforeIds=new Set(clientes.map(c=>String(c.id)));
+      const targetId=editClienteId;
+      const res=_guardarClienteCr.apply(this,args);
+      const customer=wasEdit ? clientes.find(c=>sameId(c.id,targetId)) : clientes.find(c=>!beforeIds.has(String(c.id)));
+      if(customer) saveCustomerToSupabase(customer).catch(err=>warnCrSupabaseFailure('cliente',err));
+      return res;
+    };
+  }
+  const _pedirEliminarClienteCr=window.pedirEliminarCliente;
+  if(typeof _pedirEliminarClienteCr==='function'){
+    window.pedirEliminarCliente=function(id,...args){
+      const customer=clientes.find(c=>sameId(c.id,id));
+      const res=_pedirEliminarClienteCr.call(this,id,...args);
+      if(customer){
+        setTimeout(()=>{
+          if(!clientes.some(c=>sameId(c.id,id))) deleteCustomerFromSupabase(customer).catch(err=>warnCrSupabaseFailure('cliente',err));
+        },0);
+      }
+      return res;
+    };
+  }
+  const _guardarReservaCr=window.guardarReserva;
+  if(typeof _guardarReservaCr==='function'){
+    window.guardarReserva=function(...args){
+      const wasEdit=!!editReservaId;
+      const beforeIds=new Set(reservas.map(r=>String(r.id)));
+      const targetId=editReservaId;
+      const res=_guardarReservaCr.apply(this,args);
+      const reservation=wasEdit ? reservas.find(r=>sameId(r.id,targetId)) : reservas.find(r=>!beforeIds.has(String(r.id)));
+      if(reservation) saveReservationToSupabase(reservation).catch(err=>warnCrSupabaseFailure('reserva',err));
+      return res;
+    };
+  }
+  const _pedirEliminarReservaCr=window.pedirEliminarReserva;
+  if(typeof _pedirEliminarReservaCr==='function'){
+    window.pedirEliminarReserva=function(id,...args){
+      const reservation=reservas.find(r=>sameId(r.id,id));
+      const res=_pedirEliminarReservaCr.call(this,id,...args);
+      if(reservation){
+        setTimeout(()=>{
+          if(!reservas.some(r=>sameId(r.id,id))) deleteReservationFromSupabase(reservation).catch(err=>warnCrSupabaseFailure('reserva',err));
+        },0);
+      }
+      return res;
+    };
+  }
+
+  // Mejora mínima de visitas en UI con datos de Supabase
+  const _renderClientesBase=window.renderClientesTab;
+  if(typeof _renderClientesBase==='function'){
+    window.renderClientesTab=function(...args){
+      const el=$('clientes-lista-tab');if(!el)return _renderClientesBase.apply(this,args);
+      const q=($('cliente-search')?.value||'').toLowerCase();
+      const lista=clientes.filter(c=>!q||(c.nombre||'').toLowerCase().includes(q)||(c.telefono||'').includes(q));
+      if(!lista.length){el.innerHTML='<div class="empty">No hay clientes</div>';renderCrSupabaseUi();return;}
+      el.innerHTML=lista.map(c=>`<div class="cliente-row" onclick="openClienteModal('${c.id}')">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="cliente-nombre">${c.nombre}</div>
+          <div class="cliente-visitas">${customerVisitCount(c)} visitas</div>
+        </div>
+        <div class="cliente-meta">${[c.telefono,c.email,c.alergias?'⚠ '+c.alergias:''].filter(Boolean).join(' · ')}</div>
+        ${c.preferencias?`<div style="font-size:11px;color:var(--blue);margin-top:3px">★ ${c.preferencias}</div>`:''}
+      </div>`).join('');
+      renderCrSupabaseUi();
+    };
+  }
+
+  renderCrSupabaseUi();
+})();
+</script>
 </body>
 </html>
