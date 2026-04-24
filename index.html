@@ -4226,6 +4226,7 @@ if(config.webappUrl){loadFromSheets();}
         <button class="btn ghost" type="button" onclick="probeCustomersReservationsSupabase()">Probar lectura clientes/reservas Supabase</button>
         <button class="btn ghost" type="button" onclick="reloadCustomersReservationsFromSupabase()">Recargar clientes/reservas desde Supabase</button>
         <button class="btn ghost" type="button" onclick="syncLocalCustomersReservationsToSupabase()">Subir clientes/reservas actuales a Supabase</button>
+        <button class="btn ghost" type="button" onclick="debugCustomersWritePermissions()">Probar permisos write customers</button>
         <button class="btn ghost" type="button" onclick="debugCustomersReservationsSupabase()">Debug clientes/reservas</button>
       </div>
       <div id="cr-sb-diag" style="font-size:12px;color:var(--ink2);background:var(--surf2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;line-height:1.5"></div>
@@ -4269,6 +4270,7 @@ if(config.webappUrl){loadFromSheets();}
     };
   }
   function mapCustomerToSupabase(customer,storeId,existingRow){
+    const visitsCount=Array.isArray(customer?.visitas) ? customer.visitas.length : Number(customer?.total_visits||0);
     const payload={
       store_id: storeId,
       legacy_id: customer.legacy_id || (!isUuidLike(String(customer.id||'')) ? String(customer.id) : null),
@@ -4278,7 +4280,7 @@ if(config.webappUrl){loadFromSheets();}
       allergies: customer.alergias || null,
       preferences: customer.preferencias || null,
       notes: customer.nota || null,
-      total_visits: customerVisitCount(customer)
+      total_visits: Number(visitsCount)||0
     };
     const sbId=existingRow?.id || customer._sb_id || (isUuidLike(String(customer.id||''))?String(customer.id):'');
     if(sbId) payload.id=sbId;
@@ -4519,6 +4521,28 @@ if(config.webappUrl){loadFromSheets();}
       hint:err?.hint||''
     });
   }
+  function getCrCurrentStoreMeta(){
+    return {id:getCrStoreId(),name:crCurrentStoreName||'',role:crCurrentRole||''};
+  }
+  function getSupabaseErrorMessage(err){
+    if(!err) return 'Error desconocido';
+    return err.message || err.details || String(err);
+  }
+  function inferCustomersPolicyForStep(step){
+    if(step==='select') return 'customers_select_members';
+    if(step==='insert') return 'customers_insert_ops';
+    if(step==='update') return 'customers_update_ops';
+    if(step==='delete') return 'customers_delete_admin';
+    return '';
+  }
+  function inferRlsPolicyMessage(step,err){
+    const raw=`${err?.message||''} ${err?.details||''} ${err?.hint||''}`.toLowerCase();
+    if(err?.code==='42501' || raw.includes('row-level security') || raw.includes('permission denied') || raw.includes('violates row-level security')){
+      const policy=inferCustomersPolicyForStep(step);
+      return policy ? `Posible policy faltante o mal configurada: ${policy}` : 'Posible policy RLS faltante';
+    }
+    return '';
+  }
   window.saveCustomerToSupabase=async function(customer,opts={}){
     if(!hasCrSupabaseReady()||!customer) return null;
     const client=window.getSupabaseClient?.();
@@ -4706,6 +4730,136 @@ if(config.webappUrl){loadFromSheets();}
     if(diag.error) showToast(`Debug clientes/reservas: ${diag.error}`);
     else showToast('Debug clientes/reservas impreso en consola');
   };
+  window.saveCustomerToSupabase=async function(customer,opts={}){
+    if(!customer) return null;
+    if(!hasCrSupabaseReady()){
+      console.warn('[Customers save skipped] Supabase no configurado o sin store activa',{customer});
+      return null;
+    }
+    const client=window.getSupabaseClient?.();
+    if(!client) throw new Error('Cliente Supabase no disponible');
+    const storeId=getCrStoreId();
+    const storeMeta=getCrCurrentStoreMeta();
+    if(!storeId || !isUuidLike(storeId)) throw new Error('Store activa inválida para guardar cliente');
+    const session=await getCrSession(client);
+    if(!session) throw new Error('No hay sesión activa en Supabase');
+    const existingRow=await findExistingCustomerRow(client,storeId,customer,opts.customerRows);
+    const payload=mapCustomerToSupabase(customer,storeId,existingRow);
+    const operation=existingRow ? 'update' : 'insert';
+    console.log('[Customers -> Supabase]',{
+      operation,
+      customerLocal:{...customer},
+      currentStore:storeMeta,
+      currentRole:crCurrentRole||'',
+      storeId,
+      payload,
+      existingRow:existingRow||null
+    });
+    try{
+      const res=existingRow
+        ? await client.from('customers').update(payload).eq('id',existingRow.id).eq('store_id',storeId).select('id,store_id,legacy_id,full_name,phone,email,allergies,preferences,notes,total_visits,created_at').single()
+        : await client.from('customers').insert(payload).select('id,store_id,legacy_id,full_name,phone,email,allergies,preferences,notes,total_visits,created_at').single();
+      console.log('[Customers <- Supabase]',{
+        operation,
+        storeId,
+        data:res?.data||null,
+        message:res?.error?.message||'',
+        code:res?.error?.code||'',
+        details:res?.error?.details||'',
+        hint:res?.error?.hint||''
+      });
+      if(res.error) throw res.error;
+      customer._sb_id=res.data.id;
+      customer.legacy_id=res.data.legacy_id||customer.legacy_id||(!isUuidLike(String(customer.id||''))?String(customer.id):null);
+      customer.total_visits=Number(res.data.total_visits)||customerVisitCount(customer);
+      save();
+      crLastSyncAt=stampCrMoment();
+      setCrState('supabase');
+      return res.data;
+    }catch(err){
+      const policyHint=inferRlsPolicyMessage(operation,err);
+      logCrWriteError('customer',{operation,payload,storeId,localEntity:{...customer},existingRow},err);
+      if(policyHint) console.error('[Customers policy hint]',policyHint);
+      throw err;
+    }
+  };
+  window.debugCustomersWritePermissions=async function(){
+    const result={
+      currentStore:getCrCurrentStoreMeta(),
+      currentRole:crCurrentRole||'',
+      select:{ok:false,count:0,error:null},
+      insert:{ok:false,error:null,data:null},
+      update:{ok:false,error:null,data:null},
+      delete:{ok:false,error:null},
+      policyHint:'',
+      error:null
+    };
+    try{
+      if(!hasCrSupabaseReady()) throw new Error('Supabase no está configurado o falta store activa');
+      const client=window.getSupabaseClient?.();
+      if(!client) throw new Error('Cliente Supabase no disponible');
+      const storeId=getCrStoreId();
+      if(!storeId || !isUuidLike(storeId)) throw new Error('Store activa inválida');
+      const session=await getCrSession(client);
+      if(!session) throw new Error('No hay sesión activa');
+      const selectRes=await client.from('customers').select('id,store_id,legacy_id,full_name,email,total_visits').eq('store_id',storeId).limit(5);
+      result.select={ok:!selectRes.error,count:(selectRes.data||[]).length,error:selectRes.error?{
+        message:selectRes.error.message||'',
+        code:selectRes.error.code||'',
+        details:selectRes.error.details||'',
+        hint:selectRes.error.hint||''
+      }:null};
+      if(selectRes.error) throw Object.assign(selectRes.error,{_step:'select'});
+      if((selectRes.data||[]).length){
+        const row=selectRes.data[0];
+        const updateRes=await client.from('customers').update({full_name:row.full_name}).eq('id',row.id).eq('store_id',storeId).select('id,full_name').single();
+        result.update={ok:!updateRes.error,error:updateRes.error?{
+          message:updateRes.error.message||'',
+          code:updateRes.error.code||'',
+          details:updateRes.error.details||'',
+          hint:updateRes.error.hint||''
+        }:null,data:updateRes.data||null};
+        if(updateRes.error) throw Object.assign(updateRes.error,{_step:'update'});
+      }else{
+        const tempLegacy=`debug_customer_${Date.now()}`;
+        const insertPayload={store_id:storeId,legacy_id:tempLegacy,full_name:'Debug Cliente Temporal',phone:null,email:null,allergies:null,preferences:null,notes:'debugCustomersWritePermissions',total_visits:0};
+        const insertRes=await client.from('customers').insert(insertPayload).select('id,legacy_id,full_name').single();
+        result.insert={ok:!insertRes.error,error:insertRes.error?{
+          message:insertRes.error.message||'',
+          code:insertRes.error.code||'',
+          details:insertRes.error.details||'',
+          hint:insertRes.error.hint||''
+        }:null,data:insertRes.data||null};
+        if(insertRes.error) throw Object.assign(insertRes.error,{_step:'insert'});
+        const deleteRes=await client.from('customers').delete().eq('id',insertRes.data.id).eq('store_id',storeId).select('id').single();
+        result.delete={ok:!deleteRes.error,error:deleteRes.error?{
+          message:deleteRes.error.message||'',
+          code:deleteRes.error.code||'',
+          details:deleteRes.error.details||'',
+          hint:deleteRes.error.hint||''
+        }:null};
+        if(deleteRes.error){
+          result.policyHint=inferRlsPolicyMessage('delete',deleteRes.error);
+          console.warn('[debugCustomersWritePermissions delete cleanup failed]',deleteRes.error);
+        }
+      }
+    }catch(err){
+      const step=err?._step || (result.update.error?'update':result.insert.error?'insert':result.select.error?'select':'');
+      const policyHint=inferRlsPolicyMessage(step,err);
+      result.policyHint=policyHint||result.policyHint;
+      result.error={
+        step:step||'unknown',
+        message:err?.message||String(err),
+        code:err?.code||'',
+        details:err?.details||'',
+        hint:err?.hint||''
+      };
+    }
+    console.log('[debugCustomersWritePermissions]',result);
+    if(result.error) showToast(`Permisos customers: ${result.error.step} falló · ${result.error.message}`);
+    else showToast('Permisos customers OK. Ver consola para detalle');
+    return result;
+  };
 
   const _renderClientesTabCr=window.renderClientesTab;
   if(typeof _renderClientesTabCr==='function'){
@@ -4773,13 +4927,29 @@ if(config.webappUrl){loadFromSheets();}
   }
   const _guardarClienteCr=window.guardarCliente;
   if(typeof _guardarClienteCr==='function'){
-    window.guardarCliente=function(...args){
+    window.guardarCliente=async function(...args){
       const wasEdit=!!editClienteId;
       const beforeIds=new Set(clientes.map(c=>String(c.id)));
       const targetId=editClienteId;
       const res=_guardarClienteCr.apply(this,args);
       const customer=wasEdit ? clientes.find(c=>sameId(c.id,targetId)) : clientes.find(c=>!beforeIds.has(String(c.id)));
-      if(customer) saveCustomerToSupabase(customer).catch(err=>warnCrSupabaseFailure('cliente',err));
+      if(customer && hasCrSupabaseReady()){
+        try{
+          await saveCustomerToSupabase(customer);
+          showToast('Cliente sincronizado con Supabase');
+        }catch(err){
+          const msg=getSupabaseErrorMessage(err);
+          setCrState('error',msg);
+          console.error('[guardarCliente -> saveCustomerToSupabase failed]',{
+            customer:{...customer},
+            message:err?.message||String(err),
+            code:err?.code||'',
+            details:err?.details||'',
+            hint:err?.hint||''
+          });
+          showToast(`Cliente guardado local, pero Supabase falló: ${msg}`);
+        }
+      }
       return res;
     };
   }
