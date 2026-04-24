@@ -1248,6 +1248,12 @@ const $=id=>document.getElementById(id);
 const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
 const fmtK=n=>n>=1000000?'$'+(n/1000000).toFixed(1).replace('.0','')+'M':n>=1000?'$'+Math.round(n/1000)+'k':fmt(n);
 function pad2(n){return String(n).padStart(2,'0');}
+function sameId(a,b){return String(a)===String(b);}
+function normalizeLegacyFrontId(v){
+  if(v===null||v===undefined)return v;
+  const s=String(v);
+  return /^\d+$/.test(s)?Number(s):s;
+}
 function getLocalDateString(date=new Date()){return `${date.getFullYear()}-${pad2(date.getMonth()+1)}-${pad2(date.getDate())}`;}
 function getLocalTimeString(date=new Date()){return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;}
 function getLocalTimestamp(date=new Date()){
@@ -2322,9 +2328,9 @@ function addCat(){
 function addCatFromModal(){ abrirNuevaCatDesdeProducto('ajustes'); }
 function populateCatSelect(){const el=$('m-cat');if(el)el.innerHTML=cats.sort((a,b)=>a.name.localeCompare(b.name,'es')).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');}
 function toggleIlimitado(){const ilim=$('m-ilimitado')?.checked;$('m-stock-wrap').style.display=ilim?'none':'block';}
-function adjProdStock(id,d){const p=menu.find(x=>x.id===id);if(!p||p.ilimitado)return;p.stock=Math.max(0,(p.stock||0)+d);save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
-function setProdStock(id,val){const p=menu.find(x=>x.id===id);if(!p)return;p.stock=Math.max(0,parseInt(val)||0);save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
-function toggleProdIlimitado(id,checked){const p=menu.find(x=>x.id===id);if(!p)return;p.ilimitado=checked;save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
+function adjProdStock(id,d){const p=menu.find(x=>sameId(x.id,id));if(!p||p.ilimitado)return;p.stock=Math.max(0,(p.stock||0)+d);save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
+function setProdStock(id,val){const p=menu.find(x=>sameId(x.id,id));if(!p)return;p.stock=Math.max(0,parseInt(val)||0);save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
+function toggleProdIlimitado(id,checked){const p=menu.find(x=>sameId(x.id,id));if(!p)return;p.ilimitado=checked;save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
 
 function renderMenuAdm(){
   const el=$('menu-adm');if(!el)return;
@@ -2353,7 +2359,7 @@ function openProdModal(id){
   editId=id;populateCatSelect();_variantesEdit=[];
   $('variantes-arr').className='variantes-toggle-arr';$('variantes-body').className='variantes-body';
   if(id){
-    const p=menu.find(x=>x.id===id);if(!p)return;
+    const p=menu.find(x=>sameId(x.id,id));if(!p)return;
     $('prod-modal-title').textContent='Editar producto';
     $('m-nombre').value=p.name||'';$('m-precio').value=p.price;$('m-cat').value=p.cat;
     $('m-stock').value=p.stock||0;$('m-ilimitado').checked=!!p.ilimitado;
@@ -2369,7 +2375,7 @@ function openProdModal(id){
   renderVariantesModalBody();updateVariantesBadge();
   $('modal-prod').classList.add('open');setTimeout(()=>$('m-nombre').focus(),100);
 }
-function pedirEliminarProducto(id){const p=menu.find(x=>x.id===id);closeProdModal();pedirConfirm(`¿Eliminar "${p?.name||''}"?`,()=>{menu=menu.filter(x=>x.id!==id);save();renderMenuAdm();renderProdGrid();syncMenuSheets();showToast('✓ Producto eliminado');});}
+function pedirEliminarProducto(id){const p=menu.find(x=>sameId(x.id,id));closeProdModal();pedirConfirm(`¿Eliminar "${p?.name||''}"?`,()=>{menu=menu.filter(x=>!sameId(x.id,id));save();renderMenuAdm();renderProdGrid();syncMenuSheets();showToast('✓ Producto eliminado');});}
 function closeProdModal(){$('modal-prod').classList.remove('open');}
 function closeProdModalOutside(e){if(e.target===$('modal-prod'))closeProdModal();}
 function guardarProducto(){
@@ -2377,7 +2383,7 @@ function guardarProducto(){
   if(!name||!price){showToast('Completá nombre y precio');return;}
   const ilimitado=!!$('m-ilimitado')?.checked;
   const stock=ilimitado?0:parseInt($('m-stock')?.value)||0;
-  if(editId){Object.assign(menu.find(x=>x.id===editId),{name,price,cat,stock,ilimitado,variantes:_variantesEdit});}
+  if(editId){Object.assign(menu.find(x=>sameId(x.id,editId)),{name,price,cat,stock,ilimitado,variantes:_variantesEdit});}
   else{menu.push({id:menu.reduce((m,p)=>Math.max(m,p.id),0)+1,name,price,cat,stock,ilimitado,variantes:_variantesEdit});}
   save();renderMenuAdm();renderProdGrid();renderCargaCats();syncMenuSheets();closeProdModal();showToast(editId?'✓ Actualizado':'✓ Agregado');
 }
@@ -2631,9 +2637,9 @@ function guardarEditCat(i){
 
 // ── Eliminar producto desde lista (sin abrir modal) ──
 function pedirEliminarProductoInline(id){
-  const p=menu.find(x=>x.id===id);if(!p)return;
+  const p=menu.find(x=>sameId(x.id,id));if(!p)return;
   pedirConfirm(`¿Eliminar "${p.name}"?`,()=>{
-    menu=menu.filter(x=>x.id!==id);save();renderMenuAdm();renderProdGrid();syncMenuSheets();showToast('✓ Producto eliminado');
+    menu=menu.filter(x=>!sameId(x.id,id));save();renderMenuAdm();renderProdGrid();syncMenuSheets();showToast('✓ Producto eliminado');
   });
 }
 
@@ -3498,6 +3504,7 @@ if(config.webappUrl){loadFromSheets();}
         <button class="btn ghost" type="button" onclick="probeCatalogSupabaseRead()">Probar lectura catálogo Supabase</button>
         <button class="btn ghost" type="button" onclick="reloadCatalogFromSupabase()">Recargar catálogo desde Supabase</button>
         <button class="btn ghost" type="button" onclick="syncLocalCatalogToSupabase()">Subir catálogo actual a Supabase</button>
+        <button class="btn ghost" type="button" onclick="debugCatalogWritePermissions()">Probar permisos write catálogo</button>
         <button class="btn ghost" type="button" onclick="debugCatalogSupabase()">Debug catálogo</button>
       </div>
       <div id="catalog-sb-diag" style="font-size:12px;color:var(--ink2);background:var(--surf2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;line-height:1.5"></div>
@@ -3526,7 +3533,7 @@ if(config.webappUrl){loadFromSheets();}
   }
   function mapCategoryFromSupabase(row){
     return{
-      id: row.legacy_id || row.id,
+      id: normalizeLegacyFrontId(row.legacy_id || row.id),
       _sb_id: row.id,
       legacy_id: row.legacy_id || null,
       name: row.name || 'Sin nombre',
@@ -3558,7 +3565,7 @@ if(config.webappUrl){loadFromSheets();}
       console.warn('[Catalog Supabase mapping warning]', warning);
     }
     return{
-      id: row.legacy_id || row.id,
+      id: normalizeLegacyFrontId(row.legacy_id || row.id),
       _sb_id: row.id,
       legacy_id: row.legacy_id || null,
       name: row.name || 'Sin nombre',
@@ -3571,6 +3578,11 @@ if(config.webappUrl){loadFromSheets();}
   }
   function mapProductToSupabase(product,storeId,existingRow,ctx={}){
     const categorySbId=resolveCategorySupabaseId(product.cat,ctx.categoryRows||cats);
+    if(!categorySbId && getFirstAvailableCategorySupabaseId(ctx.categoryRows||cats)){
+      const warning=`Guardado producto "${product?.name||product?.id}" sin category_id resoluble; usando fallback`;
+      if(!catalogWarnings.includes(warning)) catalogWarnings.push(warning);
+      console.warn('[Catalog Supabase mapping warning]', warning, {product,categoryRows:ctx.categoryRows||cats});
+    }
     const payload={
       store_id: storeId,
       category_id: categorySbId || getFirstAvailableCategorySupabaseId(ctx.categoryRows||cats) || null,
@@ -3596,6 +3608,24 @@ if(config.webappUrl){loadFromSheets();}
     const rows=Array.isArray(categoryRows)?categoryRows:[];
     const first=rows.find(r=>(r._sb_id||r.id));
     return first?(first._sb_id||first.id):null;
+  }
+  function logCatalogSupabaseWriteError(kind,meta,err){
+    console.error(`[Catalog Supabase write failed] ${kind}`,{
+      operation: meta.operation,
+      payload: meta.payload,
+      storeId: meta.storeId,
+      currentRole: catalogCurrentRole||'',
+      localEntity: meta.localEntity,
+      existingRow: meta.existingRow||null,
+      message: err?.message||String(err),
+      code: err?.code||'',
+      details: err?.details||'',
+      hint: err?.hint||''
+    });
+  }
+  function getCatalogWriteErrorMessage(prefix,err){
+    const msg=err?.message||String(err)||'Error desconocido';
+    return `${prefix}: ${msg}`;
   }
   async function getCatalogSession(client){
     const {data,error}=await client.auth.getSession();
@@ -3747,14 +3777,14 @@ if(config.webappUrl){loadFromSheets();}
   };
   async function findExistingCategoryRow(client,storeId,cat,categoryRows){
     const refLegacy=cat.legacy_id || (!isUuidLike(String(cat.id||'')) ? String(cat.id) : '');
-    const rows=Array.isArray(categoryRows)?categoryRows:[];
+    const rows=Array.isArray(categoryRows)&&categoryRows.length?categoryRows:await queryStoreCategories(client,storeId,false);
     const found=rows.find(r=>String(r.id||'')===String(cat._sb_id||'') || String(r.id||'')===String(cat.id||'') || (refLegacy && String(r.legacy_id||'')===String(refLegacy)));
     if(found) return found;
     return null;
   }
   async function findExistingProductRow(client,storeId,product,productRows){
     const refLegacy=product.legacy_id || (!isUuidLike(String(product.id||'')) ? String(product.id) : '');
-    const rows=Array.isArray(productRows)?productRows:[];
+    const rows=Array.isArray(productRows)&&productRows.length?productRows:await queryStoreProducts(client,storeId,false);
     const found=rows.find(r=>String(r.id||'')===String(product._sb_id||'') || String(r.id||'')===String(product.id||'') || (refLegacy && String(r.legacy_id||'')===String(refLegacy)));
     if(found) return found;
     return null;
@@ -3768,12 +3798,23 @@ if(config.webappUrl){loadFromSheets();}
     const existingRow=await findExistingCategoryRow(client,storeId,cat,opts.categoryRows);
     const payload=mapCategoryToSupabase(cat,storeId,existingRow);
     let res;
-    if(existingRow){
-      res=await client.from('categories').update(payload).eq('id',existingRow.id).eq('store_id',storeId).select('id,store_id,legacy_id,name,color,section,reservable,active').single();
-    }else{
-      res=await client.from('categories').insert(payload).select('id,store_id,legacy_id,name,color,section,reservable,active').single();
+    try{
+      if(existingRow){
+        res=await client.from('categories').update(payload).eq('id',existingRow.id).eq('store_id',storeId).select('id,store_id,legacy_id,name,color,section,reservable,active').single();
+      }else{
+        res=await client.from('categories').insert(payload).select('id,store_id,legacy_id,name,color,section,reservable,active').single();
+      }
+      if(res.error) throw res.error;
+    }catch(err){
+      logCatalogSupabaseWriteError('category',{
+        operation: existingRow?'update':'insert',
+        payload,
+        storeId,
+        localEntity:{...cat},
+        existingRow
+      },err);
+      throw err;
     }
-    if(res.error) throw res.error;
     cat._sb_id=res.data.id;
     cat.legacy_id=res.data.legacy_id||cat.legacy_id||(!isUuidLike(String(cat.id||''))?String(cat.id):null);
     save();
@@ -3799,12 +3840,23 @@ if(config.webappUrl){loadFromSheets();}
     const existingRow=await findExistingProductRow(client,storeId,product,opts.productRows);
     const payload=mapProductToSupabase(product,storeId,existingRow,{categoryRows});
     let res;
-    if(existingRow){
-      res=await client.from('products').update(payload).eq('id',existingRow.id).eq('store_id',storeId).select('id,store_id,category_id,legacy_id,name,price,stock,unlimited,active,variants').single();
-    }else{
-      res=await client.from('products').insert(payload).select('id,store_id,category_id,legacy_id,name,price,stock,unlimited,active,variants').single();
+    try{
+      if(existingRow){
+        res=await client.from('products').update(payload).eq('id',existingRow.id).eq('store_id',storeId).select('id,store_id,category_id,legacy_id,name,price,stock,unlimited,active,variants').single();
+      }else{
+        res=await client.from('products').insert(payload).select('id,store_id,category_id,legacy_id,name,price,stock,unlimited,active,variants').single();
+      }
+      if(res.error) throw res.error;
+    }catch(err){
+      logCatalogSupabaseWriteError('product',{
+        operation: existingRow?'update':'insert',
+        payload,
+        storeId,
+        localEntity:{...product},
+        existingRow
+      },err);
+      throw err;
     }
-    if(res.error) throw res.error;
     product._sb_id=res.data.id;
     product.legacy_id=res.data.legacy_id||product.legacy_id||(!isUuidLike(String(product.id||''))?String(product.id):null);
     save();
@@ -3882,20 +3934,28 @@ if(config.webappUrl){loadFromSheets();}
     setCatalogLoadState('error', err?.message||String(err));
     const msg=String(err?.message||err||'');
     showToast(msg.toLowerCase().includes('row-level security')||msg.toLowerCase().includes('rls')
-      ? `Guardado local OK · Supabase rechazó la operación por permisos (${kind})`
-      : `Guardado local OK · Supabase no sincronizó (${kind})`);
+      ? `Supabase rechazó update ${kind}: ${msg}`
+      : `Supabase rechazó ${kind}: ${msg}`);
   }
   function scheduleCatalogLoad(){ setTimeout(()=>window.loadCatalogFromSupabase?.({silent:true}),200); }
   window.debugCatalogSupabase=async function(){
     const diag=await fetchCatalogSupabaseDiagnostics({includeRows:true});
     const activeCategories=(diag.categoryRows||[]).filter(r=>r.active!==false);
     const maps=buildCategoryMaps(activeCategories);
+    const dupes=(rows)=>Object.entries(rows.reduce((acc,row)=>{
+      const key=`${row.store_id}::${row.legacy_id||''}`;
+      if(!row.legacy_id) return acc;
+      acc[key]=(acc[key]||0)+1;
+      return acc;
+    },{})).filter(([,count])=>count>1);
     console.log('[debugCatalogSupabase]',{
       currentStore:{id:diag.storeId,name:diag.storeName},
       currentRole:diag.role,
       localCounts:{categories:cats.length,products:menu.length},
       categoriesSelect:diag.categoryRows||[],
       productsSelect:diag.productRows||[],
+      duplicateLegacyCategories:dupes(diag.categoryRows||[]),
+      duplicateLegacyProducts:dupes(diag.productRows||[]),
       errors:diag.error||catalogLoadError||'',
       categoryMappingBySupabaseId:maps.categoryBySupabaseId,
       categoryMappingByLegacyId:maps.categoryByLegacyId,
@@ -3903,6 +3963,39 @@ if(config.webappUrl){loadFromSheets();}
     });
     if(diag.error) showToast(`Debug catálogo: ${diag.error}`);
     else showToast('Debug catálogo impreso en consola');
+  };
+  window.debugCatalogWritePermissions=async function(){
+    if(!hasCatalogSupabaseReady()){
+      console.warn('[debugCatalogWritePermissions] Supabase no configurado o sin store activa');
+      showToast('Supabase no configurado o sin store activa');
+      return;
+    }
+    const client=getCatalogSupabaseClient();
+    const storeId=getCatalogStoreId();
+    const result={storeId,currentRole:catalogCurrentRole||'',categorySelect:null,categoryUpdate:null,productSelect:null,productUpdate:null,error:null};
+    try{
+      const categoryRows=await queryStoreCategories(client,storeId,false);
+      result.categorySelect={ok:true,count:categoryRows.length};
+      const firstCategory=categoryRows[0];
+      if(firstCategory){
+        const categoryPayload={name:firstCategory.name,color:firstCategory.color,section:firstCategory.section,reservable:firstCategory.reservable,active:firstCategory.active};
+        const {error:updateCategoryError}=await client.from('categories').update(categoryPayload).eq('id',firstCategory.id).eq('store_id',storeId);
+        result.categoryUpdate=updateCategoryError?{ok:false,message:updateCategoryError.message,code:updateCategoryError.code,details:updateCategoryError.details,hint:updateCategoryError.hint}:{ok:true};
+      }
+      const productRows=await queryStoreProducts(client,storeId,false);
+      result.productSelect={ok:true,count:productRows.length};
+      const firstProduct=productRows[0];
+      if(firstProduct){
+        const productPayload={name:firstProduct.name,price:firstProduct.price,stock:firstProduct.stock,unlimited:firstProduct.unlimited,active:firstProduct.active,category_id:firstProduct.category_id,variants:firstProduct.variants};
+        const {error:updateProductError}=await client.from('products').update(productPayload).eq('id',firstProduct.id).eq('store_id',storeId);
+        result.productUpdate=updateProductError?{ok:false,message:updateProductError.message,code:updateProductError.code,details:updateProductError.details,hint:updateProductError.hint}:{ok:true};
+      }
+    }catch(err){
+      result.error={message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''};
+    }
+    console.log('[debugCatalogWritePermissions]',result);
+    if(result.error) showToast(`Write debug: ${result.error.message}`);
+    else showToast('Write debug impreso en consola');
   };
 
   const _safeInitSupabaseAccess=window.safeInitSupabaseAccess;
@@ -4042,6 +4135,15 @@ if(config.webappUrl){loadFromSheets();}
   if(typeof _setProdStock==='function'){
     window.setProdStock=function(id,val,...args){
       const res=_setProdStock.call(this,id,val,...args);
+      const product=menu.find(p=>String(p.id)===String(id));
+      if(product) saveProductToSupabase(product,{categoryRows:cats}).catch(err=>warnSupabaseCatalogFailure('producto',err));
+      return res;
+    };
+  }
+  const _adjProdStock=window.adjProdStock;
+  if(typeof _adjProdStock==='function'){
+    window.adjProdStock=function(id,d,...args){
+      const res=_adjProdStock.call(this,id,d,...args);
       const product=menu.find(p=>String(p.id)===String(id));
       if(product) saveProductToSupabase(product,{categoryRows:cats}).catch(err=>warnSupabaseCatalogFailure('producto',err));
       return res;
