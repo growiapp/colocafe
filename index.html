@@ -6425,8 +6425,32 @@ if(config.webappUrl){loadFromSheets();}
       activeStoreId:cfg.activeStoreId||''
     };
   }
-  function getSalesStoreId(){return currentStore?.id||getSalesConfig().activeStoreId||'';}
-  function getSalesStoreName(){return currentStore?.name||salesCurrentStoreName||'';}
+  function getSalesStore(){
+    const cfg=getSalesConfig();
+    const activeStoreId=cfg.activeStoreId||'';
+    const stores=Array.isArray(window.supabaseStores)?window.supabaseStores:[];
+    if(activeStoreId){
+      const found=stores.find(s=>String(s?.id||'')===String(activeStoreId));
+      if(found) return found;
+      return{id:activeStoreId,name:'',role:''};
+    }
+    return stores.find(s=>s?.active)||null;
+  }
+  function getSalesStoreId(){
+    const store=getSalesStore();
+    return String(store?.id||getSalesConfig().activeStoreId||'');
+  }
+  function getSalesStoreName(){
+    const store=getSalesStore();
+    if(store?.name) return store.name;
+    if(store?.id) return String(store.id);
+    if(salesCurrentStoreName) return salesCurrentStoreName;
+    return '—';
+  }
+  function getSalesRole(){
+    const store=getSalesStore();
+    return store?.role||salesCurrentRole||'';
+  }
   function hasSalesSupabaseReady(){
     const cfg=getSalesConfig();
     return !!(cfg.supabaseUrl&&cfg.supabaseAnonKey&&window.getSupabaseClient?.()&&getSalesStoreId());
@@ -6466,24 +6490,29 @@ if(config.webappUrl){loadFromSheets();}
     body.insertBefore(box, body.firstChild);
   }
   function renderSalesSupabaseUi(){
-    ensureSalesSupabaseUi();
-    const statusEl=$('sales-sb-status');
-    if(statusEl) statusEl.textContent=getSalesSourceLabel();
-    const diag=$('sales-sb-diag');
-    if(diag){
-      const ticketCount=groupLocalSaleRowsByTicket(ventas||[]).length;
-      diag.innerHTML=`
-        <div><strong>Fuente ventas:</strong> ${salesWriteState==='error'?'Fallback':salesWriteState==='syncing'?'Sincronizando':'Local + Supabase write-through'}</div>
-        <div><strong>Store activa:</strong> ${getSalesStoreName()||'Sin store activa'}</div>
-        <div><strong>Store ID:</strong> ${getSalesStoreId()||'—'}</div>
-        <div><strong>Rol:</strong> ${salesCurrentRole||'—'}</div>
-        <div><strong>Ventas locales:</strong> ${ticketCount} tickets · ${(ventas||[]).length} filas</div>
-        <div><strong>Conteos Supabase:</strong> ${salesSupabaseCounts.sales} sales · ${salesSupabaseCounts.items} items · ${salesSupabaseCounts.payments} payments</div>
-        <div><strong>Última sync ventas:</strong> ${salesLastSyncAt||'—'}</div>
-        <div><strong>Último ticket sincronizado:</strong> ${salesLastTicket||'—'}</div>
-        <div><strong>Último error ventas:</strong> ${salesLastError||'—'}</div>
-        <div><strong>Última lectura:</strong> ${salesLastProbeAt||'—'}</div>
-      `;
+    try{
+      ensureSalesSupabaseUi();
+      const statusEl=$('sales-sb-status');
+      if(statusEl) statusEl.textContent=getSalesSourceLabel();
+      const diag=$('sales-sb-diag');
+      if(diag){
+        const ticketCount=groupLocalSaleRowsByTicket(ventas||[]).length;
+        const storeId=getSalesStoreId();
+        diag.innerHTML=`
+          <div><strong>Fuente ventas:</strong> ${salesWriteState==='error'?'Fallback':salesWriteState==='syncing'?'Sincronizando':'Local + Supabase write-through'}</div>
+          <div><strong>Store activa:</strong> ${getSalesStoreName()}</div>
+          <div><strong>Store ID:</strong> ${storeId||'—'}</div>
+          <div><strong>Rol:</strong> ${getSalesRole()||'—'}</div>
+          <div><strong>Ventas locales:</strong> ${ticketCount} tickets · ${(ventas||[]).length} filas</div>
+          <div><strong>Conteos Supabase:</strong> ${salesSupabaseCounts.sales} sales · ${salesSupabaseCounts.items} items · ${salesSupabaseCounts.payments} payments</div>
+          <div><strong>Última sync ventas:</strong> ${salesLastSyncAt||'—'}</div>
+          <div><strong>Último ticket sincronizado:</strong> ${salesLastTicket||'—'}</div>
+          <div><strong>Último error ventas:</strong> ${salesLastError||(!storeId?'No hay tienda activa':'—')}</div>
+          <div><strong>Última lectura:</strong> ${salesLastProbeAt||'—'}</div>
+        `;
+      }
+    }catch(err){
+      console.warn('[Sales render diagnostic failed]',err);
     }
   }
 
@@ -6524,7 +6553,7 @@ if(config.webappUrl){loadFromSheets();}
     const base={
       storeId:getSalesStoreId(),
       storeName:getSalesStoreName(),
-      role:'',
+      role:getSalesRole()||'',
       counts:{sales:0,items:0,payments:0},
       error:''
     };
@@ -6903,7 +6932,7 @@ if(config.webappUrl){loadFromSheets();}
       const saleDelete=await client.from('sales').delete().eq('id',saleId).eq('store_id',storeId);
       if(saleDelete.error) console.warn('[Sales debug cleanup failed]',saleDelete.error);
       console.log({
-        currentRole:salesCurrentRole||'',
+        currentRole:getSalesRole()||'',
         error:null,
         salesSelectOk:true,
         salesCount:salesCount||0,
@@ -6932,7 +6961,7 @@ if(config.webappUrl){loadFromSheets();}
     console.group('[Sales Supabase debug]');
     console.log({
       currentStore:{id:getSalesStoreId(),name:getSalesStoreName()},
-      currentRole:salesCurrentRole||diag.role||'',
+      currentRole:getSalesRole()||diag.role||'',
       localRows:(ventas||[]).length,
       localTickets:groupLocalSaleRowsByTicket(ventas||[]).length,
       salesCounts:diag.counts,
