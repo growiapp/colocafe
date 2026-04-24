@@ -3132,27 +3132,33 @@ if(config.webappUrl){loadFromSheets();}
     };
   }
 
-  let supabaseObserverTicking=false;
-  const supabaseAccordionObserver=new MutationObserver(()=>{
-    if(supabaseObserverTicking) return;
-    supabaseObserverTicking=true;
-    requestAnimationFrame(()=>{
-      supabaseObserverTicking=false;
+  window.safeInitSupabaseAccess=async function(){
+    try{
+      ensureSupabaseConfigShape();
+      ensureSupabaseHeaderPill();
       ensureSupabaseAccordion();
+      ensureSupabaseModal();
       renderSupabaseStatus();
-    });
-  });
-  supabaseAccordionObserver.observe(document.body,{childList:true,subtree:true});
+      if(hasSupabaseConfig()){
+        try{
+          await initSupabaseClient();
+        }catch(err){
+          console.error('[Supabase optional init failed]', err);
+          try{ if(window.showToast) showToast('Supabase opcional no disponible'); }catch(_){}
+        }
+      }
+    }catch(err){
+      console.error('[Supabase optional init failed]', err);
+      try{ if(window.showToast) showToast('Supabase opcional no disponible'); }catch(_){}
+    }
+  };
 
-  ensureSupabaseConfigShape();
-  ensureSupabaseHeaderPill();
-  ensureSupabaseAccordion();
-  ensureSupabaseModal();
-  renderSupabaseStatus();
-  if(hasSupabaseConfig()) initSupabaseClient();
+  setTimeout(()=>{
+    if(window.safeInitSupabaseAccess) window.safeInitSupabaseAccess();
+  },0);
 })();
 </script>
-<script>
+<script type="application/disabled-supabase-patch">
 (()=>{
   const SB_URL_IDS=['cfg-sb-url-modal','cfg-sb-url-adj'];
   const SB_ANON_IDS=['cfg-sb-anon-modal','cfg-sb-anon-adj'];
