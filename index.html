@@ -3152,5 +3152,282 @@ if(config.webappUrl){loadFromSheets();}
   if(hasSupabaseConfig()) initSupabaseClient();
 })();
 </script>
+<script>
+(()=>{
+  const SB_URL_IDS=['cfg-sb-url-modal','cfg-sb-url-adj'];
+  const SB_ANON_IDS=['cfg-sb-anon-modal','cfg-sb-anon-adj'];
+  const SB_STATUS_IDS=['sb-auth-status','sb-auth-status-modal'];
+  let sbUiState='unconfigured';
+  let sbUiError='';
+
+  function sbById(id){ return document.getElementById(id); }
+  function sbRead(ids){
+    for(const id of ids){
+      const el=sbById(id);
+      if(el && typeof el.value==='string' && el.value!=='') return el.value;
+    }
+    return '';
+  }
+  function sbWrite(ids,value){
+    ids.forEach(id=>{
+      const el=sbById(id);
+      if(el) el.value=value;
+    });
+  }
+  function sbFocusFirst(ids){
+    const el=ids.map(sbById).find(Boolean);
+    if(el){ el.focus(); el.select?.(); }
+  }
+  function sbInsertAtCursor(el,text){
+    if(!el) return;
+    const start=typeof el.selectionStart==='number' ? el.selectionStart : (el.value||'').length;
+    const end=typeof el.selectionEnd==='number' ? el.selectionEnd : (el.value||'').length;
+    const next=(el.value||'').slice(0,start)+text+(el.value||'').slice(end);
+    el.value=next;
+    const caret=start+text.length;
+    if(el.setSelectionRange) el.setSelectionRange(caret, caret);
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+  function sbIsConfigInput(target){
+    return !!(target && target.id && [...SB_URL_IDS,...SB_ANON_IDS].includes(target.id));
+  }
+  function sbHasSavedConfig(){
+    return !!((window.config?.supabaseUrl||localStorage.getItem('supabase_url')||'') && (window.config?.supabaseAnonKey||localStorage.getItem('supabase_anon_key')||''));
+  }
+  function sbSetStatusText(message){
+    SB_STATUS_IDS.forEach(id=>{ const el=sbById(id); if(el) el.textContent=message; });
+  }
+  function sbApplyStatus(){
+    if(sbUiState==='connected') sbSetStatusText('Conectado');
+    else if(sbUiState==='error') sbSetStatusText(`Error de conexión${sbUiError?`: ${sbUiError}`:''}`);
+    else if(sbHasSavedConfig()) sbSetStatusText('Supabase configurado');
+    else sbSetStatusText('Sin configurar');
+  }
+  function sbSetState(state,error=''){
+    sbUiState=state;
+    sbUiError=error||'';
+    sbApplyStatus();
+  }
+  function sbPersist(url,key){
+    localStorage.setItem('supabase_url', url);
+    localStorage.setItem('supabase_anon_key', key);
+    if(window.config){
+      config={...config,supabaseUrl:url,supabaseAnonKey:key};
+      localStorage.setItem('config', JSON.stringify(config));
+    }
+  }
+  function sbValidate(url,key){
+    if(!url) return 'Project URL requerida';
+    if(!url.startsWith('https://')) return 'Project URL debe empezar con https://';
+    if(!url.includes('.supabase.co')) return 'Project URL debe contener .supabase.co';
+    if(!key) return 'Anon key no debe estar vacía';
+    return '';
+  }
+  function sbEnsurePasteButtons(){
+    const rows=[...document.querySelectorAll('[data-sb-config-wrap="true"]')];
+    rows.forEach(wrap=>{
+      if(wrap.parentNode?.querySelector('[data-sb-paste-row="true"]')) return;
+      const row=document.createElement('div');
+      row.className='row';
+      row.setAttribute('data-sb-paste-row','true');
+      row.innerHTML='<button class="btn ghost" type="button" onclick="pasteSupabaseField(\'url\')">Pegar URL</button><button class="btn ghost" type="button" onclick="pasteSupabaseField(\'anon\')">Pegar anon key</button>';
+      wrap.insertAdjacentElement('afterend', row);
+    });
+  }
+  function sbEnsureAnonToggles(){
+    SB_ANON_IDS.forEach(id=>{
+      const input=sbById(id);
+      if(!input) return;
+      input.type=(input.dataset.sbVisible==='1')?'text':'password';
+      const host=input.parentElement;
+      if(!host) return;
+      let btn=host.querySelector('[data-sb-toggle="true"]');
+      if(!btn){
+        btn=document.createElement('button');
+        btn.type='button';
+        btn.className='btn ghost';
+        btn.setAttribute('data-sb-toggle','true');
+        btn.onclick=()=>window.toggleSupabaseAnonVisibility();
+        host.appendChild(btn);
+      }
+      btn.textContent=input.type==='password'?'Mostrar':'Ocultar';
+    });
+  }
+  function sbShieldInput(el){
+    if(!el || el.dataset.sbFixed==='1') return;
+    el.dataset.sbFixed='1';
+    ['keydown','keyup','keypress','beforeinput','input','click','mousedown','mouseup','contextmenu','focus','select'].forEach(evt=>{
+      el.addEventListener(evt,e=>e.stopPropagation(),true);
+    });
+    el.addEventListener('paste',e=>{
+      e.stopPropagation();
+      const text=e.clipboardData?.getData('text');
+      if(typeof text==='string' && text.length){
+        e.preventDefault();
+        sbInsertAtCursor(el,text);
+      }
+    },true);
+  }
+  function sbPrepareInputs(){
+    SB_URL_IDS.forEach(id=>{
+      const el=sbById(id);
+      if(!el) return;
+      el.type='text';
+      el.autocomplete='off';
+      el.spellcheck=false;
+      el.autocapitalize='off';
+      el.autocorrect='off';
+      el.inputMode='url';
+      el.classList.add('sb-config-input');
+      sbShieldInput(el);
+    });
+    SB_ANON_IDS.forEach(id=>{
+      const el=sbById(id);
+      if(!el) return;
+      if(!el.dataset.sbVisible) el.dataset.sbVisible='0';
+      el.type=el.dataset.sbVisible==='1'?'text':'password';
+      el.autocomplete='off';
+      el.spellcheck=false;
+      el.autocapitalize='off';
+      el.autocorrect='off';
+      el.inputMode='text';
+      el.classList.add('sb-config-input');
+      sbShieldInput(el);
+    });
+    sbEnsurePasteButtons();
+    sbEnsureAnonToggles();
+  }
+
+  window.toggleSupabaseAnonVisibility=function(){
+    SB_ANON_IDS.forEach(id=>{
+      const el=sbById(id);
+      if(!el) return;
+      el.dataset.sbVisible=el.dataset.sbVisible==='1'?'0':'1';
+      el.type=el.dataset.sbVisible==='1'?'text':'password';
+    });
+    sbEnsureAnonToggles();
+  };
+
+  window.pasteSupabaseField=async function(kind){
+    const ids=kind==='anon'?SB_ANON_IDS:SB_URL_IDS;
+    try{
+      if(!navigator.clipboard?.readText) throw new Error('Clipboard API unavailable');
+      const text=(await navigator.clipboard.readText()).trim();
+      if(!text){
+        window.showToast?.('El portapapeles está vacío');
+        return;
+      }
+      sbWrite(ids,text);
+      sbFocusFirst(ids);
+      window.showToast?.(kind==='anon'?'✓ Anon key pegada':'✓ URL pegada');
+    }catch(err){
+      const manual=window.prompt(kind==='anon'?'Pegá la anon key:':'Pegá la Project URL:','');
+      if(typeof manual==='string' && manual.trim()){
+        sbWrite(ids,manual.trim());
+        sbFocusFirst(ids);
+        window.showToast?.(kind==='anon'?'✓ Anon key cargada':'✓ URL cargada');
+      }else{
+        window.showToast?.('Si el portapapeles está bloqueado, igual podés usar Ctrl+V o el menú contextual dentro del campo.');
+      }
+    }
+  };
+
+  const sbOriginalSave=window.guardarSupabaseConfigAdj;
+  if(typeof sbOriginalSave==='function'){
+    window.guardarSupabaseConfigAdj=async function(...args){
+      sbPrepareInputs();
+      const url=sbRead(SB_URL_IDS).trim();
+      const key=sbRead(SB_ANON_IDS).trim();
+      const validationError=sbValidate(url,key);
+      if(validationError){
+        sbSetState('error',validationError);
+        window.showToast?.(validationError);
+        return;
+      }
+      if(!/^eyJ/.test(key)) window.showToast?.('La anon key suele empezar con eyJ. Revisala si la conexión falla.');
+      sbPersist(url,key);
+      sbSetState('configured');
+      try{
+        const result=await sbOriginalSave.apply(this,args);
+        setTimeout(()=>{
+          const txt=(sbById('sb-auth-status')?.textContent||'').toLowerCase();
+          if(txt.includes('conectado')) sbSetState('connected');
+          else if(txt.includes('error')) sbSetState('error', sbById('sb-auth-status')?.textContent||'');
+          else sbSetState('configured');
+        },80);
+        return result;
+      }catch(err){
+        sbSetState('error', err?.message||String(err));
+        throw err;
+      }
+    };
+  }
+
+  const sbOriginalReconnect=window.reconectarSupabase;
+  if(typeof sbOriginalReconnect==='function'){
+    window.reconectarSupabase=async function(...args){
+      const url=sbRead(SB_URL_IDS).trim() || localStorage.getItem('supabase_url') || '';
+      const key=sbRead(SB_ANON_IDS).trim() || localStorage.getItem('supabase_anon_key') || '';
+      const validationError=sbValidate(url,key);
+      if(validationError){
+        sbSetState('error',validationError);
+        window.showToast?.(validationError);
+        return;
+      }
+      sbPersist(url,key);
+      sbSetState('configured');
+      try{
+        const result=await sbOriginalReconnect.apply(this,args);
+        setTimeout(()=>{
+          const txt=(sbById('sb-auth-status')?.textContent||'').toLowerCase();
+          if(txt.includes('conectado')) sbSetState('connected');
+          else if(txt.includes('error')) sbSetState('error', sbById('sb-auth-status')?.textContent||'');
+          else sbSetState('configured');
+        },80);
+        return result;
+      }catch(err){
+        sbSetState('error', err?.message||String(err));
+        throw err;
+      }
+    };
+  }
+
+  const sbOriginalSignIn=window.supabaseSignIn;
+  if(typeof sbOriginalSignIn==='function'){
+    window.supabaseSignIn=async function(...args){
+      try{
+        const result=await sbOriginalSignIn.apply(this,args);
+        setTimeout(()=>sbSetState('connected'),120);
+        return result;
+      }catch(err){
+        sbSetState('error', err?.message||String(err));
+        throw err;
+      }
+    };
+  }
+
+  const sbOriginalSignOut=window.supabaseSignOut;
+  if(typeof sbOriginalSignOut==='function'){
+    window.supabaseSignOut=async function(...args){
+      const result=await sbOriginalSignOut.apply(this,args);
+      sbSetState(sbHasSavedConfig()?'configured':'unconfigured');
+      return result;
+    };
+  }
+
+  document.addEventListener('keydown',e=>{ if(sbIsConfigInput(e.target)) e.stopPropagation(); },true);
+  document.addEventListener('paste',e=>{ if(sbIsConfigInput(e.target)) e.stopPropagation(); },true);
+  document.addEventListener('beforeinput',e=>{ if(sbIsConfigInput(e.target)) e.stopPropagation(); },true);
+
+  const sbFixObserver=new MutationObserver(()=>{
+    sbPrepareInputs();
+    sbApplyStatus();
+  });
+  sbFixObserver.observe(document.body,{childList:true,subtree:true});
+
+  sbPrepareInputs();
+  sbSetState(sbHasSavedConfig()?'configured':'unconfigured');
+})();
+</script>
 </body>
 </html>
