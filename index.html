@@ -6632,6 +6632,37 @@ if(config.webappUrl){loadFromSheets();}
     }
     return '';
   }
+  function logSalesTableError(table,operation,payload,existingRow,err){
+    console.error('[Sales Supabase table error]',{
+      table,
+      operation,
+      payload,
+      existingRow:existingRow||null,
+      message:err?.message||String(err),
+      code:err?.code||'',
+      details:err?.details||'',
+      hint:err?.hint||''
+    });
+  }
+  async function saveSalesRowManual(client,table,storeId,payload,selectColumns='id,legacy_id'){
+    let existingRow=null;
+    try{
+      const existingRes=await client.from(table).select('id,legacy_id').eq('store_id',storeId).eq('legacy_id',payload.legacy_id).maybeSingle();
+      if(existingRes.error) throw Object.assign(existingRes.error,{_salesOp:'select',_salesTable:table,_salesPayload:payload,_salesExisting:null});
+      existingRow=existingRes.data||null;
+      if(existingRow){
+        const updateRes=await client.from(table).update(payload).eq('id',existingRow.id).eq('store_id',storeId).select(selectColumns).single();
+        if(updateRes.error) throw Object.assign(updateRes.error,{_salesOp:'update',_salesTable:table,_salesPayload:payload,_salesExisting:existingRow});
+        return updateRes.data;
+      }
+      const insertRes=await client.from(table).insert(payload).select(selectColumns).single();
+      if(insertRes.error) throw Object.assign(insertRes.error,{_salesOp:'insert',_salesTable:table,_salesPayload:payload,_salesExisting:null});
+      return insertRes.data;
+    }catch(err){
+      logSalesTableError(table,err?._salesOp||'unknown',err?._salesPayload||payload,err?._salesExisting||existingRow,err);
+      throw err;
+    }
+  }
   async function resolveSaleProductId(row,client,storeId,cache){
     cache=cache||{};
     const direct=row?._product_sb_id;
@@ -6822,32 +6853,42 @@ if(config.webappUrl){loadFromSheets();}
       const existingRow=await findExistingSaleRow(client,storeId,group);
       const salePayload=await mapSaleGroupToSupabaseSale(group,{client,storeId,cache:relationCache});
       console.log('sale payload',salePayload);
-      const saleRes=existingRow
-        ? await client.from('sales').update(salePayload).eq('id',existingRow.id).eq('store_id',storeId).select('id,legacy_id').single()
-        : await client.from('sales').upsert(salePayload,{onConflict:'store_id,legacy_id'}).select('id,legacy_id').single();
-      if(saleRes.error) throw saleRes.error;
-      console.log('sale result',saleRes.data);
-      const saleId=saleRes.data.id;
+      const saleData=existingRow
+        ? await (async()=>{
+            try{
+              const res=await client.from('sales').update(salePayload).eq('id',existingRow.id).eq('store_id',storeId).select('id,legacy_id').single();
+              if(res.error) throw Object.assign(res.error,{_salesOp:'update',_salesTable:'sales',_salesPayload:salePayload,_salesExisting:existingRow});
+              return res.data;
+            }catch(err){
+              logSalesTableError('sales',err?._salesOp||'update',err?._salesPayload||salePayload,err?._salesExisting||existingRow,err);
+              throw err;
+            }
+          })()
+        : await saveSalesRowManual(client,'sales',storeId,salePayload,'id,legacy_id');
+      console.log('sale result',saleData);
+      const saleId=saleData.id;
       const itemsPayload=await Promise.all((group.rows||[]).map(row=>mapSaleItemToSupabaseItem(row,saleId,{client,storeId,cache:relationCache})));
       console.log('items payload',itemsPayload);
-      const itemsRes=itemsPayload.length
-        ? await client.from('sale_items').upsert(itemsPayload,{onConflict:'store_id,legacy_id'}).select('id,legacy_id')
-        : {data:[],error:null};
-      if(itemsRes.error) throw itemsRes.error;
-      console.log('items result',itemsRes.data);
+      const itemsData=[];
+      for(const itemPayload of itemsPayload){
+        const itemData=await saveSalesRowManual(client,'sale_items',storeId,itemPayload,'id,legacy_id');
+        itemsData.push(itemData);
+      }
+      console.log('items result',itemsData);
       const paymentsPayload=(group.payments||[]).map((payment,index)=>mapSalePaymentToSupabasePayment(payment,saleId,group,index));
       console.log('payments payload',paymentsPayload);
-      const paymentsRes=paymentsPayload.length
-        ? await client.from('sale_payments').upsert(paymentsPayload,{onConflict:'store_id,legacy_id'}).select('id,legacy_id')
-        : {data:[],error:null};
-      if(paymentsRes.error) throw paymentsRes.error;
-      console.log('payments result',paymentsRes.data);
+      const paymentsData=[];
+      for(const paymentPayload of paymentsPayload){
+        const paymentData=await saveSalesRowManual(client,'sale_payments',storeId,paymentPayload,'id,legacy_id');
+        paymentsData.push(paymentData);
+      }
+      console.log('payments result',paymentsData);
       markLocalSaleRowsSync(group.rows,{saleId,status:'ok',error:''});
       salesLastSyncAt=stampSalesMoment();
       setSalesWriteState('ready');
       await refreshSalesDiagnostics({silent:true});
       console.groupEnd();
-      return{ok:true,saleId,legacyId:saleRes.data.legacy_id||salesLastTicket};
+      return{ok:true,saleId,legacyId:saleData.legacy_id||salesLastTicket};
     }catch(err){
       console.error('sale result/error',{
         message:err?.message||String(err),
@@ -6856,7 +6897,7 @@ if(config.webappUrl){loadFromSheets();}
         hint:err?.hint||'',
         policyHint:inferSalesPolicyMessage(err)
       });
-      markLocalSaleRowsSync(group.rows,{saleId:null,status:'error',error:err?.message||String(err)});
+      markLocalSaleRowsSync(group.rows,{saleId:null,status:'partial_error',error:err?.message||String(err)});
       setSalesWriteState('error',err?.message||String(err));
       console.groupEnd();
       throw err;
