@@ -6893,6 +6893,12 @@ if(config.webappUrl){loadFromSheets();}
     const client=getSalesSupabaseClient();
     if(!hasSalesSupabaseReady()||!client){showToast('Configurá Supabase y una store activa primero');return;}
     console.group('[Sales Supabase write permissions]');
+    let saleId=null;
+    let paymentId=null;
+    let itemId=null;
+    let cleanupPaymentsOk=false;
+    let cleanupItemsOk=false;
+    let cleanupSalesOk=false;
     try{
       const session=await getSalesSession(client);
       if(!session) throw new Error('No hay sesión activa');
@@ -6920,7 +6926,7 @@ if(config.webappUrl){loadFromSheets();}
       if(paymentsSelectErr) throw paymentsSelectErr;
       const saleInsert=await client.from('sales').insert(salePayload).select('id,legacy_id').single();
       if(saleInsert.error) throw saleInsert.error;
-      const saleId=saleInsert.data.id;
+      saleId=saleInsert.data.id;
       const itemInsert=await client.from('sale_items').insert({
         store_id:storeId,
         sale_id:saleId,
@@ -6934,6 +6940,7 @@ if(config.webappUrl){loadFromSheets();}
         metadata:{debug:true}
       }).select('id').single();
       if(itemInsert.error) throw itemInsert.error;
+      itemId=itemInsert.data.id;
       const paymentInsert=await client.from('sale_payments').insert({
         store_id:storeId,
         sale_id:saleId,
@@ -6945,12 +6952,11 @@ if(config.webappUrl){loadFromSheets();}
         metadata:{debug:true}
       }).select('id').single();
       if(paymentInsert.error) throw paymentInsert.error;
+      paymentId=paymentInsert.data.id;
       const paymentUpdate=await client.from('sale_payments').update({amount:2}).eq('id',paymentInsert.data.id).eq('store_id',storeId).select('id').single();
       if(paymentUpdate.error) throw paymentUpdate.error;
       const saleUpdate=await client.from('sales').update({notes:'debug ok'}).eq('id',saleId).eq('store_id',storeId).select('id').single();
       if(saleUpdate.error) throw saleUpdate.error;
-      const saleDelete=await client.from('sales').delete().eq('id',saleId).eq('store_id',storeId);
-      if(saleDelete.error) console.warn('[Sales debug cleanup failed]',saleDelete.error);
       console.log({
         currentRole:getSalesRole()||'',
         error:null,
@@ -6966,7 +6972,6 @@ if(config.webappUrl){loadFromSheets();}
         salePaymentsUpdateOk:true,
         salesUpdateOk:true
       });
-      console.groupEnd();
       showToast('Permisos write sales OK');
     }catch(err){
       const schemaHint=inferSalesSchemaCacheMessage(err);
@@ -6978,8 +6983,43 @@ if(config.webappUrl){loadFromSheets();}
         policyHint:inferSalesPolicyMessage(err),
         schemaHint
       });
-      console.groupEnd();
       showToast(schemaHint||`Write sales falló: ${err?.message||String(err)}`);
+    }finally{
+      if(paymentId){
+        const paymentDelete=await client.from('sale_payments').delete().eq('id',paymentId).eq('store_id',storeId);
+        if(paymentDelete.error){
+          console.error('[Sales debug cleanup payments failed]',paymentDelete.error);
+        }else cleanupPaymentsOk=true;
+      }else{
+        const paymentDelete=await client.from('sale_payments').delete().eq('store_id',storeId).like('legacy_id','debug%');
+        if(paymentDelete.error){
+          console.error('[Sales debug cleanup payments failed]',paymentDelete.error);
+        }else cleanupPaymentsOk=true;
+      }
+      if(itemId){
+        const itemDelete=await client.from('sale_items').delete().eq('id',itemId).eq('store_id',storeId);
+        if(itemDelete.error){
+          console.error('[Sales debug cleanup items failed]',itemDelete.error);
+        }else cleanupItemsOk=true;
+      }else{
+        const itemDelete=await client.from('sale_items').delete().eq('store_id',storeId).like('legacy_id','debug%');
+        if(itemDelete.error){
+          console.error('[Sales debug cleanup items failed]',itemDelete.error);
+        }else cleanupItemsOk=true;
+      }
+      if(saleId){
+        const saleDelete=await client.from('sales').delete().eq('id',saleId).eq('store_id',storeId);
+        if(saleDelete.error){
+          console.error('[Sales debug cleanup sales failed]',saleDelete.error);
+        }else cleanupSalesOk=true;
+      }else{
+        const saleDelete=await client.from('sales').delete().eq('store_id',storeId).like('legacy_id','debug%');
+        if(saleDelete.error){
+          console.error('[Sales debug cleanup sales failed]',saleDelete.error);
+        }else cleanupSalesOk=true;
+      }
+      console.log({cleanupPaymentsOk,cleanupItemsOk,cleanupSalesOk});
+      console.groupEnd();
     }
   };
 
