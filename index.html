@@ -5780,5 +5780,614 @@ if(config.webappUrl){loadFromSheets();}
   setTimeout(()=>window.reloadExpensesFromSupabase?.(true),280);
 })();
 </script>
+<script>
+(()=>{
+  let shiftsLoadState='local';
+  let shiftsLastError='';
+  let shiftsLastReadAt='';
+  let shiftsLastSyncAt='';
+  let shiftsCurrentRole='';
+  let shiftsCurrentStoreName='';
+  let shiftsRemoteOpen=false;
+
+  function getShiftsConfig(){
+    try{
+      return (typeof config==='object'&&config)?config:JSON.parse(localStorage.getItem('config')||'{}');
+    }catch(_){ return {}; }
+  }
+  function getShiftsStoreId(){
+    const cfg=getShiftsConfig();
+    return cfg.activeStoreId||'';
+  }
+  function hasShiftsSupabaseReady(){
+    const cfg=getShiftsConfig();
+    return !!(cfg.supabaseUrl&&cfg.supabaseAnonKey&&cfg.activeStoreId&&window.getSupabaseClient?.());
+  }
+  function stampShiftsMoment(){ return `${getLocalDateString()} ${getLocalTimeString()}`; }
+  function setShiftsState(state,error=''){
+    shiftsLoadState=state;
+    shiftsLastError=error||'';
+    renderShiftsSupabaseUi();
+  }
+  function getShiftSourceLabel(){
+    if(shiftsLoadState==='supabase') return 'Fuente turno: Supabase';
+    if(shiftsLoadState==='syncing') return 'Sincronizando turno…';
+    if(shiftsLoadState==='error') return `Turno local · ${shiftsLastError||'Error Supabase'}`;
+    return 'Fuente turno: local / fallback';
+  }
+  function ensureShiftsSupabasePanel(){
+    const body=$('acc-body-menu');
+    if(!body) return;
+    if(body.querySelector('[data-shifts-sb-tools="true"]')) return;
+    const box=document.createElement('div');
+    box.setAttribute('data-shifts-sb-tools','true');
+    box.style.cssText='display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:0 0 12px 0;border-top:1px dashed var(--border);margin-top:10px;padding-top:12px;';
+    box.innerHTML=`
+      <div id="shifts-sb-status" style="font-size:12px;color:var(--ink3)">Fuente turno: local / fallback</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn ghost" type="button" onclick="debugShiftsWritePermissions()">Probar permisos write shifts</button>
+        <button class="btn ghost" type="button" onclick="reloadActiveShiftFromSupabase()">Recargar turno activo desde Supabase</button>
+        <button class="btn ghost" type="button" onclick="syncLocalShiftToSupabase()">Subir turno local actual a Supabase</button>
+        <button class="btn ghost" type="button" onclick="debugShiftsSupabase()">Debug turnos</button>
+      </div>
+      <div id="shifts-sb-diag" style="font-size:12px;color:var(--ink2);background:var(--surf2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;line-height:1.5"></div>
+    `;
+    body.appendChild(box);
+  }
+  function renderShiftsSupabaseUi(){
+    ensureShiftsSupabasePanel();
+    const status=$('shifts-sb-status');
+    if(status) status.textContent=getShiftSourceLabel();
+    const diag=$('shifts-sb-diag');
+    if(diag){
+      diag.innerHTML=`
+        <div><strong>Fuente turno:</strong> ${shiftsLoadState==='error'?'Fallback':shiftsLoadState==='supabase'?'Supabase':'Local'}</div>
+        <div><strong>Turno activo local:</strong> ${turno&&turno.abierto?'Sí':'No'}</div>
+        <div><strong>Turno activo Supabase:</strong> ${shiftsRemoteOpen?'Sí':'No'}</div>
+        <div><strong>Shift ID actual:</strong> ${turno?._sb_id||'—'}</div>
+        <div><strong>Operador:</strong> ${turno?.operador||'—'}</div>
+        <div><strong>Apertura:</strong> ${turno?.apertura||'—'}</div>
+        <div><strong>Store activa:</strong> ${shiftsCurrentStoreName||'Sin store activa'}</div>
+        <div><strong>Store ID:</strong> ${getShiftsStoreId()||'—'}</div>
+        <div><strong>Rol:</strong> ${shiftsCurrentRole||'—'}</div>
+        <div><strong>Último error:</strong> ${shiftsLastError||'—'}</div>
+        <div><strong>Última lectura:</strong> ${shiftsLastReadAt||'—'}</div>
+        <div><strong>Última sincronización:</strong> ${shiftsLastSyncAt||'—'}</div>
+      `;
+    }
+  }
+  async function getShiftsSession(client){
+    const {data,error}=await client.auth.getSession();
+    if(error) throw error;
+    return data.session||null;
+  }
+  async function queryOpenShifts(client,storeId){
+    const {data,error}=await client
+      .from('shifts')
+      .select('id,store_id,legacy_id,status,business_date,opened_at,closed_at,opened_by_user_id,opened_by_name,closed_by_user_id,closed_by_name,opening_cash,total_cash,total_mercado_pago,total_transferencia,total_other,total_amount,total_cafeteria,total_cocina,notes,metadata,created_at,updated_at')
+      .eq('store_id',storeId)
+      .eq('status','open')
+      .order('opened_at',{ascending:false});
+    if(error) throw error;
+    return data||[];
+  }
+  async function findMatchingOpenShift(client,storeId,turnoLocal){
+    const rows=await queryOpenShifts(client,storeId);
+    if(!rows.length) return null;
+    if(turnoLocal?._sb_id){
+      const byId=rows.find(r=>String(r.id||'')===String(turnoLocal._sb_id||''));
+      if(byId) return byId;
+    }
+    if(turnoLocal?.operador){
+      const byOperator=rows.find(r=>String(r.opened_by_name||'')===String(turnoLocal.operador||''));
+      if(byOperator) return byOperator;
+    }
+    return rows[0];
+  }
+  async function fetchShiftDiagnostics({includeRows=false}={}){
+    const storeId=getShiftsStoreId();
+    const base={storeId,storeName:'',role:'',openRows:[],openRow:null,error:'',openCount:0};
+    const cfg=getShiftsConfig();
+    if(!(cfg.supabaseUrl&&cfg.supabaseAnonKey)) return base;
+    if(!storeId) return {...base,error:'No hay tienda activa'};
+    if(!window.isValidUuid?.(storeId)) return {...base,error:'Store ID inválido'};
+    const client=window.getSupabaseClient?.();
+    if(!client) return {...base,error:'Cliente Supabase no disponible'};
+    try{
+      const session=await getShiftsSession(client);
+      if(!session) return {...base,error:'No hay sesión activa'};
+      const [{data:storeRow,error:storeErr},{data:roleRow,error:roleErr},openRows]=await Promise.all([
+        client.from('stores').select('id,name').eq('id',storeId).maybeSingle(),
+        client.from('store_users').select('role').eq('store_id',storeId).eq('user_id',session.user.id).maybeSingle(),
+        queryOpenShifts(client,storeId)
+      ]);
+      if(storeErr) throw storeErr;
+      if(roleErr) throw roleErr;
+      return {
+        ...base,
+        storeName:storeRow?.name||'',
+        role:roleRow?.role||'',
+        openRows:includeRows?openRows:[],
+        openRow:openRows[0]||null,
+        openCount:openRows.length
+      };
+    }catch(err){
+      return {...base,error:err?.message||String(err)};
+    }
+  }
+  function getShiftBusinessDate(turnoLike,closedAt=null){
+    const ts=closedAt || turnoLike?.apertura || turnoLike?.opened_at || '';
+    return normalizeBusinessDate(turnoLike?.fecha, ts) || getLocalDateString();
+  }
+  function mapShiftFromSupabase(row,localTurnoRef){
+    const remoteVentas=Array.isArray(row?.metadata?.ventasIds)?row.metadata.ventasIds:[];
+    const sameShift=!!(localTurnoRef && (String(localTurnoRef._sb_id||'')===String(row?.id||'') || String(localTurnoRef.apertura||'')===String(row?.opened_at||'')));
+    const localVentas=sameShift && Array.isArray(localTurnoRef?.ventasIds)?localTurnoRef.ventasIds:[];
+    return{
+      abierto: row?.status==='open',
+      operador: row?.opened_by_name || row?.closed_by_name || '',
+      fondoCaja: money2(row?.opening_cash),
+      apertura: row?.opened_at || getLocalTimestamp(),
+      ventasIds: Array.from(new Set([...(localVentas||[]), ...(remoteVentas||[])])),
+      _sb_id: row?.id || '',
+      legacy_id: row?.legacy_id || null
+    };
+  }
+  function mapShiftToSupabase(turnoLocal,session,existingRow){
+    const payload={
+      store_id:getShiftsStoreId(),
+      legacy_id: turnoLocal?.legacy_id || null,
+      status:'open',
+      business_date:getShiftBusinessDate(turnoLocal),
+      opened_at: turnoLocal?.apertura || getLocalTimestamp(),
+      opened_by_user_id: session?.user?.id || null,
+      opened_by_name: turnoLocal?.operador || null,
+      opening_cash: money2(turnoLocal?.fondoCaja),
+      metadata:{
+        ...(existingRow?.metadata||{}),
+        ventasIds:Array.isArray(turnoLocal?.ventasIds)?turnoLocal.ventasIds:[],
+        local_turno:true
+      }
+    };
+    const sbId=existingRow?.id || turnoLocal?._sb_id || '';
+    if(sbId) payload.id=sbId;
+    return payload;
+  }
+  function mapShiftCloseToSupabase(turnoLocal,cierre,session,existingRow){
+    const payload={
+      store_id:getShiftsStoreId(),
+      legacy_id: turnoLocal?.legacy_id || null,
+      status:'closed',
+      business_date: cierre?.fecha || getShiftBusinessDate(turnoLocal,cierre?.cierre),
+      opened_at: turnoLocal?.apertura || existingRow?.opened_at || getLocalTimestamp(),
+      closed_at: cierre?.cierre || getLocalTimestamp(),
+      opened_by_user_id: existingRow?.opened_by_user_id || session?.user?.id || null,
+      opened_by_name: turnoLocal?.operador || existingRow?.opened_by_name || null,
+      closed_by_user_id: session?.user?.id || null,
+      closed_by_name: turnoLocal?.operador || null,
+      opening_cash: money2(turnoLocal?.fondoCaja),
+      total_cash: money2(cierre?.totalEf),
+      total_mercado_pago: money2(cierre?.totalMp),
+      total_transferencia: money2(cierre?.totalTransferencia),
+      total_other: money2(cierre?.totalOtro),
+      total_amount: money2(cierre?.total),
+      total_cafeteria: money2(cierre?.totalCafeteria),
+      total_cocina: money2(cierre?.totalCocina),
+      metadata:{
+        ...(existingRow?.metadata||{}),
+        ventasIds:Array.isArray(turnoLocal?.ventasIds)?turnoLocal.ventasIds:[],
+        legacy_close:cierre||{},
+        local_turno:true
+      }
+    };
+    const sbId=existingRow?.id || turnoLocal?._sb_id || '';
+    if(sbId) payload.id=sbId;
+    return payload;
+  }
+  function inferShiftPolicyForStep(step){
+    if(step==='select') return 'shifts_select_members';
+    if(step==='insert') return 'shifts_insert_ops';
+    if(step==='update') return 'shifts_update_ops';
+    if(step==='delete') return 'shifts_delete_admin';
+    return '';
+  }
+  function inferShiftPolicyMessage(step,err){
+    const raw=`${err?.message||''} ${err?.details||''} ${err?.hint||''}`.toLowerCase();
+    if(err?.code==='42501' || raw.includes('row-level security') || raw.includes('permission denied') || raw.includes('violates row-level security')){
+      const policy=inferShiftPolicyForStep(step);
+      return policy ? `Posible policy faltante o mal configurada: ${policy}` : 'Posible policy RLS faltante';
+    }
+    return '';
+  }
+  function logShiftWriteError(meta,err){
+    console.error('[Shifts write failed]',{
+      operation:meta.operation,
+      payload:meta.payload,
+      storeId:meta.storeId,
+      currentRole:shiftsCurrentRole||'',
+      turnoLocal:meta.turnoLocal,
+      cierre:meta.cierre||null,
+      existingRow:meta.existingRow||null,
+      message:err?.message||String(err),
+      code:err?.code||'',
+      details:err?.details||'',
+      hint:err?.hint||''
+    });
+  }
+  function getShiftSupabaseErrorMessage(err){
+    if(!err) return 'Error desconocido';
+    return err.message || err.details || String(err);
+  }
+  function refreshShiftUi(){
+    try{renderTurnoPill();}catch(_){}
+    try{renderAjustes();}catch(_){}
+  }
+  window.loadActiveShiftFromSupabase=async function({silent=false,openRowsOverride=null}={}){
+    if(!hasShiftsSupabaseReady()) return false;
+    try{
+      const diag=openRowsOverride?null:await fetchShiftDiagnostics({includeRows:true});
+      if(diag){
+        shiftsCurrentStoreName=diag.storeName||shiftsCurrentStoreName;
+        shiftsCurrentRole=diag.role||shiftsCurrentRole;
+        shiftsLastReadAt=stampShiftsMoment();
+        shiftsRemoteOpen=(diag.openCount||0)>0;
+        if(diag.error){
+          setShiftsState('error',diag.error);
+          if(!silent) showToast(`Turno local activo · ${diag.error}`);
+          return false;
+        }
+        if(diag.openCount>1) console.warn('[Shifts warning] Hay múltiples turnos abiertos en Supabase para la store',diag.openRows);
+      }
+      const rows=openRowsOverride || diag.openRows;
+      if(!Array.isArray(rows) || !rows.length){
+        shiftsRemoteOpen=false;
+        renderShiftsSupabaseUi();
+        return false;
+      }
+      const remoteRow=rows[0];
+      if(turno&&turno.abierto&&String(turno._sb_id||'')!==String(remoteRow.id||'')){
+        console.warn('[Shifts warning] Turno local abierto y turno remoto abierto distintos. Se prioriza remoto.',{local:turno,remote:remoteRow});
+      }
+      turno=mapShiftFromSupabase(remoteRow,turno);
+      save();
+      shiftsRemoteOpen=true;
+      setShiftsState('supabase');
+      refreshShiftUi();
+      if(!silent) showToast('✓ Turno cargado desde Supabase');
+      return true;
+    }catch(err){
+      console.error('[Shifts load failed]',err);
+      setShiftsState('error',err?.message||String(err));
+      if(!silent) showToast(`Fallback local · ${err?.message||err}`);
+      return false;
+    }
+  };
+  window.saveShiftToSupabase=async function(turnoLocal){
+    if(!turnoLocal?.abierto) return null;
+    if(!hasShiftsSupabaseReady()){
+      console.warn('[Shifts save skipped] Supabase no configurado o sin store activa',{turno:turnoLocal});
+      return null;
+    }
+    const client=window.getSupabaseClient?.();
+    if(!client) throw new Error('Cliente Supabase no disponible');
+    const storeId=getShiftsStoreId();
+    if(!storeId) throw new Error('No hay tienda activa');
+    if(!window.isValidUuid?.(storeId)) throw new Error('Store ID inválido');
+    const session=await getShiftsSession(client);
+    if(!session) throw new Error('No hay sesión activa');
+    const existingRow=await findMatchingOpenShift(client,storeId,turnoLocal);
+    if(existingRow && !turnoLocal._sb_id){
+      turnoLocal._sb_id=existingRow.id;
+      turnoLocal.legacy_id=existingRow.legacy_id||turnoLocal.legacy_id||null;
+      save();
+      shiftsRemoteOpen=true;
+      setShiftsState('supabase');
+      return existingRow;
+    }
+    const payload=mapShiftToSupabase(turnoLocal,session,existingRow);
+    const operation=existingRow ? 'update' : 'insert';
+    console.log('[Shifts -> Supabase]',{operation,storeId,currentRole:shiftsCurrentRole||'',turnoLocal:{...turnoLocal},payload,existingRow:existingRow||null});
+    try{
+      const res=existingRow
+        ? await client.from('shifts').update(payload).eq('id',existingRow.id).eq('store_id',storeId).select('id,store_id,legacy_id,status,business_date,opened_at,closed_at,opened_by_user_id,opened_by_name,closed_by_user_id,closed_by_name,opening_cash,total_cash,total_mercado_pago,total_transferencia,total_other,total_amount,total_cafeteria,total_cocina,notes,metadata,created_at').single()
+        : await client.from('shifts').insert(payload).select('id,store_id,legacy_id,status,business_date,opened_at,closed_at,opened_by_user_id,opened_by_name,closed_by_user_id,closed_by_name,opening_cash,total_cash,total_mercado_pago,total_transferencia,total_other,total_amount,total_cafeteria,total_cocina,notes,metadata,created_at').single();
+      console.log('[Shifts <- Supabase]',{operation,storeId,data:res?.data||null,message:res?.error?.message||'',code:res?.error?.code||'',details:res?.error?.details||'',hint:res?.error?.hint||''});
+      if(res.error) throw res.error;
+      turnoLocal._sb_id=res.data.id;
+      turnoLocal.legacy_id=res.data.legacy_id||turnoLocal.legacy_id||null;
+      save();
+      shiftsLastSyncAt=stampShiftsMoment();
+      shiftsRemoteOpen=true;
+      setShiftsState('supabase');
+      return res.data;
+    }catch(err){
+      const policyHint=inferShiftPolicyMessage(operation,err);
+      logShiftWriteError({operation,payload,storeId,turnoLocal:{...turnoLocal},existingRow},err);
+      if(policyHint) console.error('[Shifts policy hint]',policyHint);
+      throw err;
+    }
+  };
+  window.closeShiftInSupabase=async function(turnoLocal,cierre){
+    if(!turnoLocal) return null;
+    if(!hasShiftsSupabaseReady()){
+      console.warn('[Shifts close skipped] Supabase no configurado o sin store activa',{turno:turnoLocal,cierre});
+      return null;
+    }
+    const client=window.getSupabaseClient?.();
+    if(!client) throw new Error('Cliente Supabase no disponible');
+    const storeId=getShiftsStoreId();
+    if(!storeId) throw new Error('No hay tienda activa');
+    if(!window.isValidUuid?.(storeId)) throw new Error('Store ID inválido');
+    const session=await getShiftsSession(client);
+    if(!session) throw new Error('No hay sesión activa');
+    let existingRow=null;
+    if(turnoLocal._sb_id){
+      const {data,error}=await client.from('shifts').select('id,store_id,legacy_id,status,business_date,opened_at,closed_at,opened_by_user_id,opened_by_name,closed_by_user_id,closed_by_name,opening_cash,total_cash,total_mercado_pago,total_transferencia,total_other,total_amount,total_cafeteria,total_cocina,notes,metadata,created_at').eq('id',turnoLocal._sb_id).eq('store_id',storeId).maybeSingle();
+      if(error) throw error;
+      existingRow=data||null;
+    }
+    if(!existingRow){
+      const openRows=await queryOpenShifts(client,storeId);
+      existingRow=openRows.find(r=>String(r.opened_by_name||'')===String(turnoLocal.operador||'')) || openRows[0] || null;
+    }
+    const payload=mapShiftCloseToSupabase(turnoLocal,cierre,session,existingRow);
+    const operation=existingRow ? 'update' : 'insert';
+    console.log('[Shifts close -> Supabase]',{operation,storeId,currentRole:shiftsCurrentRole||'',turnoLocal:{...turnoLocal},cierre,payload,existingRow:existingRow||null});
+    try{
+      const res=existingRow
+        ? await client.from('shifts').update(payload).eq('id',existingRow.id).eq('store_id',storeId).select('id,store_id,legacy_id,status,business_date,opened_at,closed_at,opened_by_name,closed_by_name,opening_cash,total_cash,total_mercado_pago,total_transferencia,total_other,total_amount,total_cafeteria,total_cocina,metadata,created_at').single()
+        : await client.from('shifts').insert(payload).select('id,store_id,legacy_id,status,business_date,opened_at,closed_at,opened_by_name,closed_by_name,opening_cash,total_cash,total_mercado_pago,total_transferencia,total_other,total_amount,total_cafeteria,total_cocina,metadata,created_at').single();
+      console.log('[Shifts close <- Supabase]',{operation,storeId,data:res?.data||null,message:res?.error?.message||'',code:res?.error?.code||'',details:res?.error?.details||'',hint:res?.error?.hint||''});
+      if(res.error) throw res.error;
+      shiftsLastSyncAt=stampShiftsMoment();
+      shiftsRemoteOpen=false;
+      setShiftsState('supabase');
+      return res.data;
+    }catch(err){
+      const policyHint=inferShiftPolicyMessage(operation,err);
+      logShiftWriteError({operation,payload,storeId,turnoLocal:{...turnoLocal},cierre,existingRow},err);
+      if(policyHint) console.error('[Shifts policy hint]',policyHint);
+      throw err;
+    }
+  };
+  window.syncLocalShiftToSupabase=async function(){
+    if(!(turno&&turno.abierto)){showToast('No hay turno local abierto para subir');return false;}
+    if(!hasShiftsSupabaseReady()){showToast('Configurá Supabase y una store activa primero');return false;}
+    try{
+      setShiftsState('syncing');
+      const row=await saveShiftToSupabase(turno);
+      shiftsLastSyncAt=stampShiftsMoment();
+      setShiftsState('supabase');
+      renderShiftsSupabaseUi();
+      showToast(row?.id?'✓ Turno sincronizado con Supabase':'Turno local sin cambios remotos');
+      return true;
+    }catch(err){
+      console.error('[Shift sync failed]',err);
+      setShiftsState('error',err?.message||String(err));
+      showToast(`Turno abierto local, pero Supabase falló: ${getShiftSupabaseErrorMessage(err)}`);
+      return false;
+    }
+  };
+  window.reloadActiveShiftFromSupabase=async function(silent=false){
+    return await loadActiveShiftFromSupabase({silent});
+  };
+  window.debugShiftsSupabase=async function(){
+    const diag=await fetchShiftDiagnostics({includeRows:true});
+    console.log('[debugShiftsSupabase]',{
+      currentStore:{id:diag.storeId,name:diag.storeName},
+      currentRole:diag.role,
+      turnoLocal:turno||null,
+      remoteOpenCount:diag.openCount||0,
+      openShifts:diag.openRows||[],
+      error:diag.error||shiftsLastError||''
+    });
+    if(diag.error) showToast(`Debug turnos: ${diag.error}`);
+    else showToast('Debug turnos impreso en consola');
+  };
+  window.debugShiftsWritePermissions=async function(){
+    const result={
+      storeId:getShiftsStoreId(),
+      currentRole:shiftsCurrentRole||'',
+      select:{ok:false,count:0,error:null},
+      insert:{ok:false,error:null,data:null},
+      update:{ok:false,error:null,data:null},
+      delete:{ok:false,error:null},
+      policyHint:'',
+      error:null
+    };
+    try{
+      if(!hasShiftsSupabaseReady()) throw new Error('Supabase no está configurado o falta store activa');
+      const client=window.getSupabaseClient?.();
+      if(!client) throw new Error('Cliente Supabase no disponible');
+      const storeId=getShiftsStoreId();
+      if(!storeId) throw new Error('No hay tienda activa');
+      if(!window.isValidUuid?.(storeId)) throw new Error('Store ID inválido');
+      const session=await getShiftsSession(client);
+      if(!session) throw new Error('No hay sesión activa');
+      const selectRes=await client.from('shifts').select('id,store_id,status,opened_by_name,opening_cash').eq('store_id',storeId).limit(5);
+      result.select={ok:!selectRes.error,count:(selectRes.data||[]).length,error:selectRes.error?{message:selectRes.error.message||'',code:selectRes.error.code||'',details:selectRes.error.details||'',hint:selectRes.error.hint||''}:null};
+      if(selectRes.error) throw Object.assign(selectRes.error,{_step:'select'});
+      const ts=getLocalTimestamp();
+      const insertPayload={
+        store_id:storeId,
+        legacy_id:`debug_shift_${Date.now()}`,
+        status:'closed',
+        business_date:getLocalDateString(),
+        opened_at:ts,
+        closed_at:ts,
+        opened_by_user_id:session.user.id,
+        opened_by_name:'debugShiftsWritePermissions',
+        closed_by_user_id:session.user.id,
+        closed_by_name:'debugShiftsWritePermissions',
+        opening_cash:0,
+        total_cash:0,
+        total_mercado_pago:0,
+        total_transferencia:0,
+        total_other:0,
+        total_amount:0,
+        total_cafeteria:0,
+        total_cocina:0,
+        metadata:{debug:true}
+      };
+      const insertRes=await client.from('shifts').insert(insertPayload).select('id,legacy_id,status').single();
+      result.insert={ok:!insertRes.error,error:insertRes.error?{message:insertRes.error.message||'',code:insertRes.error.code||'',details:insertRes.error.details||'',hint:insertRes.error.hint||''}:null,data:insertRes.data||null};
+      if(insertRes.error) throw Object.assign(insertRes.error,{_step:'insert'});
+      const updateRes=await client.from('shifts').update({notes:'debug update'}).eq('id',insertRes.data.id).eq('store_id',storeId).select('id,notes').single();
+      result.update={ok:!updateRes.error,error:updateRes.error?{message:updateRes.error.message||'',code:updateRes.error.code||'',details:updateRes.error.details||'',hint:updateRes.error.hint||''}:null,data:updateRes.data||null};
+      if(updateRes.error) throw Object.assign(updateRes.error,{_step:'update'});
+      const deleteRes=await client.from('shifts').delete().eq('id',insertRes.data.id).eq('store_id',storeId).select('id').single();
+      result.delete={ok:!deleteRes.error,error:deleteRes.error?{message:deleteRes.error.message||'',code:deleteRes.error.code||'',details:deleteRes.error.details||'',hint:deleteRes.error.hint||''}:null};
+      if(deleteRes.error){
+        result.policyHint=inferShiftPolicyMessage('delete',deleteRes.error);
+        console.warn('[debugShiftsWritePermissions delete cleanup failed]',deleteRes.error);
+      }
+    }catch(err){
+      const step=err?._step || (result.update.error?'update':result.insert.error?'insert':result.select.error?'select':'');
+      const policyHint=inferShiftPolicyMessage(step,err);
+      result.policyHint=policyHint||result.policyHint;
+      result.error={step:step||'unknown',message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''};
+    }
+    console.log('[debugShiftsWritePermissions]',result);
+    if(result.error) showToast(`Permisos shifts: ${result.error.step} falló · ${result.error.message}`);
+    else showToast('Permisos shifts OK. Ver consola para detalle');
+    return result;
+  };
+
+  const _renderAjustesShifts=window.renderAjustes;
+  if(typeof _renderAjustesShifts==='function'){
+    window.renderAjustes=function(...args){
+      const res=_renderAjustesShifts.apply(this,args);
+      renderShiftsSupabaseUi();
+      return res;
+    };
+  }
+  const _renderTurnoPillShifts=window.renderTurnoPill;
+  if(typeof _renderTurnoPillShifts==='function'){
+    window.renderTurnoPill=function(...args){
+      const res=_renderTurnoPillShifts.apply(this,args);
+      renderShiftsSupabaseUi();
+      return res;
+    };
+  }
+  const _safeInitSupabaseAccessShifts=window.safeInitSupabaseAccess;
+  if(typeof _safeInitSupabaseAccessShifts==='function'){
+    window.safeInitSupabaseAccess=async function(...args){
+      const res=await _safeInitSupabaseAccessShifts.apply(this,args);
+      setTimeout(()=>window.reloadActiveShiftFromSupabase?.(true),320);
+      return res;
+    };
+  }
+  const _guardarSupabaseConfigAdjShifts=window.guardarSupabaseConfigAdj;
+  if(typeof _guardarSupabaseConfigAdjShifts==='function'){
+    window.guardarSupabaseConfigAdj=async function(...args){
+      const res=await _guardarSupabaseConfigAdjShifts.apply(this,args);
+      setTimeout(()=>window.reloadActiveShiftFromSupabase?.(true),320);
+      return res;
+    };
+  }
+  const _reconectarSupabaseShifts=window.reconectarSupabase;
+  if(typeof _reconectarSupabaseShifts==='function'){
+    window.reconectarSupabase=async function(...args){
+      const res=await _reconectarSupabaseShifts.apply(this,args);
+      setTimeout(()=>window.reloadActiveShiftFromSupabase?.(true),320);
+      return res;
+    };
+  }
+  const _supabaseSignInShifts=window.supabaseSignIn;
+  if(typeof _supabaseSignInShifts==='function'){
+    window.supabaseSignIn=async function(...args){
+      const res=await _supabaseSignInShifts.apply(this,args);
+      setTimeout(()=>window.reloadActiveShiftFromSupabase?.(true),320);
+      return res;
+    };
+  }
+  const _onSupabaseStoreChangeShifts=window.onSupabaseStoreChange;
+  if(typeof _onSupabaseStoreChangeShifts==='function'){
+    window.onSupabaseStoreChange=function(...args){
+      const res=_onSupabaseStoreChangeShifts.apply(this,args);
+      setTimeout(()=>window.reloadActiveShiftFromSupabase?.(true),320);
+      return res;
+    };
+  }
+  const _loadFromSheetsShifts=window.loadFromSheets;
+  if(typeof _loadFromSheetsShifts==='function'){
+    window.loadFromSheets=async function(...args){
+      const res=await _loadFromSheetsShifts.apply(this,args);
+      setTimeout(()=>window.reloadActiveShiftFromSupabase?.(true),320);
+      return res;
+    };
+  }
+  const _abrirTurnoShifts=window.abrirTurno;
+  if(typeof _abrirTurnoShifts==='function'){
+    window.abrirTurno=async function(...args){
+      if(hasShiftsSupabaseReady()){
+        try{
+          const client=window.getSupabaseClient?.();
+          const storeId=getShiftsStoreId();
+          if(client && storeId && window.isValidUuid?.(storeId)){
+            const remoteOpen=await findMatchingOpenShift(client,storeId,turno);
+            if(remoteOpen){
+              turno=mapShiftFromSupabase(remoteOpen,turno);
+              save();
+              shiftsRemoteOpen=true;
+              setShiftsState('supabase');
+              cerrarModalTurno();
+              refreshShiftUi();
+              showToast('Ya existía un turno abierto en Supabase. Se cargó el turno remoto.');
+              return false;
+            }
+          }
+        }catch(err){
+          console.error('[abrirTurno preflight Supabase failed]',err);
+        }
+      }
+      const res=_abrirTurnoShifts.apply(this,args);
+      if(turno&&turno.abierto&&hasShiftsSupabaseReady()){
+        try{
+          await saveShiftToSupabase(turno);
+          showToast('Turno sincronizado con Supabase');
+        }catch(err){
+          const msg=getShiftSupabaseErrorMessage(err);
+          setShiftsState('error',msg);
+          console.error('[abrirTurno -> saveShiftToSupabase failed]',{turno:{...turno},message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''});
+          showToast(`Turno abierto local, pero Supabase falló: ${msg}`);
+        }
+      }
+      return res;
+    };
+  }
+  const _cerrarTurnoShifts=window.cerrarTurno;
+  if(typeof _cerrarTurnoShifts==='function'){
+    window.cerrarTurno=async function(ef,mp,tr,otro,tot,cafe,cocina,...args){
+      const turnoSnapshot=(turno&&turno.abierto)?{...turno,ventasIds:[...(turno.ventasIds||[])]}:null;
+      const cierreTs=getLocalTimestamp();
+      const cierreResumen=turnoSnapshot?{
+        fecha:getShiftBusinessDate(turnoSnapshot,cierreTs),
+        operador:turnoSnapshot.operador,
+        apertura:turnoSnapshot.apertura,
+        cierre:cierreTs,
+        fondoCaja:turnoSnapshot.fondoCaja,
+        totalEf:ef,totalMp:mp,totalTransferencia:tr,totalOtro:otro,total:tot,totalCafeteria:cafe,totalCocina:cocina
+      }:null;
+      const res=await _cerrarTurnoShifts.call(this,ef,mp,tr,otro,tot,cafe,cocina,...args);
+      if(turnoSnapshot && hasShiftsSupabaseReady()){
+        try{
+          await closeShiftInSupabase(turnoSnapshot,cierreResumen);
+          showToast('Turno cerrado y sincronizado con Supabase');
+        }catch(err){
+          const msg=getShiftSupabaseErrorMessage(err);
+          setShiftsState('error',msg);
+          console.error('[cerrarTurno -> closeShiftInSupabase failed]',{turno:turnoSnapshot,cierre:cierreResumen,message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''});
+          showToast(`Turno cerrado local, pero Supabase falló: ${msg}`);
+        }
+      }
+      return res;
+    };
+  }
+
+  renderShiftsSupabaseUi();
+  setTimeout(()=>window.reloadActiveShiftFromSupabase?.(true),340);
+})();
+</script>
 </body>
 </html>
