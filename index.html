@@ -2681,12 +2681,16 @@ if(config.webappUrl){loadFromSheets();}
         <div class="cfg-grid">
           <label>
             <div>Project URL</div>
-            <input id="cfg-sb-url-adj" placeholder="https://tu-proyecto.supabase.co">
+            <input id="cfg-sb-url-adj" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" placeholder="https://tu-proyecto.supabase.co">
           </label>
           <label>
             <div>Anon key</div>
-            <input id="cfg-sb-anon-adj" placeholder="eyJ..." autocomplete="off">
+            <input id="cfg-sb-anon-adj" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" placeholder="eyJ...">
           </label>
+        </div>
+        <div class="row">
+          <button class="btn ghost" onclick="pasteSupabaseField('url')">Pegar URL</button>
+          <button class="btn ghost" onclick="pasteSupabaseField('anon')">Pegar anon key</button>
         </div>
         <div class="cfg-help">En esta fase Supabase se usa para usuarios, login y contexto básico. Sheets/localStorage siguen siendo la persistencia principal.</div>
         <div class="row">
@@ -2755,12 +2759,16 @@ if(config.webappUrl){loadFromSheets();}
         <div class="cfg-grid">
           <label>
             <div>Project URL</div>
-            <input id="cfg-sb-url-modal" placeholder="https://tu-proyecto.supabase.co">
+            <input id="cfg-sb-url-modal" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" placeholder="https://tu-proyecto.supabase.co">
           </label>
           <label>
             <div>Anon key</div>
-            <input id="cfg-sb-anon-modal" placeholder="eyJ..." autocomplete="off">
+            <input id="cfg-sb-anon-modal" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" placeholder="eyJ...">
           </label>
+        </div>
+        <div class="row">
+          <button class="btn ghost" onclick="pasteSupabaseField('url')">Pegar URL</button>
+          <button class="btn ghost" onclick="pasteSupabaseField('anon')">Pegar anon key</button>
         </div>
         <div class="cfg-help">En esta fase Supabase se usa para usuarios, login y contexto básico. Sheets/localStorage siguen siendo la persistencia principal.</div>
         <div class="row">
@@ -2840,6 +2848,13 @@ if(config.webappUrl){loadFromSheets();}
       if(el && typeof el.value==='string' && el.value.trim()) return el.value.trim();
     }
     return '';
+  }
+
+  function writeSupabaseValue(ids, value){
+    ids.forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.value=value;
+    });
   }
 
   function ensureSupabaseAccordion(){
@@ -3008,6 +3023,24 @@ if(config.webappUrl){loadFromSheets();}
   window.closeSupabaseModal=function(){
     const modal=document.getElementById('sb-modal');
     if(modal) modal.style.display='none';
+  };
+
+  window.pasteSupabaseField=async function(kind){
+    const map=kind==='anon'
+      ? ['cfg-sb-anon-modal','cfg-sb-anon-adj']
+      : ['cfg-sb-url-modal','cfg-sb-url-adj'];
+    try{
+      const text=(await navigator.clipboard.readText()).trim();
+      if(!text){
+        if(window.showToast) showToast('El portapapeles está vacío');
+        return;
+      }
+      writeSupabaseValue(map, text);
+      if(window.showToast) showToast(kind==='anon' ? '✓ Anon key pegada' : '✓ URL pegada');
+    }catch(err){
+      console.error('Clipboard read error', err);
+      if(window.showToast) showToast('No pude leer el portapapeles. Probá mantener apretado y pegar manualmente.');
+    }
   };
 
   window.guardarSupabaseConfigAdj=async function(){
