@@ -2739,6 +2739,109 @@ if(config.webappUrl){loadFromSheets();}
     return wrap;
   }
 
+  function buildSupabaseModal(){
+    const overlay=document.createElement('div');
+    overlay.id='sb-modal';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(34,24,15,.26);display:none;align-items:center;justify-content:center;padding:20px;z-index:9999;';
+    overlay.innerHTML=`
+      <div style="width:min(680px,96vw);max-height:90vh;overflow:auto;background:#fffaf4;border:1px solid #e6d7c2;border-radius:24px;box-shadow:0 24px 60px rgba(79,49,18,.18);padding:18px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+          <div>
+            <div style="font-size:20px;font-weight:800;color:#4c3318">Supabase y acceso</div>
+            <div style="font-size:13px;color:#a38763">Configura conexión, crea usuario o iniciá sesión.</div>
+          </div>
+          <button class="btn ghost" onclick="closeSupabaseModal()">Cerrar</button>
+        </div>
+        <div class="cfg-grid">
+          <label>
+            <div>Project URL</div>
+            <input id="cfg-sb-url-modal" placeholder="https://tu-proyecto.supabase.co">
+          </label>
+          <label>
+            <div>Anon key</div>
+            <input id="cfg-sb-anon-modal" placeholder="eyJ..." autocomplete="off">
+          </label>
+        </div>
+        <div class="cfg-help">En esta fase Supabase se usa para usuarios, login y contexto básico. Sheets/localStorage siguen siendo la persistencia principal.</div>
+        <div class="row">
+          <button class="btn alt" onclick="guardarSupabaseConfigAdj()">Guardar Supabase</button>
+          <button class="btn ghost" onclick="reconectarSupabase()">Reconectar</button>
+        </div>
+        <div class="auth-card" style="margin-top:12px">
+          <div class="auth-title">Acceso</div>
+          <div class="cfg-status" id="sb-auth-status-modal">Configurá el Project URL y la anon key para habilitar login.</div>
+          <div id="sb-auth-loggedout-modal">
+            <div class="auth-row">
+              <label>
+                <div>Nombre</div>
+                <input id="sb-auth-name-modal" placeholder="Nombre visible">
+              </label>
+              <label>
+                <div>Email</div>
+                <input id="sb-auth-email-modal" type="email" placeholder="nombre@correo.com">
+              </label>
+            </div>
+            <label>
+              <div>Contraseña</div>
+              <input id="sb-auth-password-modal" type="password" placeholder="Mínimo 6 caracteres">
+            </label>
+            <div class="row">
+              <button class="btn alt" onclick="supabaseSignIn()">Iniciar sesión</button>
+              <button class="btn ghost" onclick="supabaseSignUp()">Crear usuario</button>
+            </div>
+          </div>
+          <div id="sb-auth-loggedin-modal" style="display:none">
+            <div class="auth-user-meta">
+              <strong id="sb-user-name-modal">Usuario autenticado</strong>
+              <span id="sb-user-email-modal"></span>
+            </div>
+            <div class="row">
+              <span class="auth-store-chip" id="sb-user-store-modal" style="display:none"></span>
+            </div>
+            <label>
+              <div>Store activa</div>
+              <select id="sb-store-sel-modal" onchange="onSupabaseStoreChange()"></select>
+            </label>
+            <div class="row">
+              <button class="btn ghost" onclick="refrescarSupabaseContexto()">Refrescar contexto</button>
+              <button class="btn danger" onclick="supabaseSignOut()">Cerrar sesión</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    overlay.addEventListener('click',e=>{ if(e.target===overlay) window.closeSupabaseModal(); });
+    return overlay;
+  }
+
+  function ensureSupabaseModal(){
+    if(document.getElementById('sb-modal')) return;
+    document.body.appendChild(buildSupabaseModal());
+  }
+
+  function syncSupabaseFieldValue(id, value){
+    const el=document.getElementById(id);
+    if(el && el.value !== value) el.value=value;
+  }
+
+  function syncSupabaseText(id, text){
+    const el=document.getElementById(id);
+    if(el) el.textContent=text;
+  }
+
+  function syncSupabaseDisplay(id, display){
+    const el=document.getElementById(id);
+    if(el) el.style.display=display;
+  }
+
+  function readSupabaseValue(ids){
+    for(const id of ids){
+      const el=document.getElementById(id);
+      if(el && typeof el.value==='string' && el.value.trim()) return el.value.trim();
+    }
+    return '';
+  }
+
   function ensureSupabaseAccordion(){
     const accordions=[...document.querySelectorAll('.accordion')];
     const gsAcc=accordions.find(acc => (acc.textContent||'').includes('Conexión Google Sheets'));
@@ -2756,6 +2859,7 @@ if(config.webappUrl){loadFromSheets();}
   function renderSupabaseStatus(){
     ensureSupabaseHeaderPill();
     ensureSupabaseAccordion();
+    ensureSupabaseModal();
     const configured=hasSupabaseConfig(), loggedIn=!!supabaseUser;
     const pill=document.getElementById('sb-pill');
     const dot=document.getElementById('sb-dot');
@@ -2766,39 +2870,49 @@ if(config.webappUrl){loadFromSheets();}
     const meta=document.getElementById('acc-supabase-meta');
     if(meta) meta.textContent=!configured ? 'Sin configurar' : (loggedIn ? 'Sesión iniciada' : 'Listo para login');
 
-    const sbUrl=document.getElementById('cfg-sb-url-adj');
-    const sbKey=document.getElementById('cfg-sb-anon-adj');
-    if(sbUrl && sbUrl.value!== (config.supabaseUrl||'')) sbUrl.value=config.supabaseUrl||'';
-    if(sbKey && sbKey.value!== (config.supabaseAnonKey||'')) sbKey.value=config.supabaseAnonKey||'';
+    syncSupabaseFieldValue('cfg-sb-url-adj', config.supabaseUrl||'');
+    syncSupabaseFieldValue('cfg-sb-anon-adj', config.supabaseAnonKey||'');
+    syncSupabaseFieldValue('cfg-sb-url-modal', config.supabaseUrl||'');
+    syncSupabaseFieldValue('cfg-sb-anon-modal', config.supabaseAnonKey||'');
 
-    const guest=document.getElementById('sb-auth-loggedout');
-    const userBox=document.getElementById('sb-auth-loggedin');
-    if(guest) guest.style.display=configured && !loggedIn ? 'block' : 'none';
-    if(userBox) userBox.style.display=loggedIn ? 'block' : 'none';
+    syncSupabaseDisplay('sb-auth-loggedout', configured && !loggedIn ? 'block' : 'none');
+    syncSupabaseDisplay('sb-auth-loggedin', loggedIn ? 'block' : 'none');
+    syncSupabaseDisplay('sb-auth-loggedout-modal', configured && !loggedIn ? 'block' : 'none');
+    syncSupabaseDisplay('sb-auth-loggedin-modal', loggedIn ? 'block' : 'none');
 
-    if(!configured) setSupabaseStatus('Configurá el Project URL y la anon key para habilitar login.');
-    else if(loggedIn) setSupabaseStatus('Conectado con Supabase. La persistencia principal sigue siendo local/Sheets en esta fase.');
-    else setSupabaseStatus('Supabase configurado. Podés crear usuario o iniciar sesión.');
+    const statusMessage=!configured
+      ? 'Configurá el Project URL y la anon key para habilitar login.'
+      : (loggedIn
+        ? 'Conectado con Supabase. La persistencia principal sigue siendo local/Sheets en esta fase.'
+        : 'Supabase configurado. Podés crear usuario o iniciar sesión.');
+    setSupabaseStatus(statusMessage);
+    syncSupabaseText('sb-auth-status-modal', statusMessage);
 
-    const userName=document.getElementById('sb-user-name');
-    const userEmail=document.getElementById('sb-user-email');
-    if(userName) userName.textContent=supabaseProfile?.display_name||supabaseProfile?.full_name||'Usuario autenticado';
-    if(userEmail) userEmail.textContent=supabaseUser?.email||'';
+    const displayName=supabaseProfile?.display_name||supabaseProfile?.full_name||'Usuario autenticado';
+    const email=supabaseUser?.email||'';
+    syncSupabaseText('sb-user-name', displayName);
+    syncSupabaseText('sb-user-email', email);
+    syncSupabaseText('sb-user-name-modal', displayName);
+    syncSupabaseText('sb-user-email-modal', email);
 
-    const storeSel=document.getElementById('sb-store-sel');
-    const storeChip=document.getElementById('sb-user-store');
-    if(storeSel){
-      const currentStoreId=config.activeStoreId||'';
-      storeSel.innerHTML=`<option value="">${supabaseStores.length?'Seleccioná…':'Sin stores asignadas'}</option>`+
-        supabaseStores.map(s=>`<option value="${s.id}"${s.id===currentStoreId?' selected':''}>${s.name}${s.role?` · ${s.role}`:''}</option>`).join('');
+    for(const selectId of ['sb-store-sel','sb-store-sel-modal']){
+      const storeSel=document.getElementById(selectId);
+      if(storeSel){
+        const currentStoreId=config.activeStoreId||'';
+        storeSel.innerHTML=`<option value="">${supabaseStores.length?'Seleccioná…':'Sin stores asignadas'}</option>`+
+          supabaseStores.map(s=>`<option value="${s.id}"${s.id===currentStoreId?' selected':''}>${s.name}${s.role?` · ${s.role}`:''}</option>`).join('');
+      }
     }
     const activeStore=supabaseStores.find(s=>s.id===config.activeStoreId);
-    if(storeChip){
-      if(activeStore){
-        storeChip.style.display='inline-flex';
-        storeChip.textContent=`Store: ${activeStore.name}${activeStore.role?` · ${activeStore.role}`:''}`;
-      }else{
-        storeChip.style.display='none';
+    for(const chipId of ['sb-user-store','sb-user-store-modal']){
+      const storeChip=document.getElementById(chipId);
+      if(storeChip){
+        if(activeStore){
+          storeChip.style.display='inline-flex';
+          storeChip.textContent=`Store: ${activeStore.name}${activeStore.role?` · ${activeStore.role}`:''}`;
+        }else{
+          storeChip.style.display='none';
+        }
       }
     }
   }
@@ -2877,24 +2991,28 @@ if(config.webappUrl){loadFromSheets();}
 
   function getSupabaseAuthForm(){
     return {
-      name:(document.getElementById('sb-auth-name')?.value||'').trim(),
-      email:(document.getElementById('sb-auth-email')?.value||'').trim(),
-      password:(document.getElementById('sb-auth-password')?.value||'').trim()
+      name:readSupabaseValue(['sb-auth-name-modal','sb-auth-name']),
+      email:readSupabaseValue(['sb-auth-email-modal','sb-auth-email']),
+      password:readSupabaseValue(['sb-auth-password-modal','sb-auth-password'])
     };
   }
 
   window.openSupabaseSettings=function(){
     if(window.goTab) goTab('ajustes');
-    setTimeout(()=>{
-      ensureSupabaseAccordion();
-      if(window.toggleAccordion) toggleAccordion('supabase');
-      renderSupabaseStatus();
-    },120);
+    ensureSupabaseModal();
+    renderSupabaseStatus();
+    const modal=document.getElementById('sb-modal');
+    if(modal) modal.style.display='flex';
+  };
+
+  window.closeSupabaseModal=function(){
+    const modal=document.getElementById('sb-modal');
+    if(modal) modal.style.display='none';
   };
 
   window.guardarSupabaseConfigAdj=async function(){
-    const supabaseUrl=(document.getElementById('cfg-sb-url-adj')?.value||'').trim();
-    const supabaseAnonKey=(document.getElementById('cfg-sb-anon-adj')?.value||'').trim();
+    const supabaseUrl=readSupabaseValue(['cfg-sb-url-modal','cfg-sb-url-adj']);
+    const supabaseAnonKey=readSupabaseValue(['cfg-sb-anon-modal','cfg-sb-anon-adj']);
     if(!supabaseUrl || !supabaseAnonKey){ if(window.showToast) showToast('Completá URL y anon key'); return; }
     config={ ...config, supabaseUrl, supabaseAnonKey };
     saveConfig();
@@ -2996,6 +3114,7 @@ if(config.webappUrl){loadFromSheets();}
   ensureSupabaseConfigShape();
   ensureSupabaseHeaderPill();
   ensureSupabaseAccordion();
+  ensureSupabaseModal();
   renderSupabaseStatus();
   if(hasSupabaseConfig()) initSupabaseClient();
 })();
