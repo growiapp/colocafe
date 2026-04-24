@@ -20,6 +20,7 @@
 <meta name="twitter:image" content="https://colocafe.github.io/admin/preview.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 
 
@@ -49,6 +50,11 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
 .gs-pill{display:flex;align-items:center;gap:5px;padding:4px 9px;border-radius:20px;border:1px solid var(--border);background:var(--surf2);font-size:11px;color:var(--ink3);flex-shrink:0;cursor:default}
 .gs-dot{width:6px;height:6px;border-radius:50%;background:var(--ink3);transition:background .3s;flex-shrink:0}
 .gs-dot.on{background:var(--green)}
+.sb-pill{display:flex;align-items:center;gap:5px;padding:4px 9px;border-radius:20px;border:1px solid var(--border);background:var(--surf2);font-size:11px;color:var(--ink3);flex-shrink:0;cursor:pointer;transition:background .15s}
+.sb-pill:hover{background:var(--surf3)}
+.sb-pill.on{background:var(--blue-bg);border-color:rgba(24,95,165,.18);color:var(--blue)}
+.sb-dot{width:6px;height:6px;border-radius:50%;background:var(--ink3);transition:background .3s;flex-shrink:0}
+.sb-dot.on{background:var(--blue)}
 .turno-pill{display:flex;align-items:center;gap:5px;padding:4px 9px;border-radius:20px;border:1px solid var(--border);background:var(--surf2);font-size:11px;color:var(--ink3);flex-shrink:0;cursor:pointer;transition:background .15s}
 .turno-pill:hover{background:var(--surf3)}
 .turno-pill.abierto{background:var(--green-bg);border-color:rgba(26,122,74,.2);color:var(--green)}
@@ -260,6 +266,14 @@ body{font-family:var(--ff);background:var(--bg);color:var(--ink);font-size:14px;
 .cfg-lbl{font-size:11px;color:var(--ink3);margin-bottom:5px;text-transform:uppercase;letter-spacing:.06em;display:block}
 .cfg-input{width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--r-sm);background:var(--surf2);font-family:var(--ff);font-size:13px;color:var(--ink);outline:none}
 .cfg-input:focus{border-color:var(--orange)}
+.cfg-help{font-size:11px;color:var(--ink3);line-height:1.45;margin-top:6px}
+.cfg-status{font-size:12px;color:var(--ink2);line-height:1.45;margin-bottom:10px}
+.auth-card{background:var(--surf2);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;margin-top:12px}
+.auth-title{font-size:12px;font-weight:500;color:var(--ink);margin-bottom:10px}
+.auth-row{display:flex;gap:8px;flex-wrap:wrap}
+.auth-row .btn-sm,.auth-row .btn-cfg{flex:1}
+.auth-user-meta{font-size:12px;color:var(--ink2);line-height:1.5;margin-bottom:10px}
+.auth-store-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;background:var(--surf);border:1px solid var(--border);font-size:11px;color:var(--ink2);margin-top:6px}
 .btn-cfg{width:100%;padding:10px;background:var(--orange);color:#fff;border:none;border-radius:var(--r-sm);font-family:var(--ff);font-size:13px;font-weight:500;cursor:pointer}
 .cat-mgr{display:flex;flex-direction:column;gap:6px}
 .cat-mgr-row{background:var(--surf);border:1px solid var(--border);border-radius:var(--r-sm);display:flex;align-items:center;padding:10px 12px;gap:10px}
@@ -2632,6 +2646,343 @@ const dD=$('dash-desde'),dH=$('dash-hasta');if(dD)dD.value=hoy;if(dH)dH.value=ho
 // Auto-sincronizar desde Sheets al cargar la app (si hay URL configurada)
 if(config.webappUrl){loadFromSheets();}
 
+</script>
+<script>
+(()=>{
+  let supabaseClient=null,supabaseSession=null,supabaseUser=null,supabaseProfile=null,supabaseStores=[],supabaseAuthSub=null;
+
+  function saveConfig(){ localStorage.setItem('config', JSON.stringify(config||{})); }
+  function getSupabaseLib(){ return window.supabase||null; }
+  function hasSupabaseConfig(){ return !!(config&&config.supabaseUrl&&config.supabaseAnonKey); }
+  function setSupabaseStatus(msg){ const el=document.getElementById('sb-auth-status'); if(el) el.textContent=msg; }
+  function ensureSupabaseConfigShape(){ if(!window.config) window.config={}; config={ activeStoreId:'', ...config }; }
+
+  function ensureSupabaseHeaderPill(){
+    const gsPill=document.getElementById('gs-pill');
+    if(!gsPill || document.getElementById('sb-pill')) return;
+    const pill=document.createElement('div');
+    pill.className='sb-pill';
+    pill.id='sb-pill';
+    pill.innerHTML='<div class="sb-dot" id="sb-dot"></div><span id="sb-txt">Supabase</span>';
+    pill.onclick=()=>window.openSupabaseSettings();
+    gsPill.parentNode.insertBefore(pill, gsPill);
+  }
+
+  function buildSupabaseAccordion(){
+    const wrap=document.createElement('div');
+    wrap.className='accordion';
+    wrap.id='acc-supabase';
+    wrap.innerHTML=`
+      <div class="acc-head" onclick="toggleAccordion('supabase')">
+        <div class="acc-title">Supabase y acceso</div>
+        <div class="acc-meta" id="acc-supabase-meta">Sin configurar</div>
+      </div>
+      <div class="acc-body" id="acc-supabase-body">
+        <div class="cfg-grid">
+          <label>
+            <div>Project URL</div>
+            <input id="cfg-sb-url-adj" placeholder="https://tu-proyecto.supabase.co">
+          </label>
+          <label>
+            <div>Anon key</div>
+            <input id="cfg-sb-anon-adj" placeholder="eyJ..." autocomplete="off">
+          </label>
+        </div>
+        <div class="cfg-help">En esta fase Supabase se usa para usuarios, login y contexto básico. Sheets/localStorage siguen siendo la persistencia principal.</div>
+        <div class="row">
+          <button class="btn alt" onclick="guardarSupabaseConfigAdj()">Guardar Supabase</button>
+          <button class="btn ghost" onclick="reconectarSupabase()">Reconectar</button>
+        </div>
+        <div class="auth-card">
+          <div class="auth-title">Acceso</div>
+          <div class="cfg-status" id="sb-auth-status">Configurá el Project URL y la anon key para habilitar login.</div>
+          <div id="sb-auth-loggedout">
+            <div class="auth-row">
+              <label>
+                <div>Nombre</div>
+                <input id="sb-auth-name" placeholder="Nombre visible">
+              </label>
+              <label>
+                <div>Email</div>
+                <input id="sb-auth-email" type="email" placeholder="nombre@correo.com">
+              </label>
+            </div>
+            <label>
+              <div>Contraseña</div>
+              <input id="sb-auth-password" type="password" placeholder="Mínimo 6 caracteres">
+            </label>
+            <div class="row">
+              <button class="btn alt" onclick="supabaseSignIn()">Iniciar sesión</button>
+              <button class="btn ghost" onclick="supabaseSignUp()">Crear usuario</button>
+            </div>
+          </div>
+          <div id="sb-auth-loggedin" style="display:none">
+            <div class="auth-user-meta">
+              <strong id="sb-user-name">Usuario autenticado</strong>
+              <span id="sb-user-email"></span>
+            </div>
+            <div class="row">
+              <span class="auth-store-chip" id="sb-user-store" style="display:none"></span>
+            </div>
+            <label>
+              <div>Store activa</div>
+              <select id="sb-store-sel" onchange="onSupabaseStoreChange()"></select>
+            </label>
+            <div class="row">
+              <button class="btn ghost" onclick="refrescarSupabaseContexto()">Refrescar contexto</button>
+              <button class="btn danger" onclick="supabaseSignOut()">Cerrar sesión</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    return wrap;
+  }
+
+  function ensureSupabaseAccordion(){
+    if(document.getElementById('acc-supabase')) return;
+    const gsHead=document.querySelector('[onclick*="gsheets"]');
+    const gsAcc=gsHead ? gsHead.closest('.accordion') : null;
+    const targetParent=gsAcc?.parentNode || document.getElementById('v-ajustes') || document.body;
+    const panel=buildSupabaseAccordion();
+    if(gsAcc && gsAcc.nextSibling) targetParent.insertBefore(panel, gsAcc.nextSibling);
+    else targetParent.appendChild(panel);
+  }
+
+  function renderSupabaseStatus(){
+    ensureSupabaseHeaderPill();
+    ensureSupabaseAccordion();
+    const configured=hasSupabaseConfig(), loggedIn=!!supabaseUser;
+    const pill=document.getElementById('sb-pill');
+    const dot=document.getElementById('sb-dot');
+    const txt=document.getElementById('sb-txt');
+    if(pill) pill.classList.toggle('on', loggedIn);
+    if(dot) dot.classList.toggle('on', loggedIn);
+    if(txt) txt.textContent=!configured ? 'Supabase' : (loggedIn ? (supabaseProfile?.display_name||supabaseProfile?.full_name||supabaseUser?.email||'Conectado') : 'Ingresar');
+    const meta=document.getElementById('acc-supabase-meta');
+    if(meta) meta.textContent=!configured ? 'Sin configurar' : (loggedIn ? 'Sesión iniciada' : 'Listo para login');
+
+    const sbUrl=document.getElementById('cfg-sb-url-adj');
+    const sbKey=document.getElementById('cfg-sb-anon-adj');
+    if(sbUrl && sbUrl.value!== (config.supabaseUrl||'')) sbUrl.value=config.supabaseUrl||'';
+    if(sbKey && sbKey.value!== (config.supabaseAnonKey||'')) sbKey.value=config.supabaseAnonKey||'';
+
+    const guest=document.getElementById('sb-auth-loggedout');
+    const userBox=document.getElementById('sb-auth-loggedin');
+    if(guest) guest.style.display=configured && !loggedIn ? 'block' : 'none';
+    if(userBox) userBox.style.display=loggedIn ? 'block' : 'none';
+
+    if(!configured) setSupabaseStatus('Configurá el Project URL y la anon key para habilitar login.');
+    else if(loggedIn) setSupabaseStatus('Conectado con Supabase. La persistencia principal sigue siendo local/Sheets en esta fase.');
+    else setSupabaseStatus('Supabase configurado. Podés crear usuario o iniciar sesión.');
+
+    const userName=document.getElementById('sb-user-name');
+    const userEmail=document.getElementById('sb-user-email');
+    if(userName) userName.textContent=supabaseProfile?.display_name||supabaseProfile?.full_name||'Usuario autenticado';
+    if(userEmail) userEmail.textContent=supabaseUser?.email||'';
+
+    const storeSel=document.getElementById('sb-store-sel');
+    const storeChip=document.getElementById('sb-user-store');
+    if(storeSel){
+      const currentStoreId=config.activeStoreId||'';
+      storeSel.innerHTML=`<option value="">${supabaseStores.length?'Seleccioná…':'Sin stores asignadas'}</option>`+
+        supabaseStores.map(s=>`<option value="${s.id}"${s.id===currentStoreId?' selected':''}>${s.name}${s.role?` · ${s.role}`:''}</option>`).join('');
+    }
+    const activeStore=supabaseStores.find(s=>s.id===config.activeStoreId);
+    if(storeChip){
+      if(activeStore){
+        storeChip.style.display='inline-flex';
+        storeChip.textContent=`Store: ${activeStore.name}${activeStore.role?` · ${activeStore.role}`:''}`;
+      }else{
+        storeChip.style.display='none';
+      }
+    }
+  }
+
+  function clearSupabaseContext(render=true){
+    supabaseSession=null;
+    supabaseUser=null;
+    supabaseProfile=null;
+    supabaseStores=[];
+    if(render) renderSupabaseStatus();
+  }
+
+  async function loadSupabaseContext(){
+    if(!(supabaseClient && supabaseUser)){ clearSupabaseContext(); return; }
+    try{
+      const [{data:profile,error:profileErr},{data:stores,error:storesErr},{data:memberships,error:membershipsErr}] = await Promise.all([
+        supabaseClient.from('profiles').select('id,email,full_name,display_name').eq('id', supabaseUser.id).maybeSingle(),
+        supabaseClient.from('stores').select('id,name,slug,timezone').order('name'),
+        supabaseClient.from('store_users').select('store_id,role,user_id,active').eq('user_id', supabaseUser.id).eq('active', true)
+      ]);
+      if(profileErr) throw profileErr;
+      if(storesErr) throw storesErr;
+      if(membershipsErr) throw membershipsErr;
+      const rolesByStore={};
+      (memberships||[]).forEach(m=>{ rolesByStore[m.store_id]=m.role; });
+      supabaseProfile=profile||null;
+      supabaseStores=(stores||[]).map(s=>({ ...s, role: rolesByStore[s.id]||'' }));
+      if(config.activeStoreId && !supabaseStores.some(s=>s.id===config.activeStoreId)) config.activeStoreId='';
+      if(!config.activeStoreId && supabaseStores[0]) config.activeStoreId=supabaseStores[0].id;
+      saveConfig();
+      renderSupabaseStatus();
+    }catch(err){
+      console.error('Supabase context error', err);
+      renderSupabaseStatus();
+      setSupabaseStatus(`Sesión iniciada, pero falló la carga del contexto: ${err.message||err}`);
+    }
+  }
+
+  async function initSupabaseClient(showToastOnReady=false){
+    ensureSupabaseConfigShape();
+    if(supabaseAuthSub){ supabaseAuthSub.unsubscribe(); supabaseAuthSub=null; }
+    if(!hasSupabaseConfig()){ supabaseClient=null; clearSupabaseContext(); return false; }
+    const lib=getSupabaseLib();
+    if(!lib?.createClient){
+      renderSupabaseStatus();
+      setSupabaseStatus('No cargó la librería de Supabase.');
+      return false;
+    }
+    try{
+      supabaseClient=lib.createClient(config.supabaseUrl, config.supabaseAnonKey, {
+        auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }
+      });
+      const { data:{ subscription } } = supabaseClient.auth.onAuthStateChange((event,session)=>{
+        supabaseSession=session||null;
+        supabaseUser=session?.user||null;
+        renderSupabaseStatus();
+        setTimeout(()=>{ supabaseUser ? loadSupabaseContext() : clearSupabaseContext(); }, 0);
+      });
+      supabaseAuthSub=subscription;
+      const { data, error } = await supabaseClient.auth.getSession();
+      if(error) throw error;
+      supabaseSession=data.session||null;
+      supabaseUser=data.session?.user||null;
+      if(supabaseUser) await loadSupabaseContext();
+      else renderSupabaseStatus();
+      if(showToastOnReady && window.showToast) showToast(supabaseUser ? '✓ Supabase conectado' : '✓ Supabase listo');
+      return true;
+    }catch(err){
+      console.error('Supabase init error', err);
+      supabaseClient=null;
+      clearSupabaseContext();
+      if(showToastOnReady && window.showToast) showToast(err.message||'No se pudo conectar Supabase');
+      return false;
+    }
+  }
+
+  function getSupabaseAuthForm(){
+    return {
+      name:(document.getElementById('sb-auth-name')?.value||'').trim(),
+      email:(document.getElementById('sb-auth-email')?.value||'').trim(),
+      password:(document.getElementById('sb-auth-password')?.value||'').trim()
+    };
+  }
+
+  window.openSupabaseSettings=function(){
+    if(window.goTab) goTab('ajustes');
+    setTimeout(()=>{
+      ensureSupabaseAccordion();
+      if(window.toggleAccordion) toggleAccordion('supabase');
+      renderSupabaseStatus();
+    },120);
+  };
+
+  window.guardarSupabaseConfigAdj=async function(){
+    const supabaseUrl=(document.getElementById('cfg-sb-url-adj')?.value||'').trim();
+    const supabaseAnonKey=(document.getElementById('cfg-sb-anon-adj')?.value||'').trim();
+    if(!supabaseUrl || !supabaseAnonKey){ if(window.showToast) showToast('Completá URL y anon key'); return; }
+    config={ ...config, supabaseUrl, supabaseAnonKey };
+    saveConfig();
+    await initSupabaseClient(true);
+  };
+
+  window.reconectarSupabase=async function(){
+    if(!hasSupabaseConfig()){ if(window.showToast) showToast('Primero guardá URL y anon key'); return; }
+    await initSupabaseClient(true);
+  };
+
+  window.supabaseSignUp=async function(){
+    if(!supabaseClient){ if(window.showToast) showToast('Configurá Supabase primero'); return; }
+    const {name,email,password}=getSupabaseAuthForm();
+    if(!email || password.length<6){ if(window.showToast) showToast('Ingresá email y una contraseña de al menos 6 caracteres'); return; }
+    const { data, error } = await supabaseClient.auth.signUp({
+      email,
+      password,
+      options:{ data:{ full_name:name||email.split('@')[0], display_name:name||email.split('@')[0] } }
+    });
+    if(error){ if(window.showToast) showToast(error.message||'No se pudo crear el usuario'); return; }
+    if(window.showToast) showToast(data.session ? '✓ Usuario creado e ingresado' : '✓ Usuario creado. Revisá tu email para confirmar la cuenta');
+  };
+
+  window.supabaseSignIn=async function(){
+    if(!supabaseClient){ if(window.showToast) showToast('Configurá Supabase primero'); return; }
+    const {email,password}=getSupabaseAuthForm();
+    if(!email || !password){ if(window.showToast) showToast('Ingresá email y contraseña'); return; }
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if(error){ if(window.showToast) showToast(error.message||'No se pudo iniciar sesión'); return; }
+    if(window.showToast) showToast('✓ Sesión iniciada');
+  };
+
+  window.supabaseSignOut=async function(){
+    if(!supabaseClient) return;
+    const { error } = await supabaseClient.auth.signOut();
+    if(error){ if(window.showToast) showToast(error.message||'No se pudo cerrar sesión'); return; }
+    clearSupabaseContext();
+    renderSupabaseStatus();
+    if(window.showToast) showToast('✓ Sesión cerrada');
+  };
+
+  window.refrescarSupabaseContexto=async function(){
+    if(!supabaseClient || !supabaseUser){ if(window.showToast) showToast('No hay sesión iniciada'); return; }
+    await loadSupabaseContext();
+    if(window.showToast) showToast('✓ Contexto actualizado');
+  };
+
+  window.onSupabaseStoreChange=function(){
+    config.activeStoreId=document.getElementById('sb-store-sel')?.value||'';
+    saveConfig();
+    renderSupabaseStatus();
+  };
+
+  const _guardarConfigAdj=window.guardarConfigAdj;
+  if(typeof _guardarConfigAdj==='function'){
+    window.guardarConfigAdj=function(...args){
+      const prev={...config};
+      const res=_guardarConfigAdj.apply(this,args);
+      config={...prev,...config};
+      saveConfig();
+      renderSupabaseStatus();
+      return res;
+    };
+  }
+
+  const _renderAjustesConfig=window.renderAjustesConfig;
+  if(typeof _renderAjustesConfig==='function'){
+    window.renderAjustesConfig=function(...args){
+      const res=_renderAjustesConfig.apply(this,args);
+      ensureSupabaseAccordion();
+      renderSupabaseStatus();
+      return res;
+    };
+  }
+
+  const _renderAjustes=window.renderAjustes;
+  if(typeof _renderAjustes==='function'){
+    window.renderAjustes=function(...args){
+      const res=_renderAjustes.apply(this,args);
+      ensureSupabaseAccordion();
+      renderSupabaseStatus();
+      return res;
+    };
+  }
+
+  ensureSupabaseConfigShape();
+  ensureSupabaseHeaderPill();
+  ensureSupabaseAccordion();
+  renderSupabaseStatus();
+  if(hasSupabaseConfig()) initSupabaseClient();
+})();
 </script>
 </body>
 </html>
