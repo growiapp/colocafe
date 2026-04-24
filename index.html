@@ -6496,6 +6496,8 @@ if(config.webappUrl){loadFromSheets();}
         <button class="btn ghost" type="button" onclick="retryLastSaleSync()">Reintentar sync última venta local</button>
         <button class="btn ghost" type="button" onclick="retryPendingSalesSync()">Reintentar sync ventas pendientes</button>
         <button class="btn ghost" type="button" onclick="debugPendingSalesSync()">Debug ventas pendientes</button>
+        <button class="btn ghost" type="button" onclick="markLastSaleAsManualTest()">Marcar última venta como prueba</button>
+        <button class="btn ghost" type="button" onclick="listRecentLocalSaleTickets()">Mostrar últimos tickets locales</button>
       </div>
       <div id="sales-sb-diag" style="font-size:12px;color:var(--ink2);background:var(--surf2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;line-height:1.5"></div>
     `;
@@ -6588,12 +6590,65 @@ if(config.webappUrl){loadFromSheets();}
     });
     return stats;
   }
+  function getRecentLocalSaleGroups(limit=10){
+    const groups=groupLocalSaleRowsByTicket(ventas||[]);
+    return groups
+      .slice()
+      .sort((a,b)=>String(b?.ref?.timestamp||'').localeCompare(String(a?.ref?.timestamp||'')))
+      .slice(0,Math.max(1,Number(limit)||10));
+  }
+  function markLocalSaleRowsManualTest(rows){
+    const ids=new Set((rows||[]).map(r=>String(r.id||'')));
+    let changed=false;
+    ventas=(ventas||[]).map(v=>{
+      if(!ids.has(String(v.id||''))) return v;
+      changed=true;
+      return{
+        ...v,
+        _sb_manual_test:true
+      };
+    });
+    if(changed) save();
+    return changed;
+  }
   window.findPendingSalesSyncGroups=function(rows=ventas){
     return groupLocalSaleRowsByTicket(rows).filter(group=>{
       const meta=getGroupSyncMeta(group);
       return !meta.saleId || meta.status==='pending' || meta.status==='error' || meta.status==='partial_error';
     });
   };
+  async function markRemoteSaleManualTest(group){
+    const storeId=getSalesStoreId();
+    const client=getSalesSupabaseClient();
+    if(!hasSalesSupabaseReady()||!client) return {ok:false,reason:'Supabase no configurado'};
+    const session=await getSalesSession(client);
+    if(!session) return {ok:false,reason:'No hay sesión activa'};
+    if(!storeId || !isValidUuid(storeId)) return {ok:false,reason:'Store ID inválido'};
+    const saleRow=await findExistingSaleRow(client,storeId,group);
+    if(!saleRow?.id) return {ok:false,reason:'La venta todavía no existe en Supabase'};
+    const saleFetch=await client.from('sales').select('id,metadata').eq('id',saleRow.id).eq('store_id',storeId).maybeSingle();
+    if(saleFetch.error) throw saleFetch.error;
+    const saleMeta={...(saleFetch.data?.metadata||{}),source:'manual_test',manual_test:true};
+    const saleUpdate=await client.from('sales').update({metadata:saleMeta}).eq('id',saleRow.id).eq('store_id',storeId).select('id').single();
+    if(saleUpdate.error) throw saleUpdate.error;
+
+    const itemsFetch=await client.from('sale_items').select('id,metadata').eq('store_id',storeId).eq('sale_id',saleRow.id);
+    if(itemsFetch.error) throw itemsFetch.error;
+    for(const item of (itemsFetch.data||[])){
+      const itemMeta={...(item.metadata||{}),source:'manual_test',manual_test:true};
+      const itemUpdate=await client.from('sale_items').update({metadata:itemMeta}).eq('id',item.id).eq('store_id',storeId);
+      if(itemUpdate.error) throw itemUpdate.error;
+    }
+
+    const paymentsFetch=await client.from('sale_payments').select('id,metadata').eq('store_id',storeId).eq('sale_id',saleRow.id);
+    if(paymentsFetch.error) throw paymentsFetch.error;
+    for(const payment of (paymentsFetch.data||[])){
+      const paymentMeta={...(payment.metadata||{}),source:'manual_test',manual_test:true};
+      const paymentUpdate=await client.from('sale_payments').update({metadata:paymentMeta}).eq('id',payment.id).eq('store_id',storeId);
+      if(paymentUpdate.error) throw paymentUpdate.error;
+    }
+    return {ok:true,saleId:saleRow.id};
+  }
   window.getStableSalePaymentLegacyId=function(group,payment,index){
     const base=getStableSaleLegacyId(group);
     const method=normalizePaymentMethod(payment?.metodo);
@@ -7008,6 +7063,95 @@ if(config.webappUrl){loadFromSheets();}
     });
     console.groupEnd();
     showToast(`Debug pendientes: ${pendingGroups.length} ticket(s)`);
+  };
+  window.listRecentLocalSaleTickets=function(limit=10){
+    const groups=getRecentLocalSaleGroups(limit);
+    const rows=groups.map(group=>{
+      const meta=getGroupSyncMeta(group);
+      return{
+        ticketId:getStableSaleLegacyId(group),
+        fecha:group?.ref?.fecha||'',
+        hora:group?.ref?.hora||'',
+        operador:group?.ref?.operador||'',
+        mesa:group?.ref?.mesa||'',
+        total:money2(group?.total),
+        items:(group?.rows||[]).length,
+        saleId:meta.saleId||'',
+        syncStatus:meta.status,
+        retryCount:meta.retryCount,
+        manualTest:(group?.rows||[]).some(r=>!!r?._sb_manual_test)
+      };
+    });
+    console.group('[Sales recent local tickets]');
+    console.table(rows);
+    console.groupEnd();
+    showToast(`Tickets recientes listados: ${rows.length}`);
+    return rows;
+  };
+  window.generateCleanupSqlForManualTestTickets=function(ticketIds){
+    const ids=Array.isArray(ticketIds)?ticketIds.map(v=>String(v||'').trim()).filter(Boolean):[];
+    if(!ids.length){
+      const groups=getRecentLocalSaleGroups(10).filter(group=>(group.rows||[]).some(r=>!!r?._sb_manual_test));
+      ids.push(...groups.map(group=>getStableSaleLegacyId(group)));
+    }
+    const uniqueIds=[...new Set(ids)];
+    if(!uniqueIds.length){
+      const msg='No hay ticket_ids marcados como manual_test para generar SQL.';
+      console.warn('[Sales manual test cleanup sql]',msg);
+      return msg;
+    }
+    const quoted=uniqueIds.map(id=>`'${id.replace(/'/g,"''")}'`).join(', ');
+    const sql=`begin;
+
+delete from public.sale_payments
+where sale_id in (
+  select id from public.sales
+  where legacy_id in (${quoted})
+);
+
+delete from public.sale_items
+where sale_id in (
+  select id from public.sales
+  where legacy_id in (${quoted})
+);
+
+delete from public.sales
+where legacy_id in (${quoted});
+
+commit;`;
+    console.group('[Sales manual test cleanup SQL]');
+    console.log('ticket_ids', uniqueIds);
+    console.log(sql);
+    console.groupEnd();
+    return sql;
+  };
+  window.markLastSaleAsManualTest=async function(){
+    const groups=getRecentLocalSaleGroups(1);
+    const group=groups[0];
+    if(!group){showToast('No hay ventas locales para marcar');return;}
+    const legacyId=getStableSaleLegacyId(group);
+    markLocalSaleRowsManualTest(group.rows);
+    try{
+      const remote=await markRemoteSaleManualTest(group);
+      if(remote?.ok){
+        showToast('Última venta marcada como prueba en local y Supabase');
+      }else{
+        showToast(`Última venta marcada localmente. Supabase: ${remote?.reason||'sin sync remoto'}`);
+      }
+    }catch(err){
+      console.error('[Sales manual test mark failed]',{
+        ticketId:legacyId,
+        message:err?.message||String(err),
+        code:err?.code||'',
+        details:err?.details||'',
+        hint:err?.hint||''
+      });
+      showToast(`Venta marcada localmente, pero Supabase falló: ${err?.message||String(err)}`);
+    }
+    renderSalesSupabaseUi();
+    console.group('[Sales manual test mark]');
+    console.log({ticketId:legacyId,sql:generateCleanupSqlForManualTestTickets([legacyId])});
+    console.groupEnd();
   };
 
   window.debugSalesWritePermissions=async function(){
