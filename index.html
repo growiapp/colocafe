@@ -6575,7 +6575,7 @@ if(config.webappUrl){loadFromSheets();}
           <div><strong>Preview ventas Supabase:</strong> ${salesPreviewCounts.sales} tickets · ${salesPreviewCounts.items} items · ${salesPreviewCounts.payments} payments · total ${fmt(salesPreviewCounts.total||0)}</div>
           <div><strong>Comparación preview:</strong> local ${localGroups.length} tickets / ${fmt(localTotal)} · Supabase ${salesPreviewCounts.sales} tickets / ${fmt(salesPreviewCounts.total||0)}</div>
           <div><strong>Diferencia preview:</strong> ${preview?`${preview.missingLocalInSupabase.length} local no encontrados · ${preview.missingSupabaseInLocal.length} Supabase no encontrados · ${preview.totalDiffTickets.length} tickets con diferencia`: '—'}</div>
-          <div><strong>Preview historial Supabase:</strong> ${historyPreviewResult?.tickets?.length||0} tickets · total ${fmt(historyPreviewResult?.totals?.supabase||0)}</div>
+          <div><strong>Preview historial Supabase:</strong> ${historyPreviewResult?.tickets?.length||0} tickets · ${historyPreviewResult?.sourceCounts?.items||0} items · ${historyPreviewResult?.sourceCounts?.payments||0} payments · total ${fmt(historyPreviewResult?.totals?.supabase||0)}</div>
           <div><strong>Comparación historial:</strong> ${historyPreview?`${historyPreview.missingLocalInSupabase.length} local-only · ${historyPreview.missingSupabaseInLocal.length} remote-only · ${historyPreview.totalDiffTickets.length} con diferencia total · ${historyPreview.paymentDiffTickets.length} con diferencia pagos`: '—'}</div>
           <div><strong>Última sync ventas:</strong> ${salesLastSyncAt||'—'}</div>
           <div><strong>Último ticket sincronizado:</strong> ${salesLastTicket||'—'}</div>
@@ -6820,7 +6820,10 @@ if(config.webappUrl){loadFromSheets();}
     }
     return '';
   }
-  function getSalesPreviewRange({desde='',hasta=''}={}){
+  function getSalesPreviewRange({desde='',hasta='',allDates=false}={}){
+    if(allDates){
+      return{desde:'',hasta:''};
+    }
     const todayDate=getLocalDateString();
     const defaultDesde=getLocalDateString(addLocalDays(new Date(),-6));
     return{
@@ -6890,9 +6893,9 @@ if(config.webappUrl){loadFromSheets();}
         .from('sales')
         .select('id,store_id,legacy_id,legacy_source,shift_id,customer_id,reservation_id,open_order_id,business_date,sold_at,operator_name,service_type,table_label,payment_mode,subtotal_amount,total_amount,notes,metadata')
         .eq('store_id',storeId)
-        .gte('business_date',range.desde)
-        .lte('business_date',range.hasta)
         .order('sold_at',{ascending:false});
+      if(range.desde) salesQuery=salesQuery.gte('business_date',range.desde);
+      if(range.hasta) salesQuery=salesQuery.lte('business_date',range.hasta);
       if(opts.limit!==false) salesQuery=salesQuery.limit(Number(opts.limit)||100);
       const {data:salesRows,error:salesErr}=await salesQuery;
       if(salesErr) throw salesErr;
@@ -7038,7 +7041,10 @@ if(config.webappUrl){loadFromSheets();}
   };
   window.buildHistoryPreviewFromSupabase=async function(opts={}){
     historyPreviewLastError='';
-    const preview=salesPreviewResult||await loadSalesFromSupabasePreview(opts);
+    const previewOpts={allDates:true,limit:false,forceRefresh:true,...opts};
+    const preview=(previewOpts.forceRefresh || !salesPreviewResult)
+      ? await loadSalesFromSupabasePreview(previewOpts)
+      : salesPreviewResult;
     if(!preview){
       historyPreviewLastError=salesPreviewLastError||'No se pudo leer ventas Supabase';
       renderSalesSupabaseUi();
@@ -7054,9 +7060,14 @@ if(config.webappUrl){loadFromSheets();}
       historyPreviewLastReadAt=stampSalesMoment();
       historyPreviewResult={
         tickets,
+        sourceCounts:{
+          sales:(preview.sales||[]).length,
+          items:(preview.items||[]).length,
+          payments:(preview.payments||[]).length
+        },
         totals:{supabase:totalSupabase,local:money2(getLocalHistoryTickets().reduce((sum,t)=>sum+money2(t.total),0))},
         comparison:null,
-        opts:preview.opts||opts
+        opts:preview.opts||previewOpts
       };
       renderSalesSupabaseUi();
       showToast(`Preview historial Supabase: ${tickets.length} tickets`);
@@ -7466,7 +7477,9 @@ if(config.webappUrl){loadFromSheets();}
     return comparison;
   };
   window.compareLocalHistoryVsSupabaseHistory=async function(opts={}){
-    const preview=historyPreviewResult||await buildHistoryPreviewFromSupabase(opts);
+    const preview=(opts.forceRefresh || !historyPreviewResult)
+      ? await buildHistoryPreviewFromSupabase({allDates:true,limit:false,forceRefresh:true,...opts})
+      : historyPreviewResult;
     if(!preview) return null;
     const localTickets=getLocalHistoryTickets();
     const remoteTickets=preview.tickets||[];
