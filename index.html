@@ -5953,6 +5953,11 @@ if(config.webappUrl){loadFromSheets();}
   let shiftsCurrentRole='';
   let shiftsCurrentStoreName='';
   let shiftsRemoteOpen=false;
+  let shiftCloseSource='local_fallback';
+  let shiftCloseLastAt='';
+  let shiftCloseLastError='';
+  let shiftCloseWarnings=[];
+  let shiftCloseCounts={tickets:0,items:0,payments:0,totalSupabase:0,totalLocal:0,diff:0,shiftId:''};
 
   function getShiftsConfig(){
     try{
@@ -5986,12 +5991,13 @@ if(config.webappUrl){loadFromSheets();}
     const box=document.createElement('div');
     box.setAttribute('data-shifts-sb-tools','true');
     box.style.cssText='display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:0 0 12px 0;border-top:1px dashed var(--border);margin-top:10px;padding-top:12px;';
-    box.innerHTML=`
+      box.innerHTML=`
       <div id="shifts-sb-status" style="font-size:12px;color:var(--ink3)">Fuente turno: local / fallback</div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <button class="btn ghost" type="button" onclick="debugShiftsWritePermissions()">Probar permisos write shifts</button>
         <button class="btn ghost" type="button" onclick="reloadActiveShiftFromSupabase()">Recargar turno activo desde Supabase</button>
         <button class="btn ghost" type="button" onclick="syncLocalShiftToSupabase()">Subir turno local actual a Supabase</button>
+        <button class="btn ghost" type="button" onclick="debugShiftCloseSupabase()">Debug cierre Supabase</button>
         <button class="btn ghost" type="button" onclick="debugShiftsSupabase()">Debug turnos</button>
       </div>
       <div id="shifts-sb-diag" style="font-size:12px;color:var(--ink2);background:var(--surf2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;line-height:1.5"></div>
@@ -6014,6 +6020,17 @@ if(config.webappUrl){loadFromSheets();}
         <div><strong>Store activa:</strong> ${shiftsCurrentStoreName||'Sin store activa'}</div>
         <div><strong>Store ID:</strong> ${getShiftsStoreId()||'—'}</div>
         <div><strong>Rol:</strong> ${shiftsCurrentRole||'—'}</div>
+        <div><strong>Fuente cierre actual:</strong> ${shiftCloseSource==='supabase'?'Supabase':'Local fallback'}</div>
+        <div><strong>Tickets del turno en Supabase:</strong> ${shiftCloseCounts.tickets||0}</div>
+        <div><strong>Items del turno en Supabase:</strong> ${shiftCloseCounts.items||0}</div>
+        <div><strong>Payments del turno en Supabase:</strong> ${shiftCloseCounts.payments||0}</div>
+        <div><strong>Total Supabase del turno:</strong> ${fmt(shiftCloseCounts.totalSupabase||0)}</div>
+        <div><strong>Total local del turno:</strong> ${fmt(shiftCloseCounts.totalLocal||0)}</div>
+        <div><strong>Diferencia local vs Supabase:</strong> ${fmt(shiftCloseCounts.diff||0)}</div>
+        <div><strong>Shift ID cierre:</strong> ${shiftCloseCounts.shiftId||turno?._sb_id||'—'}</div>
+        <div><strong>Warnings cierre:</strong> ${shiftCloseWarnings.length?shiftCloseWarnings.join(' | '):'—'}</div>
+        <div><strong>Último cierre:</strong> ${shiftCloseLastAt||'—'}</div>
+        <div><strong>Último error cierre:</strong> ${shiftCloseLastError||'—'}</div>
         <div><strong>Último error:</strong> ${shiftsLastError||'—'}</div>
         <div><strong>Última lectura:</strong> ${shiftsLastReadAt||'—'}</div>
         <div><strong>Última sincronización:</strong> ${shiftsLastSyncAt||'—'}</div>
@@ -6083,6 +6100,126 @@ if(config.webappUrl){loadFromSheets();}
     const ts=closedAt || turnoLike?.apertura || turnoLike?.opened_at || '';
     return normalizeBusinessDate(turnoLike?.fecha, ts) || getLocalDateString();
   }
+  function isExcludedShiftSale(row){
+    return !!(row?.legacy_source==='debug' || row?.metadata?.source==='debug' || row?.metadata?.debug===true || row?.metadata?.manual_test===true || row?.metadata?.source==='manual_test' || row?.operator_name==='Debug');
+  }
+  function inferShiftItemSection(item){
+    const section=String(item?.section||item?.metadata?.section||'').toLowerCase();
+    if(section==='cafeteria' || section==='cocina') return section;
+    const category=String(item?.category_name||item?.metadata?.category_name||'').toLowerCase();
+    if(category.includes('cocina')) return 'cocina';
+    if(category.includes('caf')) return 'cafeteria';
+    return '';
+  }
+  function getLocalShiftCloseTotals(turnoLike){
+    const shiftVentasIds=new Set(Array.isArray(turnoLike?.ventasIds)?turnoLike.ventasIds.map(id=>String(id)):[]);
+    const rows=(ventas||[]).filter(v=>shiftVentasIds.has(String(v.id||'')));
+    const ticketGroups=getVentasByTicket(rows);
+    const paymentTotals=getVentasPaymentTotals(rows);
+    const cafe=rows.filter(v=>(v.seccion||getCat(v.cat).seccion)==='cafeteria').reduce((sum,v)=>sum+(Number(v.total)||0),0);
+    const cocina=rows.filter(v=>(v.seccion||getCat(v.cat).seccion)==='cocina').reduce((sum,v)=>sum+(Number(v.total)||0),0);
+    return{
+      source:'local_fallback',
+      shiftId:turnoLike?._sb_id||'',
+      tickets:ticketGroups.length,
+      items:rows.length,
+      payments:ticketGroups.reduce((sum,g)=>sum+getTicketPayments(g).length,0),
+      totalEf:money2(paymentTotals.efectivo||0),
+      totalMp:money2(paymentTotals.mercado_pago||0),
+      totalTransferencia:money2(paymentTotals.transferencia||0),
+      totalOtro:money2(paymentTotals.otro||0),
+      total:money2(rows.reduce((sum,v)=>sum+(Number(v.total)||0),0)),
+      totalCafeteria:money2(cafe),
+      totalCocina:money2(cocina),
+      warnings:[]
+    };
+  }
+  function compareLocalVsSupabaseShiftClose(turnoLike,supabaseTotals){
+    const local=getLocalShiftCloseTotals(turnoLike);
+    const remote=supabaseTotals||null;
+    return{
+      local,
+      remote,
+      diff:money2((remote?.total||0)-local.total)
+    };
+  }
+  window.compareLocalVsSupabaseShiftClose=compareLocalVsSupabaseShiftClose;
+  async function loadShiftSalesFromSupabase(shiftId){
+    const client=window.getSupabaseClient?.();
+    const storeId=getShiftsStoreId();
+    if(!client) throw new Error('Cliente Supabase no disponible');
+    if(!storeId) throw new Error('No hay tienda activa');
+    if(!window.isValidUuid?.(storeId)) throw new Error('Store ID inválido');
+    if(!shiftId || !window.isValidUuid?.(String(shiftId))) throw new Error('Shift ID inválido');
+    const {data:salesRows,error:salesErr}=await client
+      .from('sales')
+      .select('id,store_id,legacy_id,legacy_source,shift_id,business_date,sold_at,operator_name,service_type,table_label,payment_mode,total_amount,metadata')
+      .eq('store_id',storeId)
+      .eq('shift_id',shiftId)
+      .order('sold_at',{ascending:false});
+    if(salesErr) throw salesErr;
+    const sales=(salesRows||[]).filter(row=>!isExcludedShiftSale(row));
+    const saleIds=sales.map(row=>row.id);
+    if(!saleIds.length) return{sales:[],items:[],payments:[]};
+    const [{data:itemRows,error:itemsErr},{data:paymentRows,error:paymentsErr}]=await Promise.all([
+      client.from('sale_items').select('id,store_id,sale_id,legacy_id,product_id,product_name,category_name,section,variant_summary,note,quantity,line_total,metadata').eq('store_id',storeId).in('sale_id',saleIds),
+      client.from('sale_payments').select('id,store_id,sale_id,legacy_id,method,amount,business_date,paid_at,metadata').eq('store_id',storeId).in('sale_id',saleIds)
+    ]);
+    if(itemsErr) throw itemsErr;
+    if(paymentsErr) throw paymentsErr;
+    return{sales,items:itemRows||[],payments:paymentRows||[]};
+  }
+  window.loadShiftSalesFromSupabase=loadShiftSalesFromSupabase;
+  async function calculateShiftCloseTotalsFromSupabase(shiftId){
+    const {sales,items,payments}=await loadShiftSalesFromSupabase(shiftId);
+    const paymentMap={};
+    const itemMap={};
+    (payments||[]).forEach(payment=>{(paymentMap[payment.sale_id]||(paymentMap[payment.sale_id]=[])).push(payment);});
+    (items||[]).forEach(item=>{(itemMap[item.sale_id]||(itemMap[item.sale_id]=[])).push(item);});
+    const totals={efectivo:0,mercado_pago:0,transferencia:0,otro:0};
+    const warnings=[];
+    for(const sale of sales){
+      const salePayments=paymentMap[sale.id]||[];
+      if(salePayments.length){
+        salePayments.forEach(payment=>{
+          const key=normalizePaymentMethod(payment.method||'efectivo');
+          if(totals[key]===undefined) totals[key]=0;
+          totals[key]=money2(totals[key]+(Number(payment.amount)||0));
+        });
+      }else{
+        const legacyMethod=normalizePaymentMethod(sale?.metadata?.legacy_pago||'');
+        if(legacyMethod){
+          totals[legacyMethod]=money2((totals[legacyMethod]||0)+(Number(sale.total_amount)||0));
+          warnings.push(`Ticket ${sale.legacy_id||sale.id} sin sale_payments; se usó fallback legacy`);
+        }else{
+          warnings.push(`Ticket ${sale.legacy_id||sale.id} sin sale_payments ni método legacy`);
+        }
+      }
+    }
+    let totalCafeteria=0,totalCocina=0;
+    (items||[]).forEach(item=>{
+      const section=inferShiftItemSection(item);
+      if(section==='cafeteria') totalCafeteria=money2(totalCafeteria+(Number(item.line_total)||0));
+      else if(section==='cocina') totalCocina=money2(totalCocina+(Number(item.line_total)||0));
+    });
+    return{
+      source:'supabase',
+      shiftId,
+      tickets:(sales||[]).length,
+      items:(items||[]).length,
+      payments:(payments||[]).length,
+      totalEf:money2(totals.efectivo||0),
+      totalMp:money2(totals.mercado_pago||0),
+      totalTransferencia:money2(totals.transferencia||0),
+      totalOtro:money2(totals.otro||0),
+      total:money2((sales||[]).reduce((sum,sale)=>sum+(Number(sale.total_amount)||0),0)),
+      totalCafeteria:money2(totalCafeteria),
+      totalCocina:money2(totalCocina),
+      warnings,
+      raw:{sales,items,payments}
+    };
+  }
+  window.calculateShiftCloseTotalsFromSupabase=calculateShiftCloseTotalsFromSupabase;
   function mapShiftFromSupabase(row,localTurnoRef){
     const remoteVentas=Array.isArray(row?.metadata?.ventasIds)?row.metadata.ventasIds:[];
     const sameShift=!!(localTurnoRef && (String(localTurnoRef._sb_id||'')===String(row?.id||'') || String(localTurnoRef.apertura||'')===String(row?.opened_at||'')));
@@ -6348,6 +6485,36 @@ if(config.webappUrl){loadFromSheets();}
     if(diag.error) showToast(`Debug turnos: ${diag.error}`);
     else showToast('Debug turnos impreso en consola');
   };
+  window.debugShiftCloseSupabase=async function(){
+    const turnoLike=(turno&&turno.abierto)?{...turno,ventasIds:[...(turno.ventasIds||[])]}:null;
+    if(!turnoLike){showToast('No hay turno abierto');return null;}
+    const result={
+      turnoLocal:turnoLike,
+      localTotals:getLocalShiftCloseTotals(turnoLike),
+      supabaseTotals:null,
+      warnings:[],
+      error:null
+    };
+    try{
+      let shiftId=turnoLike._sb_id||'';
+      if(!shiftId && hasShiftsSupabaseReady()){
+        const syncedShift=await saveShiftToSupabase(turnoLike);
+        shiftId=syncedShift?.id||turnoLike._sb_id||'';
+      }
+      if(shiftId){
+        result.supabaseTotals=await calculateShiftCloseTotalsFromSupabase(shiftId);
+        result.compare=compareLocalVsSupabaseShiftClose(turnoLike,result.supabaseTotals);
+      }else{
+        result.warnings.push('No hay shift remoto disponible');
+      }
+    }catch(err){
+      result.error={message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''};
+    }
+    console.log('[debugShiftCloseSupabase]',result);
+    if(result.error) showToast(`Debug cierre: ${result.error.message}`);
+    else showToast('Debug cierre impreso en consola');
+    return result;
+  };
   window.debugShiftsWritePermissions=async function(){
     const result={
       storeId:getShiftsStoreId(),
@@ -6524,6 +6691,70 @@ if(config.webappUrl){loadFromSheets();}
   if(typeof _cerrarTurnoShifts==='function'){
     window.cerrarTurno=async function(ef,mp,tr,otro,tot,cafe,cocina,...args){
       const turnoSnapshot=(turno&&turno.abierto)?{...turno,ventasIds:[...(turno.ventasIds||[])]}:null;
+      const localTotals=turnoSnapshot?getLocalShiftCloseTotals(turnoSnapshot):null;
+      let chosenTotals=localTotals||{totalEf:ef,totalMp:mp,totalTransferencia:tr,totalOtro:otro,total:tot,totalCafeteria:cafe,totalCocina:cocina,tickets:0,items:0,payments:0,warnings:[]};
+      let cierreSource='local_fallback';
+      let cierreWarnings=[];
+      let cierreError='';
+      let pendingAfterSync=false;
+      if(turnoSnapshot && hasShiftsSupabaseReady()){
+        try{
+          const pendingBefore=(window.findPendingSalesSyncGroups?.(ventas||[])||[]).filter(group=>(group.rows||[]).some(row=>(turnoSnapshot.ventasIds||[]).includes(row.id)));
+          if(pendingBefore.length){
+            await window.autoRetryPendingSalesSync?.({reason:'shift_close',force:true}).catch(()=>{});
+          }
+          const pendingAfter=(window.findPendingSalesSyncGroups?.(ventas||[])||[]).filter(group=>(group.rows||[]).some(row=>(turnoSnapshot.ventasIds||[]).includes(row.id)));
+          if(pendingAfter.length){
+            pendingAfterSync=true;
+            cierreWarnings.push('Hay ventas pendientes de sincronizar. El cierre Supabase puede no incluirlas.');
+          }
+          let shiftId=turnoSnapshot._sb_id||'';
+          if(!shiftId){
+            const syncedShift=await saveShiftToSupabase(turnoSnapshot);
+            shiftId=syncedShift?.id||turnoSnapshot._sb_id||'';
+          }
+          if(pendingAfterSync){
+            cierreWarnings.push('Se usará fallback local para evitar un cierre incompleto en Supabase.');
+          }else if(!shiftId){
+            cierreWarnings.push('No se encontró shift remoto. Se usará fallback local.');
+          }else{
+            const supabaseTotals=await calculateShiftCloseTotalsFromSupabase(shiftId);
+            const diffMeta=compareLocalVsSupabaseShiftClose(turnoSnapshot,supabaseTotals);
+            chosenTotals={...supabaseTotals};
+            cierreSource='supabase';
+            cierreWarnings=[...cierreWarnings,...(supabaseTotals.warnings||[])];
+            shiftCloseCounts={
+              tickets:supabaseTotals.tickets||0,
+              items:supabaseTotals.items||0,
+              payments:supabaseTotals.payments||0,
+              totalSupabase:money2(supabaseTotals.total||0),
+              totalLocal:money2(diffMeta.local?.total||0),
+              diff:money2(diffMeta.diff||0),
+              shiftId:shiftId||''
+            };
+            shiftCloseSource='supabase';
+            shiftCloseWarnings=[...cierreWarnings];
+            shiftCloseLastError='';
+            shiftCloseLastAt=stampShiftsMoment();
+          }
+        }catch(err){
+          cierreError=getShiftSupabaseErrorMessage(err);
+          cierreWarnings.push('Cierre realizado en modo local/fallback. Revisar sincronización.');
+          shiftCloseSource='local_fallback';
+          shiftCloseLastError=cierreError;
+        }
+      }else if(turnoSnapshot){
+        shiftCloseCounts={
+          tickets:localTotals?.tickets||0,
+          items:localTotals?.items||0,
+          payments:localTotals?.payments||0,
+          totalSupabase:0,
+          totalLocal:money2(localTotals?.total||tot),
+          diff:0,
+          shiftId:turnoSnapshot?._sb_id||''
+        };
+        shiftCloseSource='local_fallback';
+      }
       const cierreTs=getLocalTimestamp();
       const cierreResumen=turnoSnapshot?{
         fecha:getShiftBusinessDate(turnoSnapshot,cierreTs),
@@ -6531,20 +6762,52 @@ if(config.webappUrl){loadFromSheets();}
         apertura:turnoSnapshot.apertura,
         cierre:cierreTs,
         fondoCaja:turnoSnapshot.fondoCaja,
-        totalEf:ef,totalMp:mp,totalTransferencia:tr,totalOtro:otro,total:tot,totalCafeteria:cafe,totalCocina:cocina
+        totalEf:money2(chosenTotals.totalEf),
+        totalMp:money2(chosenTotals.totalMp),
+        totalTransferencia:money2(chosenTotals.totalTransferencia),
+        totalOtro:money2(chosenTotals.totalOtro),
+        total:money2(chosenTotals.total),
+        totalCafeteria:money2(chosenTotals.totalCafeteria),
+        totalCocina:money2(chosenTotals.totalCocina),
+        source:cierreSource,
+        tickets:chosenTotals.tickets||0,
+        items:chosenTotals.items||0,
+        payments:chosenTotals.payments||0,
+        warnings:cierreWarnings
       }:null;
-      const res=await _cerrarTurnoShifts.call(this,ef,mp,tr,otro,tot,cafe,cocina,...args);
+      shiftCloseWarnings=[...cierreWarnings];
+      if(cierreResumen){
+        shiftCloseCounts={
+          tickets:cierreResumen.tickets||0,
+          items:cierreResumen.items||0,
+          payments:cierreResumen.payments||0,
+          totalSupabase:cierreSource==='supabase'?money2(cierreResumen.total):money2(shiftCloseCounts.totalSupabase||0),
+          totalLocal:money2(localTotals?.total||tot),
+          diff:money2((cierreSource==='supabase'?money2(cierreResumen.total):money2(localTotals?.total||tot))-(money2(localTotals?.total||tot))),
+          shiftId:turnoSnapshot?._sb_id||shiftCloseCounts.shiftId||''
+        };
+        shiftCloseLastAt=stampShiftsMoment();
+        if(cierreError) shiftCloseLastError=cierreError;
+      }
+      const res=await _cerrarTurnoShifts.call(this,money2(chosenTotals.totalEf),money2(chosenTotals.totalMp),money2(chosenTotals.totalTransferencia),money2(chosenTotals.totalOtro),money2(chosenTotals.total),money2(chosenTotals.totalCafeteria),money2(chosenTotals.totalCocina),...args);
       if(turnoSnapshot && hasShiftsSupabaseReady()){
         try{
           await closeShiftInSupabase(turnoSnapshot,cierreResumen);
-          showToast('Turno cerrado y sincronizado con Supabase');
+          shiftCloseSource=cierreSource==='supabase'?'supabase':'local_fallback';
+          shiftCloseLastError='';
+          showToast(cierreWarnings.length?(cierreSource==='supabase'?'Turno cerrado con datos Supabase · revisar warnings':'Cierre realizado en modo local/fallback. Revisar warnings'):'Turno cerrado y sincronizado con Supabase');
         }catch(err){
           const msg=getShiftSupabaseErrorMessage(err);
           setShiftsState('error',msg);
+          shiftCloseSource='local_fallback';
+          shiftCloseLastError=msg;
           console.error('[cerrarTurno -> closeShiftInSupabase failed]',{turno:turnoSnapshot,cierre:cierreResumen,message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''});
-          showToast(`Turno cerrado local, pero Supabase falló: ${msg}`);
+          showToast(`Cierre realizado en modo local/fallback. Revisar sincronización. ${msg}`);
         }
+      }else if(cierreWarnings.length){
+        showToast(cierreWarnings[0]);
       }
+      renderShiftsSupabaseUi();
       return res;
     };
   }
