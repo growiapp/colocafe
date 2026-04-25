@@ -6442,6 +6442,9 @@ if(config.webappUrl){loadFromSheets();}
   let salesPreviewLastReadAt='';
   let salesPreviewLastError='';
   let salesPreviewResult=null;
+  let historyPreviewLastReadAt='';
+  let historyPreviewLastError='';
+  let historyPreviewResult=null;
   let salesAutoSyncRunning=false;
   let salesAutoSyncLastRunAt=0;
   const SALES_AUTO_SYNC_COOLDOWN_MS=30000;
@@ -6531,6 +6534,7 @@ if(config.webappUrl){loadFromSheets();}
         const localGroups=groupLocalSaleRowsByTicket(ventas||[]);
         const localTotal=money2(localGroups.reduce((sum,g)=>sum+money2(g.total),0));
         const preview=salesPreviewResult?.comparison||null;
+        const historyPreview=historyPreviewResult?.comparison||null;
         diag.innerHTML=`
           <div><strong>Estado Supabase:</strong> ${hasSalesSupabaseReady()?'Conectado':'Sin conexión'}</div>
           <div><strong>Fuente ventas:</strong> ${salesWriteState==='error'?'Fallback':salesWriteState==='syncing'?'Sincronizando':'Local + Supabase write-through'}</div>
@@ -6544,12 +6548,16 @@ if(config.webappUrl){loadFromSheets();}
           <div><strong>Preview ventas Supabase:</strong> ${salesPreviewCounts.sales} tickets · ${salesPreviewCounts.items} items · ${salesPreviewCounts.payments} payments · total ${fmt(salesPreviewCounts.total||0)}</div>
           <div><strong>Comparación preview:</strong> local ${localGroups.length} tickets / ${fmt(localTotal)} · Supabase ${salesPreviewCounts.sales} tickets / ${fmt(salesPreviewCounts.total||0)}</div>
           <div><strong>Diferencia preview:</strong> ${preview?`${preview.missingLocalInSupabase.length} local no encontrados · ${preview.missingSupabaseInLocal.length} Supabase no encontrados · ${preview.totalDiffTickets.length} tickets con diferencia`: '—'}</div>
+          <div><strong>Preview historial Supabase:</strong> ${historyPreviewResult?.tickets?.length||0} tickets · total ${fmt(historyPreviewResult?.totals?.supabase||0)}</div>
+          <div><strong>Comparación historial:</strong> ${historyPreview?`${historyPreview.missingLocalInSupabase.length} local-only · ${historyPreview.missingSupabaseInLocal.length} remote-only · ${historyPreview.totalDiffTickets.length} con diferencia total · ${historyPreview.paymentDiffTickets.length} con diferencia pagos`: '—'}</div>
           <div><strong>Última sync ventas:</strong> ${salesLastSyncAt||'—'}</div>
           <div><strong>Último ticket sincronizado:</strong> ${salesLastTicket||'—'}</div>
           <div><strong>Último error ventas:</strong> ${salesLastError||(!storeId?'No hay tienda activa':'—')}</div>
           <div><strong>Última lectura:</strong> ${salesLastProbeAt||'—'}</div>
           <div><strong>Última lectura preview:</strong> ${salesPreviewLastReadAt||'—'}</div>
           <div><strong>Último error preview:</strong> ${salesPreviewLastError||'—'}</div>
+          <div><strong>Última lectura historial preview:</strong> ${historyPreviewLastReadAt||'—'}</div>
+          <div><strong>Último error historial preview:</strong> ${historyPreviewLastError||'—'}</div>
         `;
       }
       const techBox=$('sales-tech-box');
@@ -6572,6 +6580,9 @@ if(config.webappUrl){loadFromSheets();}
           <button class="btn ghost" type="button" onclick="loadSalesFromSupabasePreview()">Leer ventas Supabase preview</button>
           <button class="btn ghost" type="button" onclick="compareLocalSalesVsSupabase()">Comparar ventas local vs Supabase</button>
           <button class="btn ghost" type="button" onclick="debugSalesReadSupabase()">Debug lectura ventas</button>
+          <button class="btn ghost" type="button" onclick="buildHistoryPreviewFromSupabase()">Leer preview historial Supabase</button>
+          <button class="btn ghost" type="button" onclick="compareLocalHistoryVsSupabaseHistory()">Comparar historial local vs Supabase</button>
+          <button class="btn ghost" type="button" onclick="debugHistorySupabasePreview()">Debug historial Supabase</button>
         `:'';
       }
     }catch(err){
@@ -6944,6 +6955,94 @@ if(config.webappUrl){loadFromSheets();}
       cat:item.metadata?.cat??null,
       _sb_sale_id:sale.id
     }));
+  };
+  function getComparablePaymentMethods(pagos){
+    return (Array.isArray(pagos)?pagos:[])
+      .map(p=>normalizePaymentMethod(p?.metodo||p?.method||''))
+      .filter(Boolean)
+      .sort();
+  }
+  function getLocalHistoryTickets(){
+    return groupLocalSaleRowsByTicket(ventas||[]).map(group=>{
+      const pagos=getTicketPayments(group);
+      const totalPagos=money2(pagos.reduce((sum,p)=>sum+(Number(p.monto)||0),0));
+      return{
+        ticketId:getStableSaleLegacyId(group),
+        fecha:normalizeBusinessDate(group?.ref?.fecha,group?.ref?.timestamp),
+        hora:normalizeBusinessTime(group?.ref?.hora,group?.ref?.timestamp),
+        timestamp:group?.ref?.timestamp||'',
+        operador:group?.ref?.operador||'',
+        mesa:group?.ref?.mesa||'',
+        tipo:group?.ref?.tipo||'salon',
+        total:money2(group.total),
+        itemCount:(group.rows||[]).length,
+        paymentCount:pagos.length,
+        paymentTotal:totalPagos,
+        paymentMethods:getComparablePaymentMethods(pagos),
+        shiftId:(group.rows||[]).map(r=>r?._shift_sb_id||'').find(Boolean)||null,
+        reservationId:(group.rows||[]).map(r=>r?._reservation_sb_id||'').find(Boolean)||null,
+        products:(group.rows||[]).map(r=>`${r.producto||''} x${Number(r.cantidad)||0}`)
+      };
+    });
+  }
+  window.mapSupabaseSaleToHistoryTicket=function(sale,items,payments){
+    const comparablePayments=(payments||[]).map(p=>({metodo:normalizePaymentMethod(p.method),monto:money2(p.amount)}));
+    return{
+      ticketId:sale.legacy_id||sale.id,
+      fecha:normalizeBusinessDate(sale.business_date,sale.sold_at),
+      hora:normalizeBusinessTime('',sale.sold_at),
+      timestamp:sale.sold_at||'',
+      operador:sale.operator_name||'',
+      mesa:sale.table_label||'',
+      tipo:sale.service_type||'salon',
+      total:money2(sale.total_amount),
+      itemCount:(items||[]).length,
+      paymentCount:(payments||[]).length,
+      paymentTotal:money2(comparablePayments.reduce((sum,p)=>sum+(Number(p.monto)||0),0)),
+      paymentMethods:getComparablePaymentMethods(comparablePayments),
+      shiftId:sale.shift_id||null,
+      reservationId:sale.reservation_id||null,
+      products:(items||[]).map(item=>`${item.product_name||''} x${Number(item.quantity)||0}`),
+      payments:comparablePayments
+    };
+  };
+  window.buildHistoryPreviewFromSupabase=async function(opts={}){
+    historyPreviewLastError='';
+    const preview=salesPreviewResult||await loadSalesFromSupabasePreview(opts);
+    if(!preview){
+      historyPreviewLastError=salesPreviewLastError||'No se pudo leer ventas Supabase';
+      renderSalesSupabaseUi();
+      return null;
+    }
+    try{
+      const itemMap={};
+      const paymentMap={};
+      (preview.items||[]).forEach(item=>{(itemMap[item.sale_id]||(itemMap[item.sale_id]=[])).push(item);});
+      (preview.payments||[]).forEach(payment=>{(paymentMap[payment.sale_id]||(paymentMap[payment.sale_id]=[])).push(payment);});
+      const tickets=(preview.sales||[]).map(sale=>mapSupabaseSaleToHistoryTicket(sale,itemMap[sale.id]||[],paymentMap[sale.id]||[]));
+      const totalSupabase=money2(tickets.reduce((sum,t)=>sum+money2(t.total),0));
+      historyPreviewLastReadAt=stampSalesMoment();
+      historyPreviewResult={
+        tickets,
+        totals:{supabase:totalSupabase,local:money2(getLocalHistoryTickets().reduce((sum,t)=>sum+money2(t.total),0))},
+        comparison:null,
+        opts:preview.opts||opts
+      };
+      renderSalesSupabaseUi();
+      showToast(`Preview historial Supabase: ${tickets.length} tickets`);
+      return historyPreviewResult;
+    }catch(err){
+      historyPreviewLastError=err?.message||String(err);
+      console.error('[History preview build failed]',{
+        message:err?.message||String(err),
+        code:err?.code||'',
+        details:err?.details||'',
+        hint:err?.hint||''
+      });
+      renderSalesSupabaseUi();
+      showToast(`Preview historial falló: ${historyPreviewLastError}`);
+      return null;
+    }
   };
   async function resolveSaleProductId(row,client,storeId,cache){
     cache=cache||{};
@@ -7336,6 +7435,63 @@ if(config.webappUrl){loadFromSheets();}
     showToast(`Comparación ventas: ${missingLocalInSupabase.length} local-only · ${missingSupabaseInLocal.length} remote-only · ${totalDiffTickets.length} con diferencia`);
     return comparison;
   };
+  window.compareLocalHistoryVsSupabaseHistory=async function(opts={}){
+    const preview=historyPreviewResult||await buildHistoryPreviewFromSupabase(opts);
+    if(!preview) return null;
+    const localTickets=getLocalHistoryTickets();
+    const remoteTickets=preview.tickets||[];
+    const localMap={};
+    const remoteMap={};
+    localTickets.forEach(ticket=>{localMap[ticket.ticketId]=ticket;});
+    remoteTickets.forEach(ticket=>{remoteMap[ticket.ticketId]=ticket;});
+    const localIds=Object.keys(localMap);
+    const remoteIds=Object.keys(remoteMap);
+    const missingLocalInSupabase=localIds.filter(id=>!remoteMap[id]);
+    const missingSupabaseInLocal=remoteIds.filter(id=>!localMap[id]);
+    const totalDiffTickets=[];
+    const paymentDiffTickets=[];
+    const itemDiffTickets=[];
+    const shiftDiffTickets=[];
+    [...new Set(localIds.filter(id=>remoteMap[id]))].forEach(id=>{
+      const local=localMap[id];
+      const remote=remoteMap[id];
+      if(Math.abs(money2(local.total)-money2(remote.total))>1){
+        totalDiffTickets.push({ticketId:id,localTotal:money2(local.total),remoteTotal:money2(remote.total),diff:money2(remote.total-local.total)});
+      }
+      if(local.itemCount!==remote.itemCount){
+        itemDiffTickets.push({ticketId:id,localItems:local.itemCount,remoteItems:remote.itemCount});
+      }
+      if(Math.abs(money2(local.paymentTotal)-money2(remote.paymentTotal))>1 || JSON.stringify(local.paymentMethods)!==JSON.stringify(remote.paymentMethods)){
+        paymentDiffTickets.push({ticketId:id,localPaymentTotal:money2(local.paymentTotal),remotePaymentTotal:money2(remote.paymentTotal),localMethods:local.paymentMethods.join(', '),remoteMethods:remote.paymentMethods.join(', ')});
+      }
+      if(String(local.fecha||'')!==String(remote.fecha||'') || String(local.shiftId||'')!==String(remote.shiftId||'')){
+        shiftDiffTickets.push({ticketId:id,localFecha:local.fecha,remoteFecha:remote.fecha,localShift:local.shiftId||'',remoteShift:remote.shiftId||''});
+      }
+    });
+    const comparison={
+      local:{tickets:localTickets.length,total:money2(localTickets.reduce((sum,t)=>sum+money2(t.total),0))},
+      supabase:{tickets:remoteTickets.length,total:money2(remoteTickets.reduce((sum,t)=>sum+money2(t.total),0))},
+      missingLocalInSupabase,
+      missingSupabaseInLocal,
+      totalDiffTickets,
+      paymentDiffTickets,
+      itemDiffTickets,
+      shiftDiffTickets
+    };
+    historyPreviewResult={...preview,comparison};
+    renderSalesSupabaseUi();
+    console.group('[History preview compare]');
+    console.log(comparison);
+    if(missingLocalInSupabase.length) console.table(missingLocalInSupabase.map(ticketId=>({ticketId,status:'local_only'})));
+    if(missingSupabaseInLocal.length) console.table(missingSupabaseInLocal.map(ticketId=>({ticketId,status:'supabase_only'})));
+    if(totalDiffTickets.length) console.table(totalDiffTickets);
+    if(paymentDiffTickets.length) console.table(paymentDiffTickets);
+    if(itemDiffTickets.length) console.table(itemDiffTickets);
+    if(shiftDiffTickets.length) console.table(shiftDiffTickets);
+    console.groupEnd();
+    showToast(`Comparación historial: ${missingLocalInSupabase.length} local-only · ${missingSupabaseInLocal.length} remote-only · ${totalDiffTickets.length} diferencias`);
+    return comparison;
+  };
   window.debugSalesReadSupabase=async function(opts={}){
     const preview=await loadSalesFromSupabasePreview(opts);
     console.group('[Sales Supabase read debug]');
@@ -7351,6 +7507,21 @@ if(config.webappUrl){loadFromSheets();}
         payments:preview?.payments?.length||0,
         comparableRows:preview?.comparableRows?.length||0
       }
+    });
+    console.groupEnd();
+    return preview;
+  };
+  window.debugHistorySupabasePreview=async function(opts={}){
+    const preview=await buildHistoryPreviewFromSupabase(opts);
+    console.group('[History Supabase preview debug]');
+    console.log({
+      currentStore:{id:getSalesStoreId(),name:getSalesStoreName()},
+      currentRole:getSalesRole()||'',
+      historyTickets:preview?.tickets?.length||0,
+      historyTotal:preview?.totals?.supabase||0,
+      localHistoryTickets:getLocalHistoryTickets().length,
+      lastRead:historyPreviewLastReadAt||null,
+      lastError:historyPreviewLastError||null
     });
     console.groupEnd();
     return preview;
