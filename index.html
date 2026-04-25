@@ -890,8 +890,8 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
     <div class="modal-title" style="text-align:center" id="confirm-titulo">¿Confirmar?</div>
     <div style="font-size:14px;color:var(--ink2);text-align:center;line-height:1.5;margin-bottom:20px" id="confirm-msg"></div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="cerrarModalConfirm()">Cancelar</button>
-      <button class="btn-save" id="confirm-btn-ok" onclick="ejecutarConfirm()">Confirmar</button>
+      <button class="btn-cancel" type="button" onclick="cerrarModalConfirm()">Cancelar</button>
+      <button class="btn-save" type="button" id="confirm-btn-ok" onclick="ejecutarConfirm()">Confirmar</button>
     </div>
   </div>
 </div>
@@ -920,8 +920,8 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
       <input class="modal-input" id="nueva-mesa-input" type="text" placeholder="Mesa 3, Juan García…" maxlength="40">
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="cerrarModalNuevaMesa()">Cancelar</button>
-      <button class="btn-save" onclick="confirmarNuevaMesa()">Abrir mesa</button>
+      <button class="btn-cancel" type="button" onclick="cerrarModalNuevaMesa()">Cancelar</button>
+      <button class="btn-save" type="button" onclick="confirmarNuevaMesa()">Abrir mesa</button>
     </div>
   </div>
 </div>
@@ -941,8 +941,8 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
       <span style="font-size:15px;font-weight:500;color:var(--orange)" id="modal-variantes-total">$0</span>
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="cerrarModalVariantes()">Cancelar</button>
-      <button class="btn-save" onclick="confirmarVariantes()">Agregar al pedido</button>
+      <button class="btn-cancel" type="button" onclick="cerrarModalVariantes()">Cancelar</button>
+      <button class="btn-save" type="button" onclick="confirmarVariantes()">Agregar al pedido</button>
     </div>
   </div>
 </div>
@@ -954,12 +954,12 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
     <div class="modal-title" id="prod-modal-title">Producto</div>
     <div class="modal-field">
       <label class="modal-lbl">Nombre</label>
-      <input class="modal-input" id="m-nombre" type="text" placeholder="Cappuccino">
+      <input class="modal-input" id="m-nombre" type="text" placeholder="Cappuccino" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other">
     </div>
     <div class="modal-2col">
       <div class="modal-field">
         <label class="modal-lbl">Precio ($)</label>
-        <input class="modal-input" id="m-precio" type="number" placeholder="5500" min="0">
+        <input class="modal-input" id="m-precio" type="number" placeholder="5500" min="0" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other">
       </div>
       <div class="modal-field">
         <label class="modal-lbl">Categoría</label>
@@ -980,7 +980,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
         <span class="toggle-lbl" id="m-ilimitado-lbl">∞ Ilimitado</span>
       </div>
       <div id="m-stock-wrap" style="margin-top:6px">
-        <input class="modal-input" id="m-stock" type="number" placeholder="20" min="0">
+        <input class="modal-input" id="m-stock" type="number" placeholder="20" min="0" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other">
       </div>
     </div>
     <!-- Variantes (expandible) -->
@@ -1102,12 +1102,12 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
     <div class="modal-title" id="prod-rapido-titulo">Nuevo producto</div>
     <div class="modal-field">
       <label class="modal-lbl">Nombre</label>
-      <input class="modal-input" id="pr-nombre" type="text" placeholder="Cappuccino">
+      <input class="modal-input" id="pr-nombre" type="text" placeholder="Cappuccino" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other">
     </div>
     <div class="modal-2col">
       <div class="modal-field">
         <label class="modal-lbl">Precio ($)</label>
-        <input class="modal-input" id="pr-precio" type="number" placeholder="5500" min="0">
+        <input class="modal-input" id="pr-precio" type="number" placeholder="5500" min="0" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other">
       </div>
       <div class="modal-field">
         <label class="modal-lbl">Categoría</label>
@@ -1127,7 +1127,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
         <span class="toggle-lbl" id="pr-ilimitado-lbl">∞ Ilimitado</span>
       </div>
       <div id="pr-stock-wrap" style="margin-top:6px">
-        <input class="modal-input" id="pr-stock" type="number" placeholder="20" min="0">
+        <input class="modal-input" id="pr-stock" type="number" placeholder="20" min="0" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other">
       </div>
     </div>
     <div id="prod-rapido-actions" class="modal-actions"></div>
@@ -1141,7 +1141,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
     <div class="modal-title">Nueva categoría</div>
     <div class="modal-field">
       <label class="modal-lbl">Nombre</label>
-      <input class="modal-input" id="nueva-cat-nombre" type="text" placeholder="Desayunos, Postres…">
+      <input class="modal-input" id="nueva-cat-nombre" type="text" placeholder="Desayunos, Postres…" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other">
     </div>
     <div class="modal-field">
       <label class="modal-lbl">Sección</label>
@@ -1161,8 +1161,8 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
       </label>
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="cerrarModalNuevaCat()">Cancelar</button>
-      <button class="btn-save" onclick="guardarNuevaCat()">Crear categoría</button>
+      <button class="btn-cancel" type="button" onclick="cerrarModalNuevaCat()">Cancelar</button>
+      <button class="btn-save" type="button" onclick="guardarNuevaCat()">Crear categoría</button>
     </div>
   </div>
 </div>
@@ -1195,8 +1195,8 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
       <input class="modal-input" id="gasto-fecha" type="date">
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="cerrarModalGasto()">Cancelar</button>
-      <button class="btn-save" onclick="guardarGasto()">Guardar</button>
+      <button class="btn-cancel" type="button" onclick="cerrarModalGasto()">Cancelar</button>
+      <button class="btn-save" type="button" onclick="guardarGasto()">Guardar</button>
     </div>
   </div>
 </div>
@@ -1216,8 +1216,8 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
       <input class="modal-input" id="cobro-nuevo-op" type="text" placeholder="Nombre">
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="cerrarModalOperadorCobro()">Cancelar</button>
-      <button class="btn-save" onclick="confirmarOperadorCobro()">Cobrar</button>
+      <button class="btn-cancel" type="button" onclick="cerrarModalOperadorCobro()">Cancelar</button>
+      <button class="btn-save" type="button" onclick="confirmarOperadorCobro()">Cobrar</button>
     </div>
   </div>
 </div>
@@ -1238,8 +1238,8 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
       <input class="modal-input" id="gasto-nuevo-op" type="text" placeholder="Nombre">
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="cerrarModalGastoOperador()">Cancelar</button>
-      <button class="btn-save" onclick="confirmarGastoOperador()">Registrar gasto</button>
+      <button class="btn-cancel" type="button" onclick="cerrarModalGastoOperador()">Cancelar</button>
+      <button class="btn-save" type="button" onclick="confirmarGastoOperador()">Registrar gasto</button>
     </div>
   </div>
 </div>
@@ -1580,8 +1580,8 @@ function mostrarAbrirTurno(){
     <div class="modal-field"><label class="modal-lbl">Fondo de caja ($)</label>
       <input class="modal-input" id="turno-fondo" type="number" placeholder="0" min="0"></div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="cerrarModalTurno()">Cancelar</button>
-      <button class="btn-save" onclick="abrirTurno()">Abrir turno</button>
+      <button class="btn-cancel" type="button" onclick="cerrarModalTurno()">Cancelar</button>
+      <button class="btn-save" type="button" onclick="abrirTurno()">Abrir turno</button>
     </div>`;
 }
 function onTurnoOperadorChange(){
@@ -2133,12 +2133,12 @@ function openReservaModal(id){
     $('res-nota').value=r.nota||'';
     (r.items||[]).forEach((item,i)=>{reservaCarrito[`ri_${i}`]={...item};});
     $('reserva-modal-titulo').textContent='Editar reserva';
-    $('reserva-modal-actions').innerHTML=`<button class="btn-cancel" onclick="pedirEliminarReserva('${id}')">Eliminar</button><button class="btn-save" onclick="guardarReserva()">Guardar</button>`;
+    $('reserva-modal-actions').innerHTML=`<button class="btn-cancel" type="button" onclick="pedirEliminarReserva('${id}')">Eliminar</button><button class="btn-save" type="button" onclick="guardarReserva()">Guardar</button>`;
   }else{
     $('reserva-modal-titulo').textContent='Nueva reserva';
     ['res-nombre','res-nota'].forEach(fid=>$(fid).value='');
     $('res-fecha').value=today();$('res-estado').value='pendiente';$('res-cliente').value='';
-    $('reserva-modal-actions').innerHTML=`<button class="btn-cancel" onclick="cerrarModalReserva()">Cancelar</button><button class="btn-save" onclick="guardarReserva()">Guardar</button>`;
+    $('reserva-modal-actions').innerHTML=`<button class="btn-cancel" type="button" onclick="cerrarModalReserva()">Cancelar</button><button class="btn-save" type="button" onclick="guardarReserva()">Guardar</button>`;
   }
   renderReservaProductoGrid();renderReservaProdChips();
   $('modal-reserva').classList.add('open');
@@ -2462,11 +2462,11 @@ function openClienteModal(id,retorno){
     const c=clientes.find(x=>x.id===id);if(!c)return;
     $('cliente-modal-titulo').textContent='Editar cliente';
     $('cli-nombre').value=c.nombre||'';$('cli-tel').value=c.telefono||'';$('cli-email').value=c.email||'';$('cli-alergias').value=c.alergias||'';$('cli-prefs').value=c.preferencias||'';
-    $('cliente-modal-actions').innerHTML=`<button class="btn-cancel" onclick="pedirEliminarCliente('${id}')">Eliminar</button><button class="btn-save" onclick="guardarCliente()">Guardar</button>`;
+    $('cliente-modal-actions').innerHTML=`<button class="btn-cancel" type="button" onclick="pedirEliminarCliente('${id}')">Eliminar</button><button class="btn-save" type="button" onclick="guardarCliente()">Guardar</button>`;
   }else{
     $('cliente-modal-titulo').textContent='Nuevo cliente';
     ['cli-nombre','cli-tel','cli-email','cli-alergias','cli-prefs'].forEach(fid=>$(fid).value='');
-    $('cliente-modal-actions').innerHTML=`<button class="btn-cancel" onclick="cerrarModalCliente()">Cancelar</button><button class="btn-save" onclick="guardarCliente()">Guardar</button>`;
+    $('cliente-modal-actions').innerHTML=`<button class="btn-cancel" type="button" onclick="cerrarModalCliente()">Cancelar</button><button class="btn-save" type="button" onclick="guardarCliente()">Guardar</button>`;
   }
   $('modal-cliente').classList.add('open');setTimeout(()=>$('cli-nombre').focus(),100);
 }
@@ -2497,8 +2497,8 @@ function guardarCliente(){
     renderReservaProductoGrid();renderReservaProdChips();
     $('reserva-modal-titulo').textContent=snap.editReservaId?'Editar reserva':'Nueva reserva';
     $('reserva-modal-actions').innerHTML=snap.editReservaId?
-      `<button class="btn-cancel" onclick="pedirEliminarReserva('${snap.editReservaId}')">Eliminar</button><button class="btn-save" onclick="guardarReserva()">Guardar</button>`:
-      `<button class="btn-cancel" onclick="cerrarModalReserva()">Cancelar</button><button class="btn-save" onclick="guardarReserva()">Guardar</button>`;
+      `<button class="btn-cancel" type="button" onclick="pedirEliminarReserva('${snap.editReservaId}')">Eliminar</button><button class="btn-save" type="button" onclick="guardarReserva()">Guardar</button>`:
+      `<button class="btn-cancel" type="button" onclick="cerrarModalReserva()">Cancelar</button><button class="btn-save" type="button" onclick="guardarReserva()">Guardar</button>`;
     ['salon','delivery','takeaway'].forEach(t=>{$(`rtipo-btn-${t}`).className=`tipo-btn${t===tipoNuevaMesaReserva?' sel-'+t:''}`;});
     $('modal-reserva').classList.add('open');
   }
@@ -2589,12 +2589,12 @@ function openProdModal(id){
     $('m-stock').value=p.stock||0;$('m-ilimitado').checked=!!p.ilimitado;
     $('m-stock-wrap').style.display=p.ilimitado?'none':'block';
     _variantesEdit=JSON.parse(JSON.stringify(p.variantes||[]));
-    $('prod-modal-actions').innerHTML=`<button class="btn-cancel" onclick="pedirEliminarProducto(${id})">Eliminar</button><button class="btn-save" onclick="guardarProducto()">Guardar</button>`;
+    $('prod-modal-actions').innerHTML=`<button class="btn-cancel" type="button" onclick="pedirEliminarProducto(${id})">Eliminar</button><button class="btn-save" type="button" onclick="guardarProducto()">Guardar</button>`;
   }else{
     $('prod-modal-title').textContent='Nuevo producto';
     ['m-nombre','m-precio','m-stock'].forEach(fid=>$(fid).value='');
     $('m-cat').value=cats[0]?.id||'';$('m-ilimitado').checked=false;$('m-stock-wrap').style.display='block';
-    $('prod-modal-actions').innerHTML=`<button class="btn-cancel" onclick="closeProdModal()">Cancelar</button><button class="btn-save" onclick="guardarProducto()">Guardar</button>`;
+    $('prod-modal-actions').innerHTML=`<button class="btn-cancel" type="button" onclick="closeProdModal()">Cancelar</button><button class="btn-save" type="button" onclick="guardarProducto()">Guardar</button>`;
   }
   renderVariantesModalBody();updateVariantesBadge();
   $('modal-prod').classList.add('open');setTimeout(()=>$('m-nombre').focus(),100);
@@ -2654,8 +2654,8 @@ function openProdRapidoModal(contexto){
   _rellenarModalProd(null);
   $('prod-rapido-titulo').textContent = 'Nuevo producto';
   $('prod-rapido-actions').innerHTML = contexto==='ajustes'
-    ? `<button class="btn-cancel" onclick="cerrarModalProdRapido()">Cancelar</button><button class="btn-save" onclick="guardarProdRapido()">Guardar</button>`
-    : `<button class="btn-cancel" onclick="cerrarModalProdRapido()">Cancelar</button><button class="btn-save" onclick="guardarProdRapido()">Crear y agregar</button>`;
+    ? `<button class="btn-cancel" type="button" onclick="cerrarModalProdRapido()">Cancelar</button><button class="btn-save" type="button" onclick="guardarProdRapido()">Guardar</button>`
+    : `<button class="btn-cancel" type="button" onclick="cerrarModalProdRapido()">Cancelar</button><button class="btn-save" type="button" onclick="guardarProdRapido()">Crear y agregar</button>`;
   $('modal-prod-rapido').classList.add('open');
   setTimeout(()=>$('pr-nombre').focus(),100);
 }
@@ -2773,7 +2773,7 @@ function cerrarModalNuevaCat(){
   setTimeout(()=>{
     const actionsEl=$('modal-nueva-cat').querySelector('.modal-actions');
     if(actionsEl&&!actionsEl.innerHTML.includes('guardarNuevaCat')){
-      actionsEl.innerHTML=`<button class="btn-cancel" onclick="cerrarModalNuevaCat()">Cancelar</button><button class="btn-save" onclick="guardarNuevaCat()">Crear categoría</button>`;
+      actionsEl.innerHTML=`<button class="btn-cancel" type="button" onclick="cerrarModalNuevaCat()">Cancelar</button><button class="btn-save" type="button" onclick="guardarNuevaCat()">Crear categoría</button>`;
     }
   },300);
 }
@@ -2841,7 +2841,7 @@ function openCatModal(i){
   ).join('');
   // Change save button label
   const actionsEl=$('modal-nueva-cat').querySelector('.modal-actions');
-  if(actionsEl) actionsEl.innerHTML=`<button class="btn-cancel" onclick="cerrarModalNuevaCat()">Cancelar</button><button class="btn-save" onclick="guardarEditCat(${i})">Guardar</button>`;
+  if(actionsEl) actionsEl.innerHTML=`<button class="btn-cancel" type="button" onclick="cerrarModalNuevaCat()">Cancelar</button><button class="btn-save" type="button" onclick="guardarEditCat(${i})">Guardar</button>`;
   $('modal-nueva-cat').classList.add('open');
   setTimeout(()=>$('nueva-cat-nombre').focus(),120);
 }
@@ -2856,7 +2856,7 @@ function guardarEditCat(i){
   save();cerrarModalNuevaCat();renderCatMgr();renderCargaCats();
   // Restore save button for nueva-cat
   const actionsEl=$('modal-nueva-cat').querySelector('.modal-actions');
-  if(actionsEl) actionsEl.innerHTML=`<button class="btn-cancel" onclick="cerrarModalNuevaCat()">Cancelar</button><button class="btn-save" onclick="guardarNuevaCat()">Crear categoría</button>`;
+  if(actionsEl) actionsEl.innerHTML=`<button class="btn-cancel" type="button" onclick="cerrarModalNuevaCat()">Cancelar</button><button class="btn-save" type="button" onclick="guardarNuevaCat()">Crear categoría</button>`;
   showToast('✓ Categoría actualizada');
 }
 
@@ -2954,11 +2954,11 @@ if(config.webappUrl){loadFromSheets();}
             <input id="sb-auth-name" type="hidden" value="">
             <label>
               <div>Email</div>
-              <input id="sb-auth-email" type="email" placeholder="nombre@correo.com">
+              <input id="sb-auth-email" type="email" placeholder="nombre@correo.com" autocomplete="username">
             </label>
             <label>
               <div>Contraseña</div>
-              <input id="sb-auth-password" type="password" placeholder="Mínimo 6 caracteres">
+              <input id="sb-auth-password" type="password" placeholder="Mínimo 6 caracteres" autocomplete="current-password">
             </label>
             <div class="row">
               <button class="btn alt" onclick="supabaseSignIn()">Iniciar sesión</button>
@@ -3037,11 +3037,11 @@ if(config.webappUrl){loadFromSheets();}
             <input id="sb-auth-name-modal" type="hidden" value="">
             <label>
               <div>Email</div>
-              <input id="sb-auth-email-modal" type="email" placeholder="nombre@correo.com">
+              <input id="sb-auth-email-modal" type="email" placeholder="nombre@correo.com" autocomplete="username">
             </label>
             <label>
               <div>Contraseña</div>
-              <input id="sb-auth-password-modal" type="password" placeholder="Mínimo 6 caracteres">
+              <input id="sb-auth-password-modal" type="password" placeholder="Mínimo 6 caracteres" autocomplete="current-password">
             </label>
             <div class="row">
               <button class="btn alt" onclick="supabaseSignIn()">Iniciar sesión</button>
@@ -3638,7 +3638,9 @@ if(config.webappUrl){loadFromSheets();}
       if(!el) return;
       if(!el.dataset.sbVisible) el.dataset.sbVisible='0';
       el.type=el.dataset.sbVisible==='1'?'text':'password';
-      el.autocomplete='off';
+      el.autocomplete='new-password';
+      el.dataset.lpignore='true';
+      el.dataset['1pIgnore']='true';
       el.spellcheck=false;
       el.autocapitalize='off';
       el.autocorrect='off';
