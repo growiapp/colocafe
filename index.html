@@ -639,6 +639,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
         <input type="date" class="dash-fecha-input" id="dash-hasta" onchange="renderDashboard()">
       </div>
     </div>
+    <div id="dash-source-status" style="font-size:12px;color:var(--ink3);margin-bottom:12px"></div>
     <div class="kpi-grid" id="kpi-grid"></div>
     <div class="seccion-split" id="seccion-split"></div>
     <div class="dash-grid">
@@ -2133,16 +2134,34 @@ function setDashFiltro(f){
 }
 function renderDashboard(){
   const{desde,hasta}=dashRango();
-  const vh=ventas.filter(v=>v.fecha>=desde&&v.fecha<=hasta);
+  const dashboardState=window.getDashboardState?.()||null;
+  const stateRangeMatches=dashboardState?.range?.desde===desde&&dashboardState?.range?.hasta===hasta;
+  const showLoading=!!dashboardState?.loading&&(!stateRangeMatches||dashboardState?.source==='pending');
+  if(activeTab==='dashboard'&&window.ensureDashboardSource)setTimeout(()=>window.ensureDashboardSource({range:{desde,hasta}}),0);
+  const localRows=ventas.filter(v=>v.fecha>=desde&&v.fecha<=hasta);
+  const localTickets=getVentasByTicket(localRows);
+  const useSupabase=stateRangeMatches&&dashboardState?.source==='supabase';
+  const useFallback=stateRangeMatches&&dashboardState?.source==='local_fallback';
+  const vh=useSupabase||useFallback?(dashboardState?.rows||[]):(showLoading?[]:localRows);
+  const ticketGroups=useSupabase||useFallback?(dashboardState?.tickets||[]):(showLoading?[]:localTickets);
   const vg=gastos.filter(g=>g.fecha>=desde&&g.fecha<=hasta);
   const totalV=vh.reduce((s,v)=>s+v.total,0);
   const totalG=vg.reduce((s,g)=>s+g.monto,0);
   const ganancia=totalV-totalG;
-  const txP=vh.length,promP=txP?Math.round(totalV/txP):0;
+  const txP=ticketGroups.length,promP=txP?Math.round(totalV/txP):0;
   const ayer=addLocalDays(new Date(),-1);
-  const va=ventas.filter(v=>v.fecha===getLocalDateString(ayer));
+  const va=useSupabase||useFallback?[]:ventas.filter(v=>v.fecha===getLocalDateString(ayer));
   const totalAyer=va.reduce((s,v)=>s+v.total,0);
   const difPct=totalAyer>0?Math.round((totalV-totalAyer)/totalAyer*100):null;
+  const dashboardSourceLabel=useSupabase?'Supabase':useFallback?'Dashboard en modo local/fallback':showLoading?'Cargando dashboard desde Supabase…':'Local';
+  const dashboardMsg=useSupabase&&txP===0&&!dashboardState?.error?'No hay ventas en Supabase para este rango.':(dashboardState?.error||'');
+  const dashStatus=$('dash-source-status');
+  if(dashStatus){
+    const itemsCount=useSupabase||useFallback?(dashboardState?.itemsCount||vh.length):vh.length;
+    const paymentsCount=useSupabase||useFallback?(dashboardState?.paymentsCount||ticketGroups.reduce((sum,g)=>sum+getTicketPayments(g).length,0)):ticketGroups.reduce((sum,g)=>sum+getTicketPayments(g).length,0);
+    const totalLoaded=useSupabase||useFallback?(dashboardState?.total||totalV):totalV;
+    dashStatus.innerHTML=`<strong>Fuente dashboard:</strong> ${dashboardSourceLabel} · <strong>Tickets:</strong> ${txP} · <strong>Items:</strong> ${itemsCount} · <strong>Payments:</strong> ${paymentsCount} · <strong>Total:</strong> ${fmt(totalLoaded)} · <strong>Rango:</strong> ${desde} → ${hasta}${dashboardState?.lastReadAt?` · <strong>Última lectura:</strong> ${dashboardState.lastReadAt}`:''}${dashboardMsg?` · <strong>Estado:</strong> ${dashboardMsg}`:''}`;
+  }
 
   // KPIs
   $('kpi-grid').innerHTML=`
@@ -2153,13 +2172,14 @@ function renderDashboard(){
 
   // Resultado financiero
   $('seccion-split').innerHTML=`
-    <div class="seccion-card"><div class="seccion-lbl">☕ Cafetería</div><div class="seccion-val">${fmt(vh.filter(v=>getCat(v.cat).seccion==='cafeteria').reduce((s,v)=>s+v.total,0))}</div><div class="seccion-sub">${vh.filter(v=>getCat(v.cat).seccion==='cafeteria').length} ítems</div></div>
-    <div class="seccion-card"><div class="seccion-lbl">🍳 Cocina</div><div class="seccion-val">${fmt(vh.filter(v=>getCat(v.cat).seccion==='cocina').reduce((s,v)=>s+v.total,0))}</div><div class="seccion-sub">${vh.filter(v=>getCat(v.cat).seccion==='cocina').length} ítems</div></div>`;
+    <div class="seccion-card"><div class="seccion-lbl">☕ Cafetería</div><div class="seccion-val">${fmt(vh.filter(v=>(v.seccion||getCat(v.cat).seccion)==='cafeteria').reduce((s,v)=>s+v.total,0))}</div><div class="seccion-sub">${vh.filter(v=>(v.seccion||getCat(v.cat).seccion)==='cafeteria').length} ítems</div></div>
+    <div class="seccion-card"><div class="seccion-lbl">🍳 Cocina</div><div class="seccion-val">${fmt(vh.filter(v=>(v.seccion||getCat(v.cat).seccion)==='cocina').reduce((s,v)=>s+v.total,0))}</div><div class="seccion-sub">${vh.filter(v=>(v.seccion||getCat(v.cat).seccion)==='cocina').length} ítems</div></div>`;
 
   // Bar chart 7 días
   const dias7=[],lbls7=[];
-  for(let i=6;i>=0;i--){const d=addLocalDays(new Date(),-i);dias7.push(getLocalDateString(d));lbls7.push(i===0?'Hoy':['D','L','M','X','J','V','S'][d.getDay()]);}
-  const sem=dias7.map(f=>ventas.filter(v=>v.fecha===f).reduce((s,v)=>s+v.total,0));
+  const dashHasta=parseLocalDateSafe(hasta||today());
+  for(let i=6;i>=0;i--){const d=addLocalDays(dashHasta,-i);dias7.push(getLocalDateString(d));lbls7.push(getLocalDateString(d)===today()?'Hoy':['D','L','M','X','J','V','S'][d.getDay()]);}
+  const sem=dias7.map(f=>vh.filter(v=>v.fecha===f).reduce((s,v)=>s+v.total,0));
   const maxV=Math.max(...sem,1);
   const barTtl=$('bar-chart-titulo');if(barTtl)barTtl.textContent='Últimos 7 días';
   $('bar-semana').innerHTML=sem.map((v,i)=>`<div class="bar-col" style="gap:3px">
@@ -6558,6 +6578,16 @@ if(config.webappUrl){loadFromSheets();}
   let historyVisibleLastReadAt='';
   let historyVisibleLastError='';
   let historyVisibleLoading=false;
+  let dashboardVisibleSource='pending';
+  let dashboardVisibleRows=[];
+  let dashboardVisibleTickets=[];
+  let dashboardVisibleItemsCount=0;
+  let dashboardVisiblePaymentsCount=0;
+  let dashboardVisibleTotal=0;
+  let dashboardVisibleLastReadAt='';
+  let dashboardVisibleLastError='';
+  let dashboardVisibleLoading=false;
+  let dashboardVisibleRange={desde:'',hasta:''};
   let salesAutoSyncRunning=false;
   let salesAutoSyncLastRunAt=0;
   const SALES_AUTO_SYNC_COOLDOWN_MS=30000;
@@ -6622,6 +6652,12 @@ if(config.webappUrl){loadFromSheets();}
     if(historyVisibleSource==='local_fallback') return 'Local fallback';
     return 'Local';
   }
+  function getDashboardSourceLabel(){
+    if(dashboardVisibleSource==='supabase') return 'Supabase';
+    if(dashboardVisibleSource==='local_fallback') return 'Local fallback';
+    if(dashboardVisibleSource==='pending') return 'Cargando…';
+    return 'Local';
+  }
   function setVisibleHistoryState({source='local_fallback',tickets=[],itemsCount=0,paymentsCount=0,total=0,lastReadAt='',error='',loading=false}={}){
     historyVisibleSource=source;
     historyVisibleTickets=Array.isArray(tickets)?tickets:[];
@@ -6644,6 +6680,48 @@ if(config.webappUrl){loadFromSheets();}
       loading:historyVisibleLoading
     };
   };
+  function buildLocalDashboardDataset(range){
+    const desde=range?.desde||today();
+    const hasta=range?.hasta||today();
+    const rows=(ventas||[]).filter(v=>v.fecha>=desde&&v.fecha<=hasta);
+    const tickets=groupLocalSaleRowsByTicket(rows);
+    return{
+      source:'local_fallback',
+      rows,
+      tickets,
+      itemsCount:rows.length,
+      paymentsCount:tickets.reduce((sum,g)=>sum+getTicketPayments(g).length,0),
+      total:money2(rows.reduce((sum,row)=>sum+(Number(row.total)||0),0)),
+      range:{desde,hasta}
+    };
+  }
+  function setDashboardState({source='pending',rows=[],tickets=[],itemsCount=0,paymentsCount=0,total=0,lastReadAt='',error='',loading=false,range=null}={}){
+    dashboardVisibleSource=source;
+    dashboardVisibleRows=Array.isArray(rows)?rows:[];
+    dashboardVisibleTickets=Array.isArray(tickets)?tickets:[];
+    dashboardVisibleItemsCount=Number(itemsCount)||0;
+    dashboardVisiblePaymentsCount=Number(paymentsCount)||0;
+    dashboardVisibleTotal=money2(total);
+    dashboardVisibleLastReadAt=lastReadAt||dashboardVisibleLastReadAt||'';
+    dashboardVisibleLastError=error||'';
+    dashboardVisibleLoading=!!loading;
+    dashboardVisibleRange=range?{desde:range.desde||'',hasta:range.hasta||''}:dashboardVisibleRange;
+  }
+  window.getDashboardState=function(){
+    return{
+      source:dashboardVisibleSource,
+      rows:[...dashboardVisibleRows],
+      tickets:[...dashboardVisibleTickets],
+      itemsCount:dashboardVisibleItemsCount,
+      paymentsCount:dashboardVisiblePaymentsCount,
+      total:dashboardVisibleTotal,
+      lastReadAt:dashboardVisibleLastReadAt,
+      error:dashboardVisibleLastError,
+      loading:dashboardVisibleLoading,
+      range:{...dashboardVisibleRange}
+    };
+  };
+  window.hasSalesSupabaseReady=hasSalesSupabaseReady;
   function ensureSalesSupabaseUi(){
     const body=$('acc-body-menu');
     if(!body||body.querySelector('[data-sales-sb-tools="true"]')) return;
@@ -6689,6 +6767,9 @@ if(config.webappUrl){loadFromSheets();}
           <div><strong>Comparación preview:</strong> local ${localGroups.length} tickets / ${fmt(localTotal)} · Supabase ${salesPreviewCounts.sales} tickets / ${fmt(salesPreviewCounts.total||0)}</div>
           <div><strong>Diferencia preview:</strong> ${preview?`${preview.missingLocalInSupabase.length} local no encontrados · ${preview.missingSupabaseInLocal.length} Supabase no encontrados · ${preview.totalDiffTickets.length} tickets con diferencia`: '—'}</div>
           <div><strong>Preview historial Supabase:</strong> ${historyPreviewResult?.tickets?.length||0} tickets · ${historyPreviewResult?.sourceCounts?.items||0} items · ${historyPreviewResult?.sourceCounts?.payments||0} payments · total ${fmt(historyPreviewResult?.totals?.supabase||0)}</div>
+          <div><strong>Fuente dashboard actual:</strong> ${getDashboardSourceLabel()}</div>
+          <div><strong>Dashboard cargado:</strong> ${dashboardVisibleTickets.length} tickets · ${dashboardVisibleItemsCount} items · ${dashboardVisiblePaymentsCount} payments · total ${fmt(dashboardVisibleTotal||0)}</div>
+          <div><strong>Rango dashboard:</strong> ${(dashboardVisibleRange?.desde||'—')} → ${(dashboardVisibleRange?.hasta||'—')}</div>
           <div><strong>Fuente historial actual:</strong> ${getHistorySourceLabel()}</div>
           <div><strong>Historial cargado:</strong> ${historyVisibleTickets.length} tickets · ${historyVisibleItemsCount} items · ${historyVisiblePaymentsCount} payments · total ${fmt(historyVisibleTotal||0)}</div>
           <div><strong>Comparación historial:</strong> ${historyPreview?`${historyPreview.missingLocalInSupabase.length} local-only · ${historyPreview.missingSupabaseInLocal.length} remote-only · ${historyPreview.totalDiffTickets.length} con diferencia total · ${historyPreview.paymentDiffTickets.length} con diferencia pagos`: '—'}</div>
@@ -6701,6 +6782,8 @@ if(config.webappUrl){loadFromSheets();}
           <div><strong>Preparación migración Excel:</strong> Antes de importar el histórico, dejá identificadas y limpias o marcadas todas las ventas de prueba/manual_test/debug.</div>
           <div><strong>Última lectura historial preview:</strong> ${historyPreviewLastReadAt||'—'}</div>
           <div><strong>Último error historial preview:</strong> ${historyPreviewLastError||'—'}</div>
+          <div><strong>Última lectura dashboard:</strong> ${dashboardVisibleLastReadAt||'—'}</div>
+          <div><strong>Último error dashboard:</strong> ${dashboardVisibleLastError||'—'}</div>
           <div><strong>Última lectura historial visible:</strong> ${historyVisibleLastReadAt||'—'}</div>
           <div><strong>Último error historial visible:</strong> ${historyVisibleLastError||'—'}</div>
         `;
@@ -6728,6 +6811,7 @@ if(config.webappUrl){loadFromSheets();}
           <button class="btn ghost" type="button" onclick="compareLocalSalesVsSupabase()">Comparar ventas local vs Supabase</button>
           <button class="btn ghost" type="button" onclick="debugSalesReadSupabase()">Debug lectura ventas</button>
           <button class="btn ghost" type="button" onclick="reloadVisibleHistoryFromSupabase({forceRefresh:true})">Recargar historial desde Supabase</button>
+          <button class="btn ghost" type="button" onclick="reloadDashboardFromSupabase({forceRefresh:true})">Recargar dashboard desde Supabase</button>
           <button class="btn ghost" type="button" onclick="buildHistoryPreviewFromSupabase()">Leer preview historial Supabase</button>
           <button class="btn ghost" type="button" onclick="compareLocalHistoryVsSupabaseHistory()">Comparar historial local vs Supabase</button>
           <button class="btn ghost" type="button" onclick="debugHistorySupabasePreview()">Debug historial Supabase</button>
@@ -7038,7 +7122,7 @@ if(config.webappUrl){loadFromSheets();}
         comparison:null
       };
       renderSalesSupabaseUi();
-      showToast(`Preview ventas Supabase: ${filteredSales.length} tickets`);
+      if(!opts.silent) showToast(`Preview ventas Supabase: ${filteredSales.length} tickets`);
       return salesPreviewResult;
     }catch(err){
       salesPreviewLastError=err?.message||String(err);
@@ -7049,7 +7133,7 @@ if(config.webappUrl){loadFromSheets();}
         hint:err?.hint||''
       });
       renderSalesSupabaseUi();
-      showToast(`Preview ventas falló: ${salesPreviewLastError}`);
+      if(!opts.silent) showToast(`Preview ventas falló: ${salesPreviewLastError}`);
       return null;
     }
   };
@@ -7080,7 +7164,9 @@ if(config.webappUrl){loadFromSheets();}
   window.mapSupabaseSaleToComparableLocalRows=function(sale,items,payments){
     const paymentMode=sale?.payment_mode||((payments||[]).length>1?'mixed':'single');
     const legacyPago=(sale?.metadata?.legacy_pago)||getLegacyPagoValue(normalizePaymentMethod(payments?.[0]?.method||'efectivo'));
-    const comparablePayments=(payments||[]).map(p=>({metodo:normalizePaymentMethod(p.method),monto:money2(p.amount)}));
+    const comparablePayments=(payments&&payments.length)
+      ? (payments||[]).map(p=>({metodo:normalizePaymentMethod(p.method),monto:money2(p.amount)}))
+      : [{metodo:normalizePaymentMethod(legacyPago||'efectivo'),monto:money2(sale?.total_amount)}];
     return (items||[]).map(item=>({
       id:item.legacy_id||item.id,
       _preview_only:true,
@@ -7147,7 +7233,10 @@ if(config.webappUrl){loadFromSheets();}
   }
   window.getLocalHistoryTickets=getLocalHistoryTickets;
   window.mapSupabaseSaleToHistoryTicket=function(sale,items,payments){
-    const comparablePayments=(payments||[]).map(p=>({metodo:normalizePaymentMethod(p.method),monto:money2(p.amount)}));
+    const legacyPago=(sale?.metadata?.legacy_pago)||getLegacyPagoValue(normalizePaymentMethod(payments?.[0]?.method||'efectivo'));
+    const comparablePayments=(payments&&payments.length)
+      ? (payments||[]).map(p=>({metodo:normalizePaymentMethod(p.method),monto:money2(p.amount)}))
+      : [{metodo:normalizePaymentMethod(legacyPago||'efectivo'),monto:money2(sale?.total_amount)}];
     return{
       ticketId:sale.legacy_id||sale.id,
       fecha:normalizeBusinessDate(sale.business_date,sale.sold_at),
@@ -7299,6 +7388,69 @@ if(config.webappUrl){loadFromSheets();}
       error:'Historial en modo local/fallback',
       loading:false
     });
+  };
+  window.reloadDashboardFromSupabase=async function({silent=false,forceRefresh=true,range=null}={}){
+    const appliedRange=range||((typeof dashRango==='function')?dashRango():{desde:today(),hasta:today()});
+    if(dashboardVisibleLoading) return null;
+    if(!hasSalesSupabaseReady()){
+      const local=buildLocalDashboardDataset(appliedRange);
+      setDashboardState({...local,lastReadAt:dashboardVisibleLastReadAt||'',error:'Dashboard en modo local/fallback',loading:false});
+      if(activeTab==='dashboard') renderDashboard();
+      renderSalesSupabaseUi();
+      return null;
+    }
+    dashboardVisibleLoading=true;
+    renderSalesSupabaseUi();
+    try{
+      if(typeof window.reloadExpensesFromSupabase==='function'){
+        await window.reloadExpensesFromSupabase(true).catch(()=>{});
+      }
+    }catch(_){}
+    try{
+      const preview=await loadSalesFromSupabasePreview({...appliedRange,limit:false,forceRefresh,silent:true});
+      if(!preview) throw new Error(salesPreviewLastError||'No se pudo leer dashboard desde Supabase');
+      const rows=preview.comparableRows||[];
+      const tickets=groupLocalSaleRowsByTicket(rows);
+      const total=money2((preview.sales||[]).reduce((sum,sale)=>sum+(Number(sale.total_amount)||0),0));
+      setDashboardState({
+        source:'supabase',
+        rows,
+        tickets,
+        itemsCount:preview.items?.length||0,
+        paymentsCount:preview.payments?.length||0,
+        total,
+        lastReadAt:stampSalesMoment(),
+        error:'',
+        loading:false,
+        range:appliedRange
+      });
+      if(activeTab==='dashboard') renderDashboard();
+      renderSalesSupabaseUi();
+      if(!silent) showToast(`Dashboard Supabase cargado: ${tickets.length} tickets`);
+      return window.getDashboardState();
+    }catch(err){
+      const local=buildLocalDashboardDataset(appliedRange);
+      setDashboardState({...local,lastReadAt:stampSalesMoment(),error:err?.message||String(err)||'Dashboard en modo local/fallback',loading:false});
+      if(activeTab==='dashboard') renderDashboard();
+      renderSalesSupabaseUi();
+      if(!silent) showToast(`Dashboard en modo local/fallback: ${err?.message||String(err)}`);
+      return null;
+    }finally{
+      dashboardVisibleLoading=false;
+      renderSalesSupabaseUi();
+    }
+  };
+  window.ensureDashboardSource=async function({range=null,forceRefresh=false}={}){
+    const appliedRange=range||((typeof dashRango==='function')?dashRango():{desde:today(),hasta:today()});
+    if(dashboardVisibleLoading) return;
+    if(hasSalesSupabaseReady()){
+      if(forceRefresh || dashboardVisibleSource!=='supabase' || dashboardVisibleRange.desde!==appliedRange.desde || dashboardVisibleRange.hasta!==appliedRange.hasta){
+        await reloadDashboardFromSupabase({silent:true,forceRefresh:true,range:appliedRange});
+      }
+      return;
+    }
+    const local=buildLocalDashboardDataset(appliedRange);
+    setDashboardState({...local,lastReadAt:dashboardVisibleLastReadAt||'',error:'Dashboard en modo local/fallback',loading:false});
   };
   async function resolveSaleProductId(row,client,storeId,cache){
     cache=cache||{};
@@ -7531,6 +7683,9 @@ if(config.webappUrl){loadFromSheets();}
       await refreshSalesDiagnostics({silent:true});
       if(window.reloadVisibleHistoryFromSupabase){
         setTimeout(()=>window.reloadVisibleHistoryFromSupabase({silent:true,forceRefresh:true}),0);
+      }
+      if(window.reloadDashboardFromSupabase){
+        setTimeout(()=>window.reloadDashboardFromSupabase({silent:true,forceRefresh:true}),0);
       }
       console.groupEnd();
       return{ok:true,saleId,legacyId:saleData.legacy_id||salesLastTicket};
@@ -8230,6 +8385,7 @@ commit;`;
       renderSalesSupabaseUi();
       refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics init failed]',err));
       window.autoRetryPendingSalesSync?.({reason:'init'}).catch(err=>console.warn('[Sales auto retry init failed]',err));
+      window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}).catch(err=>console.warn('[Dashboard reload init failed]',err));
       return result;
     };
   }
@@ -8239,6 +8395,7 @@ commit;`;
       const result=await _guardarSupabaseConfigAdjSales.apply(this,args);
       refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics config failed]',err));
       window.autoRetryPendingSalesSync?.({reason:'config'}).catch(err=>console.warn('[Sales auto retry config failed]',err));
+      window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}).catch(err=>console.warn('[Dashboard reload config failed]',err));
       return result;
     };
   }
@@ -8248,6 +8405,7 @@ commit;`;
       const result=await _reconectarSupabaseSales.apply(this,args);
       refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics reconnect failed]',err));
       window.autoRetryPendingSalesSync?.({reason:'reconnect'}).catch(err=>console.warn('[Sales auto retry reconnect failed]',err));
+      window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}).catch(err=>console.warn('[Dashboard reload reconnect failed]',err));
       return result;
     };
   }
@@ -8257,6 +8415,7 @@ commit;`;
       const result=await _supabaseSignInSales.apply(this,args);
       refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics sign-in failed]',err));
       window.autoRetryPendingSalesSync?.({reason:'sign_in'}).catch(err=>console.warn('[Sales auto retry sign-in failed]',err));
+      window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}).catch(err=>console.warn('[Dashboard reload sign-in failed]',err));
       return result;
     };
   }
@@ -8266,12 +8425,14 @@ commit;`;
       const result=await _onSupabaseStoreChangeSales.apply(this,args);
       refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics store change failed]',err));
       window.autoRetryPendingSalesSync?.({reason:'store_change',force:true}).catch(err=>console.warn('[Sales auto retry store change failed]',err));
+      window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}).catch(err=>console.warn('[Dashboard reload store change failed]',err));
       return result;
     };
   }
 
   window.addEventListener('online',()=>{
     window.autoRetryPendingSalesSync?.({reason:'online'}).catch(err=>console.warn('[Sales auto retry online failed]',err));
+    window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}).catch(err=>console.warn('[Dashboard reload online failed]',err));
   });
 
   renderSalesSupabaseUi();
