@@ -2783,6 +2783,7 @@ if(config.webappUrl){loadFromSheets();}
         <div class="acc-meta" id="acc-supabase-meta">Sin configurar</div>
       </div>
       <div class="acc-body" id="acc-supabase-body">
+        <div id="sb-tech-config-adj">
         <div class="cfg-grid">
           <label>
             <div>Project URL</div>
@@ -2801,6 +2802,7 @@ if(config.webappUrl){loadFromSheets();}
         <div class="row">
           <button class="btn alt" onclick="guardarSupabaseConfigAdj()">Guardar Supabase</button>
           <button class="btn ghost" onclick="reconectarSupabase()">Reconectar</button>
+        </div>
         </div>
         <div class="auth-card">
           <div class="auth-title">Acceso</div>
@@ -2861,6 +2863,7 @@ if(config.webappUrl){loadFromSheets();}
           </div>
           <button class="btn ghost" onclick="closeSupabaseModal()">Cerrar</button>
         </div>
+        <div id="sb-tech-config-modal">
         <div class="cfg-grid">
           <label>
             <div>Project URL</div>
@@ -2879,6 +2882,7 @@ if(config.webappUrl){loadFromSheets();}
         <div class="row">
           <button class="btn alt" onclick="guardarSupabaseConfigAdj()">Guardar Supabase</button>
           <button class="btn ghost" onclick="reconectarSupabase()">Reconectar</button>
+        </div>
         </div>
         <div class="auth-card" style="margin-top:12px">
           <div class="auth-title">Acceso</div>
@@ -2998,12 +3002,12 @@ if(config.webappUrl){loadFromSheets();}
   function renderSupabaseStatus(){
     ensureSupabaseHeaderPill();
     ensureSupabaseAccordion();
-    if(canShowSupabaseTechnicalUi()) ensureSupabaseModal();
+    const configured=hasSupabaseConfig(), loggedIn=!!supabaseUser, canTech=canShowSupabaseTechnicalUi();
+    if(configured || canTech) ensureSupabaseModal();
     else{
       const hiddenModal=document.getElementById('sb-modal');
       if(hiddenModal) hiddenModal.style.display='none';
     }
-    const configured=hasSupabaseConfig(), loggedIn=!!supabaseUser;
     const pill=document.getElementById('sb-pill');
     const dot=document.getElementById('sb-dot');
     const txt=document.getElementById('sb-txt');
@@ -3017,6 +3021,8 @@ if(config.webappUrl){loadFromSheets();}
     syncSupabaseFieldValue('cfg-sb-anon-adj', config.supabaseAnonKey||'');
     syncSupabaseFieldValue('cfg-sb-url-modal', config.supabaseUrl||'');
     syncSupabaseFieldValue('cfg-sb-anon-modal', config.supabaseAnonKey||'');
+    syncSupabaseDisplay('sb-tech-config-adj', canTech ? 'block' : 'none');
+    syncSupabaseDisplay('sb-tech-config-modal', canTech ? 'block' : 'none');
 
     syncSupabaseDisplay('sb-auth-loggedout', configured && !loggedIn ? 'block' : 'none');
     syncSupabaseDisplay('sb-auth-loggedin', loggedIn ? 'block' : 'none');
@@ -3024,7 +3030,9 @@ if(config.webappUrl){loadFromSheets();}
     syncSupabaseDisplay('sb-auth-loggedin-modal', loggedIn ? 'block' : 'none');
 
     const statusMessage=!configured
-      ? 'Configurá el Project URL y la anon key para habilitar login.'
+      ? (canTech
+        ? 'Configurá el Project URL y la anon key para habilitar login.'
+        : 'Supabase no está configurado. Contactá al administrador.')
       : (loggedIn
         ? 'Conectado con Supabase. La persistencia principal sigue siendo local/Sheets en esta fase.'
         : 'Supabase configurado. Podés crear usuario o iniciar sesión.');
@@ -3144,11 +3152,13 @@ if(config.webappUrl){loadFromSheets();}
   }
 
   window.openSupabaseSettings=function(){
-    if(window.goTab) goTab('ajustes');
-    if(!canShowSupabaseTechnicalUi()){
-      if(window.showToast) showToast('Configuración técnica disponible sólo para owner/admin en modo técnico');
+    const configured=hasSupabaseConfig();
+    const canTech=canShowSupabaseTechnicalUi();
+    if(!configured && !canTech){
+      if(window.showToast) showToast('Supabase no está configurado. Contactá al administrador.');
       return;
     }
+    if(canTech && window.goTab) goTab('ajustes');
     ensureSupabaseModal();
     renderSupabaseStatus();
     const modal=document.getElementById('sb-modal');
