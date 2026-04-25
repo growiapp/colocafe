@@ -286,14 +286,34 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .cfg-input:focus{border-color:var(--orange)}
 .cfg-help{font-size:11px;color:var(--ink3);line-height:1.45;margin-top:6px}
 .cfg-status{font-size:12px;color:var(--ink2);line-height:1.45;margin-bottom:10px}
+.cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cfg-grid label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink2)}
 .auth-card{background:linear-gradient(180deg,rgba(246,239,228,.95),rgba(255,255,255,.96));border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;margin-top:12px;box-shadow:var(--shadow-sm)}
 .auth-title{font-size:12px;font-weight:500;color:var(--ink);margin-bottom:10px}
 .auth-subtitle{font-size:11px;color:var(--ink3);margin-top:-6px;margin-bottom:10px}
 .auth-row{display:flex;gap:8px;flex-wrap:wrap}
 .auth-row .btn-sm,.auth-row .btn-cfg{flex:1}
+.auth-row label{flex:1;display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink2)}
 .auth-user-meta{font-size:12px;color:var(--ink2);line-height:1.5;margin-bottom:10px}
 .auth-store-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;background:var(--surf);border:1px solid var(--border);font-size:11px;color:var(--ink2);margin-top:6px}
 .btn-cfg{width:100%;padding:10px;background:linear-gradient(180deg,var(--orange-mid),var(--orange));color:#fff;border:none;border-radius:var(--r-sm);font-family:var(--ff);font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 10px 22px rgba(185,76,30,.18)}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.row .btn{flex:1}
+.btn{appearance:none;border:none;border-radius:var(--r-sm);padding:10px 14px;font-family:var(--ff);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+.btn:hover{transform:translateY(-1px)}
+.btn:active{transform:translateY(0)}
+.btn.ghost{background:var(--surf);color:var(--ink2);border:1px solid var(--border2)}
+.btn.alt{background:linear-gradient(180deg,var(--orange-mid),var(--orange));color:#fff;box-shadow:0 10px 22px rgba(185,76,30,.18)}
+.btn.danger{background:var(--red);color:#fff}
+.sb-tech-details{margin-top:6px;border:1px solid var(--border);border-radius:12px;background:rgba(246,239,228,.75);overflow:hidden}
+.sb-tech-details summary{list-style:none;cursor:pointer;padding:11px 12px;font-size:12px;font-weight:700;color:var(--ink);display:flex;align-items:center;justify-content:space-between}
+.sb-tech-details summary::-webkit-details-marker{display:none}
+.sb-tech-details summary::after{content:'▾';font-size:11px;color:var(--ink3);transition:transform .18s}
+.sb-tech-details[open] summary::after{transform:rotate(180deg)}
+.sb-tech-panel{padding:0 12px 12px}
+@media(max-width:640px){
+  .cfg-grid{grid-template-columns:1fr}
+}
 .cat-mgr{display:flex;flex-direction:column;gap:6px}
 .cat-mgr-row{background:var(--surf);border:1px solid var(--border);border-radius:var(--r-sm);display:flex;align-items:center;padding:10px 12px;gap:10px}
 .cat-swatch{width:14px;height:14px;border-radius:50%;flex-shrink:0;cursor:pointer;border:1px solid rgba(0,0,0,.1)}
@@ -2891,7 +2911,7 @@ if(config.webappUrl){loadFromSheets();}
           <button class="btn ghost" onclick="pasteSupabaseField('url')">Pegar URL</button>
           <button class="btn ghost" onclick="pasteSupabaseField('anon')">Pegar anon key</button>
         </div>
-        <div class="cfg-help">En esta fase Supabase se usa para usuarios, login y contexto básico. Sheets/localStorage siguen siendo la persistencia principal.</div>
+        <div class="cfg-help">Sistema sincronizado con Supabase.</div>
         <div class="row">
           <button class="btn alt" onclick="guardarSupabaseConfigAdj()">Guardar Supabase</button>
           <button class="btn ghost" onclick="reconectarSupabase()">Reconectar</button>
@@ -2960,27 +2980,32 @@ if(config.webappUrl){loadFromSheets();}
           </div>
           <button class="btn ghost" onclick="closeSupabaseModal()">Cerrar</button>
         </div>
-        <div id="sb-tech-config-modal">
-        <div class="cfg-grid">
-          <label>
-            <div>Project URL</div>
-            <input id="cfg-sb-url-modal" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" placeholder="https://tu-proyecto.supabase.co">
-          </label>
-          <label>
-            <div>Anon key</div>
-            <input id="cfg-sb-anon-modal" type="password" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" placeholder="eyJ...">
-          </label>
-        </div>
-        <div class="row">
-          <button class="btn ghost" onclick="pasteSupabaseField('url')">Pegar URL</button>
-          <button class="btn ghost" onclick="pasteSupabaseField('anon')">Pegar anon key</button>
-        </div>
-        <div class="cfg-help">En esta fase Supabase se usa para usuarios, login y contexto básico. Sheets/localStorage siguen siendo la persistencia principal.</div>
-        <div class="row">
-          <button class="btn alt" onclick="guardarSupabaseConfigAdj()">Guardar Supabase</button>
-          <button class="btn ghost" onclick="reconectarSupabase()">Reconectar</button>
-        </div>
-        </div>
+        <details id="sb-tech-config-modal-wrap" class="sb-tech-details" style="display:none">
+          <summary>Configuración técnica</summary>
+          <div class="sb-tech-panel">
+            <div id="sb-tech-config-modal">
+              <div class="cfg-grid">
+                <label>
+                  <div>Project URL</div>
+                  <input id="cfg-sb-url-modal" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" placeholder="https://tu-proyecto.supabase.co">
+                </label>
+                <label>
+                  <div>Anon key</div>
+                  <input id="cfg-sb-anon-modal" type="password" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" placeholder="eyJ...">
+                </label>
+              </div>
+              <div class="row">
+                <button class="btn ghost" onclick="pasteSupabaseField('url')">Pegar URL</button>
+                <button class="btn ghost" onclick="pasteSupabaseField('anon')">Pegar anon key</button>
+              </div>
+              <div class="cfg-help">Sistema sincronizado con Supabase.</div>
+              <div class="row">
+                <button class="btn alt" onclick="guardarSupabaseConfigAdj()">Guardar Supabase</button>
+                <button class="btn ghost" onclick="reconectarSupabase()">Reconectar</button>
+              </div>
+            </div>
+          </div>
+        </details>
         <div class="auth-card" style="margin-top:12px">
           <div class="auth-title">Acceso</div>
           <div class="auth-subtitle">Si la conexión ya está configurada, ingresá con tu email y contraseña.</div>
@@ -3101,6 +3126,7 @@ if(config.webappUrl){loadFromSheets();}
     ensureSupabaseHeaderPill();
     ensureSupabaseAccordion();
     const configured=hasSupabaseConfig(), loggedIn=!!supabaseUser, canTech=canShowSupabaseTechnicalUi();
+    const canTechLoggedIn=loggedIn && canTech;
     if(configured || canTech) ensureSupabaseModal();
     else{
       const hiddenModal=document.getElementById('sb-modal');
@@ -3120,7 +3146,10 @@ if(config.webappUrl){loadFromSheets();}
     syncSupabaseFieldValue('cfg-sb-url-modal', config.supabaseUrl||'');
     syncSupabaseFieldValue('cfg-sb-anon-modal', config.supabaseAnonKey||'');
     syncSupabaseDisplay('sb-tech-config-adj', canTech ? 'block' : 'none');
-    syncSupabaseDisplay('sb-tech-config-modal', canTech ? 'block' : 'none');
+    syncSupabaseDisplay('sb-tech-config-modal-wrap', canTechLoggedIn ? 'block' : 'none');
+    syncSupabaseDisplay('sb-tech-config-modal', canTechLoggedIn ? 'block' : 'none');
+    const techDetails=document.getElementById('sb-tech-config-modal-wrap');
+    if(techDetails && !canTechLoggedIn) techDetails.removeAttribute('open');
 
     syncSupabaseDisplay('sb-auth-loggedout', configured && !loggedIn ? 'block' : 'none');
     syncSupabaseDisplay('sb-auth-loggedin', loggedIn ? 'block' : 'none');
@@ -3129,8 +3158,8 @@ if(config.webappUrl){loadFromSheets();}
 
     const statusMessage=!configured
       ? (canTech
-        ? 'Configurá el Project URL y la anon key para habilitar login.'
-        : 'Supabase no está configurado. Contactá al administrador.')
+        ? (loggedIn?'Podés completar la configuración técnica desde este mismo modal.':'El acceso todavía no está configurado. Contactá al administrador.')
+        : 'El acceso todavía no está configurado. Contactá al administrador.')
       : (loggedIn
         ? 'Conectado con Supabase. Podés seguir operando con datos sincronizados.'
         : 'Supabase ya está listo. Ingresá con tu cuenta para empezar.');
