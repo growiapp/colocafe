@@ -1350,11 +1350,12 @@ function getCurrentPaymentState(total=money2(carritoTotalFn(carrito))){
   }
   const pagos=getDraftMixedPayments(),asignado=money2(pagos.reduce((s,p)=>s+p.monto,0)),diferencia=money2(total-asignado);
   let mensaje='';
-  if(!pagos.length)mensaje='Ingresá al menos dos medios para usar pago mixto';
-  else if(pagos.length<2)mensaje=`Agregá otro medio. Llevás ${fmt(asignado)} de ${fmt(total)}`;
-  else if(diferencia>0)mensaje=`Faltan ${fmt(diferencia)} para completar ${fmt(total)}`;
-  else if(diferencia<0)mensaje=`Se excede por ${fmt(Math.abs(diferencia))}`;
-  else mensaje=`Pago mixto listo · ${pagos.map(p=>`${getPaymentMethodMeta(p.metodo).short} ${fmt(p.monto)}`).join(' · ')}`;
+  const detalleTotales=`Total venta: ${fmt(total)} · Pagado: ${fmt(asignado)}`;
+  if(!pagos.length)mensaje=`Faltan ${fmt(total)} para completar el pago · ${detalleTotales}`;
+  else if(pagos.length<2)mensaje=`Faltan ${fmt(Math.max(diferencia,0))} para completar el pago · ${detalleTotales}`;
+  else if(diferencia>0)mensaje=`Faltan ${fmt(diferencia)} para completar el pago · ${detalleTotales}`;
+  else if(diferencia<0)mensaje=`Te pasaste por ${fmt(Math.abs(diferencia))}. Ajustá los importes. · ${detalleTotales}`;
+  else mensaje=`Pago completo · ${detalleTotales}`;
   return{payment_mode:'mixed',pago:'mixed',pagos,asignado,diferencia,valido:total>0&&pagos.length>=2&&Math.abs(diferencia)<0.009,mensaje};
 }
 function updatePaymentUI(total=money2(carritoTotalFn(carrito)),state=getCurrentPaymentState(total)){
