@@ -515,7 +515,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .brand-panel-kicker{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3)}
 .brand-panel-title{font-family:var(--ff-serif);font-size:22px;line-height:1.1;color:var(--ink)}
 .brand-panel-text{font-size:13px;line-height:1.5;color:var(--ink2);max-width:560px}
-.brand-panel-badge{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border-radius:999px;background:var(--surf);border:1px solid var(--border);font-size:11px;color:var(--ink2);white-space:nowrap}
+.brand-panel-badge{display:inline-flex;align-items:center;gap:8px;padding:7px 11px;border-radius:999px;background:var(--surf);border:1px solid var(--border);font-size:11px;color:var(--ink2);white-space:nowrap}
+.brand-panel-badge img{height:14px;max-width:72px;width:auto;object-fit:contain;display:block}
+.tech-only-note{display:none}
 .settings-note{font-size:12px;color:var(--ink2);line-height:1.55;background:rgba(246,239,228,.88);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:12px}
 .settings-note strong{color:var(--ink)}
 .page-footer{padding:10px 18px calc(var(--nav-h) + 18px);text-align:center}
@@ -608,7 +610,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
     <div class="turno-pill" id="turno-pill" onclick="openTurnoModal()">
       <span class="turno-dot" id="turno-dot"></span>Sin turno
     </div>
-    <div class="gs-pill" id="gs-pill" onclick="if(config.webappUrl)loadFromSheets();else goTab('ajustes');" style="cursor:pointer" title="Tap para sincronizar">
+    <div class="gs-pill" id="gs-pill" onclick="if(config.webappUrl)loadFromSheets();else goTab('ajustes');" style="display:none;cursor:pointer" title="Tap para sincronizar">
       <div class="gs-dot" id="gs-dot"></div>
       <span id="gs-txt">Sin conexión</span>
     </div>
@@ -763,16 +765,20 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
   <div class="adj-layout">
     <div class="brand-panel">
       <div class="brand-panel-copy">
-        <div class="brand-panel-kicker">Configuración</div>
+        <div class="brand-panel-kicker">Ajustes</div>
         <div class="brand-panel-title">Colo Café · operación diaria</div>
-        <div class="brand-panel-text">Usá esta sección para revisar conexiones, datos locales y herramientas administrativas. Las opciones técnicas quedan reservadas para administración en modo técnico.</div>
+        <div class="brand-panel-text" id="ajustes-brand-text">Usá esta sección para revisar tu cuenta, tienda activa y opciones de operación.</div>
       </div>
-      <div class="brand-panel-badge">Soporte y evolución · Growi</div>
+      <div class="brand-panel-badge">
+        <span>Soporte y evolución</span>
+        <img src="./assets/growi-logo.png" alt="Growi" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">
+        <span style="display:none">Growi</span>
+      </div>
     </div>
-    <div class="settings-note">
-      <strong>Operación.</strong> El equipo de caja y salón sólo necesita ver el estado general de conexión y sincronización.
+    <div class="settings-note" id="ajustes-settings-note">
+      <strong>Operación.</strong> Revisá tu cuenta, la tienda activa y el estado general de la operación.
       <br>
-      <strong>Herramientas técnicas.</strong> La configuración avanzada y los diagnósticos quedan ocultos para operadores normales.
+      <span id="ajustes-settings-note-tech">Las herramientas avanzadas quedan reservadas para administración en modo técnico.</span>
     </div>
 
     <!-- ACCORDION: Menú -->
@@ -812,12 +818,13 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
     <div class="accordion-item" id="acc-sheets">
       <div class="accordion-hdr" onclick="toggleAccordion('sheets')">
         <div>
-          <div class="accordion-titulo">Conexión Google Sheets</div>
+          <div class="accordion-titulo">Compatibilidad Google Sheets</div>
           <div class="accordion-meta" id="acc-sheets-meta"></div>
         </div>
         <span class="accordion-arr" id="acc-arr-sheets">▾</span>
       </div>
       <div class="accordion-body" id="acc-body-sheets">
+        <p class="tech-only-note" id="gs-legacy-note" style="font-size:12px;color:var(--ink2);margin:0 0 12px;line-height:1.5">Uso reservado para compatibilidad o respaldo. La operación principal usa Supabase.</p>
         <div class="modal-field" style="margin-bottom:10px">
           <label class="modal-lbl">ID del Spreadsheet</label>
           <input class="cfg-input" id="cfg-sheet-adj" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
@@ -844,7 +851,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
         <span class="accordion-arr" id="acc-arr-datos">▾</span>
       </div>
       <div class="accordion-body" id="acc-body-datos">
-        <p style="font-size:12px;color:var(--ink2);margin-bottom:12px;line-height:1.5">Borrá ventas e historial local. Menú y configuración no se ven afectados.</p>
+        <p style="font-size:12px;color:var(--ink2);margin-bottom:12px;line-height:1.5">Borrá ventas e historial local. Menú y Ajustes no se ven afectados.</p>
         <button class="btn-sm" style="color:var(--red);border-color:rgba(176,48,48,.3)" onclick="pedirConfirm('¿Limpiar todo el historial local de ventas?',limpiarVentas,'Limpiar','var(--red)','🗑')">🗑 Limpiar ventas e historial</button>
       </div>
     </div>
@@ -1690,12 +1697,15 @@ async function inicializarSheets(){
 //  CONFIG
 // ══════════════════════════════════════════════════
 function renderSetupBanner(){
+  const canTech=window.canShowClientTechnicalUi?.()||false;
   const c=!!config.webappUrl;
+  const gsPill=$('gs-pill');
+  if(gsPill) gsPill.style.display=canTech?'inline-flex':'none';
   $('gs-dot').classList.toggle('on',c);$('gs-txt').textContent=c?'Conectado':'Sin conexión';
   const d2=$('gs-dot2');if(d2)d2.classList.toggle('on',c);
   const sb=$('setup-banner');if(sb)sb.innerHTML=c?'':
-    `<div class="setup-banner" onclick="goTab('ajustes');setTimeout(()=>toggleAccordion('sheets'),200)">⚡ Falta conectar Google Sheets. Revisalo en Ajustes.</div>`;
-  const am=$('acc-sheets-meta');if(am)am.textContent=c?'Conectado':'Sin configurar';
+    (canTech?`<div class="setup-banner" onclick="goTab('ajustes');setTimeout(()=>toggleAccordion('sheets'),200)">⚡ Falta conectar Google Sheets. Revisalo en Ajustes.</div>`:'');
+  const am=$('acc-sheets-meta');if(am)am.textContent=c?'Disponible':'Uso técnico';
 }
 function guardarConfigAdj(){
   const sheetId=($('cfg-sheet-adj')?.value||'').trim(),webappUrl=($('cfg-url-adj')?.value||'').trim();
@@ -2250,10 +2260,23 @@ function renderDashboard(){
   const dashboardMsg=useSupabase&&txP===0&&!dashboardState?.error?'No hay ventas en Supabase para este rango.':(dashboardState?.error||'');
   const dashStatus=$('dash-source-status');
   if(dashStatus){
-    const itemsCount=useSupabase||useFallback?(dashboardState?.itemsCount||vh.length):vh.length;
-    const paymentsCount=useSupabase||useFallback?(dashboardState?.paymentsCount||ticketGroups.reduce((sum,g)=>sum+getTicketPayments(g).length,0)):ticketGroups.reduce((sum,g)=>sum+getTicketPayments(g).length,0);
-    const totalLoaded=useSupabase||useFallback?(dashboardState?.total||totalV):totalV;
-    dashStatus.innerHTML=`<strong>Fuente dashboard:</strong> ${dashboardSourceLabel} · <strong>Tickets:</strong> ${txP} · <strong>Items:</strong> ${itemsCount} · <strong>Payments:</strong> ${paymentsCount} · <strong>Total:</strong> ${fmt(totalLoaded)} · <strong>Rango:</strong> ${desde} → ${hasta}${dashboardState?.lastReadAt?` · <strong>Última lectura:</strong> ${dashboardState.lastReadAt}`:''}${dashboardMsg?` · <strong>Estado:</strong> ${dashboardMsg}`:''}`;
+    const canTech=window.canShowClientTechnicalUi?.()||false;
+    if(canTech){
+      const itemsCount=useSupabase||useFallback?(dashboardState?.itemsCount||vh.length):vh.length;
+      const paymentsCount=useSupabase||useFallback?(dashboardState?.paymentsCount||ticketGroups.reduce((sum,g)=>sum+getTicketPayments(g).length,0)):ticketGroups.reduce((sum,g)=>sum+getTicketPayments(g).length,0);
+      const totalLoaded=useSupabase||useFallback?(dashboardState?.total||totalV):totalV;
+      dashStatus.style.display='block';
+      dashStatus.innerHTML=`<strong>Fuente dashboard:</strong> ${dashboardSourceLabel} · <strong>Tickets:</strong> ${txP} · <strong>Items:</strong> ${itemsCount} · <strong>Payments:</strong> ${paymentsCount} · <strong>Total:</strong> ${fmt(totalLoaded)} · <strong>Rango:</strong> ${desde} → ${hasta}${dashboardState?.lastReadAt?` · <strong>Última lectura:</strong> ${dashboardState.lastReadAt}`:''}${dashboardMsg?` · <strong>Estado:</strong> ${dashboardMsg}`:''}`;
+    }else{
+      let simpleMsg='';
+      if(showLoading) simpleMsg='Actualizando dashboard…';
+      else if((dashboardState?.error||'').toLowerCase().includes('sesión')) simpleMsg='Iniciá sesión para ver el dashboard sincronizado.';
+      else if((dashboardState?.error||'').toLowerCase().includes('store')) simpleMsg='Elegí una tienda activa para ver el dashboard.';
+      else if(useSupabase&&txP===0&&!dashboardState?.error) simpleMsg='No hay ventas en Supabase para este rango.';
+      else if(useFallback) simpleMsg='Mostrando datos disponibles.';
+      dashStatus.style.display=simpleMsg?'block':'none';
+      dashStatus.textContent=simpleMsg;
+    }
   }
 
   // KPIs
@@ -2363,13 +2386,14 @@ function renderHistVentas(){
     ? (histState?.tickets||[])
     : ((histState?.tickets&&histState.tickets.length)?histState.tickets:fallbackTickets);
   const sourceLabel=useSupabase?'Supabase':(isFallback?'Modo sin conexión (historial local)':'Local');
+  const canTech=window.canShowClientTechnicalUi?.()||false;
   if(activeTab==='historial' && window.ensureVisibleHistorySource) setTimeout(()=>window.ensureVisibleHistorySource(),0);
   if(loading){
-    $('hist-list').innerHTML=`<div class="empty">Cargando historial desde Supabase…</div>`;
+    $('hist-list').innerHTML=`<div class="empty">${canTech?'Cargando historial desde Supabase…':'Cargando historial…'}</div>`;
     return;
   }
   if(useSupabase && !tickets.length){
-    $('hist-list').innerHTML=`<div class="empty">No hay ventas en Supabase para esta tienda.</div>`;
+    $('hist-list').innerHTML=`<div class="empty">${canTech?'No hay ventas en Supabase para esta tienda.':'No hay ventas para esta tienda.'}</div>`;
     return;
   }
   if(!tickets.length){
@@ -2380,8 +2404,8 @@ function renderHistVentas(){
     <div class="hist-item" style="margin-bottom:10px">
       <div class="hist-hdr" style="cursor:default">
         <div>
-          <div class="hist-fecha">Fuente: ${sourceLabel}</div>
-          <div class="hist-meta">${tickets.length} tickets · total ${fmt(tickets.reduce((sum,t)=>sum+money2(t.total),0))}${error?` · ${error}`:''}</div>
+          <div class="hist-fecha">${canTech?`Fuente: ${sourceLabel}`:'Historial de ventas'}</div>
+          <div class="hist-meta">${tickets.length} tickets · total ${fmt(tickets.reduce((sum,t)=>sum+money2(t.total),0))}${canTech&&error?` · ${error}`:''}${!canTech&&isFallback?' · Mostrando datos disponibles.':''}</div>
         </div>
       </div>
     </div>
@@ -2390,7 +2414,7 @@ function renderHistVentas(){
         ? t.payments.map(p=>`${getPaymentMethodMeta(p.metodo||p.method).short} ${fmt(p.monto||0)}`).join(' · ')
         : 'Sin pagos';
       const d=parseLocalDateSafe(t.fecha||t.timestamp||today());
-      const showTechSource=localStorage.getItem('sales_technical_mode')==='1';
+      const showTechSource=canTech;
       return `<div class="hist-item">
         <div class="hist-hdr" onclick="toggleHist(${i})">
           <div>
@@ -2490,6 +2514,11 @@ function guardarCliente(){
 function renderAjustes(){
   renderCatMgr();renderMenuAdm();renderAjustesConfig();renderSetupBanner();
   const am=$('acc-menu-meta');if(am)am.textContent=`${menu.length} productos · ${cats.length} categorías`;
+  const canTech=window.canShowClientTechnicalUi?.()||false;
+  const accSheets=$('acc-sheets'); if(accSheets) accSheets.style.display=canTech?'block':'none';
+  const accDatos=$('acc-datos'); if(accDatos) accDatos.style.display=canTech?'block':'none';
+  const techNote=$('ajustes-settings-note-tech'); if(techNote) techNote.style.display=canTech?'inline':'none';
+  const gsLegacyNote=$('gs-legacy-note'); if(gsLegacyNote) gsLegacyNote.style.display=canTech?'block':'none';
 }
 function renderCatMgr(){
   const el=$('cat-mgr');if(!el)return;
@@ -2892,8 +2921,8 @@ if(config.webappUrl){loadFromSheets();}
     wrap.id='acc-supabase';
     wrap.innerHTML=`
       <div class="acc-head" onclick="toggleAccordion('supabase')">
-        <div class="acc-title">Supabase y acceso</div>
-        <div class="acc-meta" id="acc-supabase-meta">Sin configurar</div>
+        <div class="acc-title">Cuenta</div>
+        <div class="acc-meta" id="acc-supabase-meta">Acceso y tienda activa</div>
       </div>
       <div class="acc-body" id="acc-supabase-body">
         <div id="sb-tech-config-adj">
@@ -2920,7 +2949,7 @@ if(config.webappUrl){loadFromSheets();}
         <div class="auth-card">
           <div class="auth-title">Acceso</div>
           <div class="auth-subtitle">Ingresá con tu cuenta para operar con ventas, historial, dashboard y turnos sincronizados.</div>
-          <div class="cfg-status" id="sb-auth-status">Configurá el Project URL y la anon key para habilitar login.</div>
+          <div class="cfg-status" id="sb-auth-status">Sistema sincronizado con Supabase.</div>
           <div id="sb-auth-loggedout">
             <div class="auth-row">
               <label>
@@ -2981,7 +3010,7 @@ if(config.webappUrl){loadFromSheets();}
           <button class="btn ghost" onclick="closeSupabaseModal()">Cerrar</button>
         </div>
         <details id="sb-tech-config-modal-wrap" class="sb-tech-details" style="display:none">
-          <summary>Configuración técnica</summary>
+          <summary>Ajustes técnicos</summary>
           <div class="sb-tech-panel">
             <div id="sb-tech-config-modal">
               <div class="cfg-grid">
@@ -3009,7 +3038,7 @@ if(config.webappUrl){loadFromSheets();}
         <div class="auth-card" style="margin-top:12px">
           <div class="auth-title">Acceso</div>
           <div class="auth-subtitle">Si la conexión ya está configurada, ingresá con tu email y contraseña.</div>
-          <div class="cfg-status" id="sb-auth-status-modal">Configurá el Project URL y la anon key para habilitar login.</div>
+          <div class="cfg-status" id="sb-auth-status-modal">Sistema sincronizado con Supabase.</div>
           <div id="sb-auth-loggedout-modal">
             <div class="auth-row">
               <label>
@@ -3073,6 +3102,9 @@ if(config.webappUrl){loadFromSheets();}
   function canShowSupabaseTechnicalUi(){
     return ['owner','admin'].includes((getSupabaseActiveRole()||'').toLowerCase()) && getSupabaseTechnicalModeEnabled();
   }
+  window.canShowClientTechnicalUi=function(){
+    return !!supabaseUser && canShowSupabaseTechnicalUi();
+  };
 
   function syncSupabaseFieldValue(id, value){
     const el=document.getElementById(id);
@@ -3107,12 +3139,16 @@ if(config.webappUrl){loadFromSheets();}
   function ensureSupabaseAccordion(){
     const ajustesView=document.getElementById('v-ajustes');
     const existing=document.getElementById('acc-supabase');
-    if(!ajustesView || !canShowSupabaseTechnicalUi()){
+    const canAccessPanel=!!ajustesView && (hasSupabaseConfig() || !!supabaseUser || canShowSupabaseTechnicalUi());
+    if(!ajustesView || !canAccessPanel){
       if(existing && existing.parentNode) existing.parentNode.removeChild(existing);
       return;
     }
     const accordions=[...ajustesView.querySelectorAll('.accordion')];
-    const gsAcc=accordions.find(acc => (acc.textContent||'').includes('Conexión Google Sheets'));
+    const gsAcc=accordions.find(acc => {
+      const txt=(acc.textContent||'');
+      return txt.includes('Compatibilidad Google Sheets') || txt.includes('Conexión Google Sheets');
+    });
     const targetParent=gsAcc?.parentNode || ajustesView;
     if(!targetParent) return;
     if(existing && existing.parentNode===targetParent) return;
@@ -3145,7 +3181,7 @@ if(config.webappUrl){loadFromSheets();}
     syncSupabaseFieldValue('cfg-sb-anon-adj', config.supabaseAnonKey||'');
     syncSupabaseFieldValue('cfg-sb-url-modal', config.supabaseUrl||'');
     syncSupabaseFieldValue('cfg-sb-anon-modal', config.supabaseAnonKey||'');
-    syncSupabaseDisplay('sb-tech-config-adj', canTech ? 'block' : 'none');
+    syncSupabaseDisplay('sb-tech-config-adj', canTechLoggedIn ? 'block' : 'none');
     syncSupabaseDisplay('sb-tech-config-modal-wrap', canTechLoggedIn ? 'block' : 'none');
     syncSupabaseDisplay('sb-tech-config-modal', canTechLoggedIn ? 'block' : 'none');
     const techDetails=document.getElementById('sb-tech-config-modal-wrap');
@@ -3158,7 +3194,7 @@ if(config.webappUrl){loadFromSheets();}
 
     const statusMessage=!configured
       ? (canTech
-        ? (loggedIn?'Podés completar la configuración técnica desde este mismo modal.':'El acceso todavía no está configurado. Contactá al administrador.')
+        ? (loggedIn?'Podés completar los ajustes técnicos desde este mismo modal.':'El acceso todavía no está configurado. Contactá al administrador.')
         : 'El acceso todavía no está configurado. Contactá al administrador.')
       : (loggedIn
         ? 'Conectado con Supabase. Podés seguir operando con datos sincronizados.'
@@ -3789,6 +3825,7 @@ if(config.webappUrl){loadFromSheets();}
     if(!body) return;
     if(body.querySelector('[data-catalog-sb-tools="true"]')) return;
     const box=document.createElement('div');
+    box.id='catalog-sb-box';
     box.setAttribute('data-catalog-sb-tools','true');
     box.style.cssText='display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:0 0 12px 0;';
     box.innerHTML=`
@@ -3806,6 +3843,10 @@ if(config.webappUrl){loadFromSheets();}
   }
   function renderCatalogSupabaseUi(){
     ensureCatalogSupabaseButton();
+    const box=$('catalog-sb-box');
+    const canTech=window.canShowClientTechnicalUi?.()||false;
+    if(box) box.style.display=canTech?'flex':'none';
+    if(!canTech) return;
     const el=$('catalog-sb-status');
     if(el) el.textContent=getCatalogLoadLabel();
     const diag=$('catalog-sb-diag');
@@ -4498,6 +4539,7 @@ if(config.webappUrl){loadFromSheets();}
     if(!body) return;
     if(body.querySelector('[data-cr-sb-tools="true"]')) return;
     const box=document.createElement('div');
+    box.id='cr-sb-box';
     box.setAttribute('data-cr-sb-tools','true');
     box.style.cssText='display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:0 0 12px 0;border-top:1px dashed var(--border);margin-top:10px;padding-top:12px;';
     box.innerHTML=`
@@ -4516,6 +4558,10 @@ if(config.webappUrl){loadFromSheets();}
   }
   function renderCrSupabaseUi(){
     ensureCrSupabasePanel();
+    const box=$('cr-sb-box');
+    const canTech=window.canShowClientTechnicalUi?.()||false;
+    if(box) box.style.display=canTech?'flex':'none';
+    if(!canTech) return;
     const status=$('cr-sb-status');
     if(status) status.textContent=getCrSourceLabel();
     const diag=$('cr-sb-diag');
@@ -5534,6 +5580,7 @@ if(config.webappUrl){loadFromSheets();}
     if(!body) return;
     if(body.querySelector('[data-expenses-sb-tools="true"]')) return;
     const box=document.createElement('div');
+    box.id='expenses-sb-box';
     box.setAttribute('data-expenses-sb-tools','true');
     box.style.cssText='display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:0 0 12px 0;border-top:1px dashed var(--border);margin-top:10px;padding-top:12px;';
     box.innerHTML=`
@@ -5550,6 +5597,10 @@ if(config.webappUrl){loadFromSheets();}
   }
   function renderExpensesSupabaseUi(){
     ensureExpensesSupabasePanel();
+    const box=$('expenses-sb-box');
+    const canTech=window.canShowClientTechnicalUi?.()||false;
+    if(box) box.style.display=canTech?'flex':'none';
+    if(!canTech) return;
     const status=$('expenses-sb-status');
     if(status) status.textContent=getExpensesSourceLabel();
     const diag=$('expenses-sb-diag');
@@ -6096,6 +6147,7 @@ if(config.webappUrl){loadFromSheets();}
     if(!body) return;
     if(body.querySelector('[data-shifts-sb-tools="true"]')) return;
     const box=document.createElement('div');
+    box.id='shifts-sb-box';
     box.setAttribute('data-shifts-sb-tools','true');
     box.style.cssText='display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:0 0 12px 0;border-top:1px dashed var(--border);margin-top:10px;padding-top:12px;';
       box.innerHTML=`
@@ -6113,6 +6165,10 @@ if(config.webappUrl){loadFromSheets();}
   }
   function renderShiftsSupabaseUi(){
     ensureShiftsSupabasePanel();
+    const box=$('shifts-sb-box');
+    const canTech=window.canShowClientTechnicalUi?.()||false;
+    if(box) box.style.display=canTech?'flex':'none';
+    if(!canTech) return;
     const status=$('shifts-sb-status');
     if(status) status.textContent=getShiftSourceLabel();
     const diag=$('shifts-sb-diag');
@@ -7096,6 +7152,7 @@ if(config.webappUrl){loadFromSheets();}
     const body=$('acc-body-menu');
     if(!body||body.querySelector('[data-sales-sb-tools="true"]')) return;
     const box=document.createElement('div');
+    box.id='sales-sb-box';
     box.setAttribute('data-sales-sb-tools','true');
     box.style.cssText='display:flex;flex-direction:column;gap:10px;padding:0 0 12px 0;';
     box.innerHTML=`
@@ -7112,6 +7169,10 @@ if(config.webappUrl){loadFromSheets();}
   function renderSalesSupabaseUi(){
     try{
       ensureSalesSupabaseUi();
+      const box=$('sales-sb-box');
+      const canTechUi=window.canShowClientTechnicalUi?.()||false;
+      if(box) box.style.display=canTechUi?'flex':'none';
+      if(!canTechUi) return;
       const statusEl=$('sales-sb-status');
       if(statusEl) statusEl.textContent=getSalesSourceLabel();
       const diag=$('sales-sb-diag');
