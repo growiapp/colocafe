@@ -222,6 +222,22 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .quad-item{font-size:12px;color:var(--ink2);padding:3px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between}
 .quad-item:last-child{border-bottom:none}
 .quad-item span{font-size:11px;color:var(--ink3)}
+.menu-eng-legend{font-size:11px;color:var(--ink3);margin-top:10px;padding-top:8px;border-top:1px solid var(--border);line-height:1.5}
+/* Tooltip genérico – funciona con hover (desktop) y tap (mobile) */
+.tip-wrap{position:relative;display:inline-flex}
+.tip-icon{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:rgba(0,0,0,.18);color:#fff;font-size:9px;font-weight:700;cursor:pointer;flex-shrink:0;user-select:none;line-height:1}
+.tip-bubble{display:none;position:absolute;z-index:300;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:#2a1f10;color:#f5ede3;font-size:11px;line-height:1.55;padding:9px 11px;border-radius:9px;width:210px;text-align:left;box-shadow:0 4px 20px rgba(0,0,0,.28);pointer-events:none;font-weight:400}
+.tip-bubble::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#2a1f10}
+.tip-wrap:hover .tip-bubble,.tip-icon.open .tip-bubble{display:block}
+@media(max-width:480px){.tip-bubble{left:auto;right:0;transform:none}.tip-bubble::after{left:auto;right:10px;transform:none}}
+/* Operadores en Ajustes */
+.ops-list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.op-row{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--surf2);border-radius:var(--r-sm);font-size:13px}
+.op-row-name{font-weight:500;color:var(--ink)}
+.op-row-meta{font-size:11px;color:var(--ink3);margin-top:1px}
+.op-row-actions{display:flex;gap:6px;align-items:center}
+.op-tag{font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;background:var(--green-bg);color:var(--green)}
+.op-tag.inactive{background:var(--surf3,#f0ebe3);color:var(--ink3)}
 
 /* ── SECCIÓN SPLIT ── */
 .seccion-split{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
@@ -727,7 +743,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
     </div>
     <div class="chart-card">
       <div class="chart-ttl">Ingeniería de menú</div>
-      <div style="font-size:11px;color:var(--ink3);margin-bottom:10px">Basado en ventas reales del período seleccionado</div>
+      <div style="font-size:11px;color:var(--ink3);margin-bottom:10px">Basado en ventas del período seleccionado · tocá <strong>?</strong> para ver qué hacer con cada categoría</div>
       <div class="menu-eng-grid" id="menu-eng-grid"></div>
     </div>
   </div>
@@ -810,6 +826,22 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
 
     <!-- Card modo técnico: solo owner/admin, debajo de Menú -->
     <div id="tech-mode-section" style="display:none"></div>
+
+    <!-- ACCORDION: OPERADORES (visible para owner/admin sin modo técnico) -->
+    <div class="accordion-item" id="acc-operadores" style="display:none">
+      <div class="accordion-hdr" onclick="toggleAccordion('operadores')">
+        <div>
+          <div class="accordion-titulo">Operadores</div>
+          <div class="accordion-meta" id="acc-operadores-meta">Personal activo de la tienda</div>
+        </div>
+        <span class="accordion-arr" id="acc-arr-operadores">▾</span>
+      </div>
+      <div class="accordion-body" id="acc-body-operadores">
+        <div id="ops-section-body">
+          <div style="font-size:12px;color:var(--ink3)">Cargando operadores…</div>
+        </div>
+      </div>
+    </div>
 
     <!-- ACCORDION: Sheets (solo modo técnico) -->
     <div class="accordion-item" id="acc-sheets" style="display:none">
@@ -1305,6 +1337,8 @@ let reservas  = JSON.parse(localStorage.getItem('reservas')||'[]');
 let turno     = JSON.parse(localStorage.getItem('turno')||'null');
 let gastos    = JSON.parse(localStorage.getItem('gastos')||'[]');
 let operadores= JSON.parse(localStorage.getItem('operadores')||'[]');
+let supabaseOperadoresCache=null; // null=sin cargar, []=cargado vacío, [...]= con datos
+let supabaseOperadoresCacheStoreId=null;
 
 // Migrate
 menu = menu.map(p=>({...p,name:p.name??p.nombre??'?',price:p.price??p.precio??0,stock:p.stock??10,ilimitado:p.ilimitado??false,variantes:p.variantes??p.modificadores??[]}));
@@ -1491,6 +1525,52 @@ function carritoTotalFn(c){return Object.values(c).reduce((s,i)=>s+carritoItemTo
 function stockStatus(p){if(p.ilimitado)return'ok';return p.stock<=0?'out':p.stock<=5?'low':'ok';}
 function dashRango(){const hoy=today();if(dashFiltro==='hoy')return{desde:hoy,hasta:hoy};if(dashFiltro==='semana'){const d=addLocalDays(new Date(),-6);return{desde:getLocalDateString(d),hasta:hoy};}if(dashFiltro==='mes'){const d=new Date();d.setDate(1);return{desde:getLocalDateString(d),hasta:hoy};}return{desde:$('dash-desde')?.value||hoy,hasta:$('dash-hasta')?.value||hoy};}
 
+// ── Dashboard: comparación vs período anterior ────────────────
+function getPreviousComparisonRange(filtro,desde,hasta){
+  if(filtro==='hoy'){
+    const prev=addLocalDays(parseLocalDateSafe(desde),-1);
+    return{desde:getLocalDateString(prev),hasta:getLocalDateString(prev),label:'vs ayer'};
+  }
+  if(filtro==='semana'){
+    // Ventana anterior de igual duración (7 días)
+    const d=parseLocalDateSafe(desde);
+    const prevHasta=addLocalDays(d,-1);
+    const prevDesde=addLocalDays(prevHasta,-6);
+    return{desde:getLocalDateString(prevDesde),hasta:getLocalDateString(prevHasta),label:'vs semana anterior'};
+  }
+  if(filtro==='mes'){
+    // Mes calendario anterior completo
+    const d=parseLocalDateSafe(desde);
+    const prevMonthStart=new Date(d.getFullYear(),d.getMonth()-1,1);
+    const prevMonthEnd=new Date(d.getFullYear(),d.getMonth(),0);
+    return{desde:getLocalDateString(prevMonthStart),hasta:getLocalDateString(prevMonthEnd),label:'vs mes anterior'};
+  }
+  // Personalizado: mismo número de días, período inmediatamente anterior
+  const d=parseLocalDateSafe(desde);
+  const h=parseLocalDateSafe(hasta);
+  const days=Math.max(0,Math.round((h.getTime()-d.getTime())/(1000*60*60*24)));
+  const prevHasta=addLocalDays(d,-1);
+  const prevDesde=addLocalDays(prevHasta,-days);
+  return{desde:getLocalDateString(prevDesde),hasta:getLocalDateString(prevHasta),label:'vs período anterior'};
+}
+
+function calculatePeriodDelta(current,previous){
+  if(typeof previous!=='number'||previous===null) return null;
+  if(previous===0&&current===0) return{pct:null,type:'empty'};
+  if(previous===0&&current>0) return{pct:null,type:'new'};
+  if(previous===0) return null;
+  const pct=Math.round((current-previous)/previous*100);
+  return{pct,type:pct>=0?'up':'down'};
+}
+
+function formatDeltaKpi(delta,label){
+  if(!delta) return`<div class="kpi-sub">${label}</div>`;
+  if(delta.type==='empty') return`<div class="kpi-sub">Sin actividad</div>`;
+  if(delta.type==='new') return`<div class="kpi-sub kpi-up">Nuevo período con ventas</div>`;
+  const arrow=delta.pct>=0?'+':'';
+  return`<div class="kpi-sub ${delta.pct>=0?'kpi-up':'kpi-dn'}">${arrow}${delta.pct}% ${label}</div>`;
+}
+
 // ── Modal confirmación ────────────────────────────
 function pedirConfirm(msg,fn,labelOk='Eliminar',color='var(--red)',icon='⚠️'){
   confirmCallback=fn;$('confirm-icon').textContent=icon;$('confirm-msg').textContent=msg;
@@ -1546,11 +1626,161 @@ function switchMenuTab(tab){
 // ══════════════════════════════════════════════════
 //  OPERADORES
 // ══════════════════════════════════════════════════
+// ── Operadores: Supabase-backed con fallback local ─────────────
+function normalizeOperatorName(name){
+  return (name||'').trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .replace(/\s+/g,' ');
+}
+function getActiveOperators(){
+  if(supabaseOperadoresCache && supabaseOperadoresCache.length>0){
+    return supabaseOperadoresCache.filter(op=>op.active!==false);
+  }
+  return (operadores||[]).map(name=>({id:null,name,normalized_name:normalizeOperatorName(name),active:true,role:'operator'}));
+}
 function getOperadoresOpts(includeNuevo=true){
-  const opts=operadores.map(op=>`<option value="${op}">${op}</option>`).join('');
-  return `<option value="">Seleccioná…</option>${opts}${includeNuevo?'<option value="__nuevo__">➕ Nuevo operador</option>':opts}`;
+  const ops=getActiveOperators();
+  const opts=ops.map(op=>`<option value="${op.name}">${op.name}</option>`).join('');
+  const nuevoOpt=includeNuevo?'<option value="__nuevo__">➕ Nuevo operador</option>':'';
+  return `<option value="">Seleccioná…</option>${opts}${nuevoOpt}`;
 }
 function syncOperadoresSheets(){sheetsPost({action:'updateOperadores',rows:operadores.map(op=>({nombre:op}))});}
+
+async function loadOperatorsFromSupabase(){
+  try{
+    const client=window.getSupabaseClient?.();
+    const storeId=window.getCatalogStoreId?.();
+    if(!client||!storeId||!isValidUuid(storeId)) return false;
+    const {data:sess}=await client.auth.getSession();
+    if(!sess?.session) return false;
+    const {data,error}=await client.from('operators')
+      .select('id,name,normalized_name,active,role,metadata')
+      .eq('store_id',storeId)
+      .order('name',{ascending:true});
+    if(error){
+      if(error.code==='42P01') return false; // tabla no existe aún
+      throw error;
+    }
+    supabaseOperadoresCache=data||[];
+    supabaseOperadoresCacheStoreId=storeId;
+    // Sync nombres al array local para fallback offline
+    const sbNames=(supabaseOperadoresCache||[]).filter(op=>op.active!==false).map(op=>op.name);
+    sbNames.forEach(n=>{if(!operadores.includes(n)){operadores.push(n);}});
+    if(sbNames.length) save();
+    return true;
+  }catch(err){
+    if((err?.code||'')!=='42P01') console.warn('[operators] load error:',err);
+    return false;
+  }
+}
+
+async function saveOperatorToSupabase(name){
+  const normalized=normalizeOperatorName(name);
+  if(!normalized) return null;
+  try{
+    const client=window.getSupabaseClient?.();
+    const storeId=window.getCatalogStoreId?.();
+    if(!client||!storeId||!isValidUuid(storeId)) return null;
+    const {data:sess}=await client.auth.getSession();
+    if(!sess?.session) return null;
+    const {data,error}=await client.from('operators')
+      .upsert({store_id:storeId,name:name.trim(),normalized_name:normalized,active:true},
+              {onConflict:'store_id,normalized_name'})
+      .select('id,name,normalized_name,active,role')
+      .single();
+    if(error){
+      if(error.code==='42P01') return null;
+      throw error;
+    }
+    if(!supabaseOperadoresCache) supabaseOperadoresCache=[];
+    const idx=supabaseOperadoresCache.findIndex(op=>op.normalized_name===normalized);
+    if(idx>=0) supabaseOperadoresCache[idx]=data;
+    else supabaseOperadoresCache.push(data);
+    return data;
+  }catch(err){
+    if((err?.code||'')!=='42P01') console.warn('[operators] save error:',err);
+    return null;
+  }
+}
+
+async function setOperatorActiveInSupabase(id,active){
+  try{
+    const client=window.getSupabaseClient?.();
+    const storeId=window.getCatalogStoreId?.();
+    if(!client||!storeId) return false;
+    const {data:sess}=await client.auth.getSession();
+    if(!sess?.session) return false;
+    const {error}=await client.from('operators')
+      .update({active:!!active}).eq('id',id).eq('store_id',storeId);
+    if(error) throw error;
+    if(supabaseOperadoresCache){
+      const op=supabaseOperadoresCache.find(op=>op.id===id);
+      if(op) op.active=!!active;
+    }
+    return true;
+  }catch(err){
+    console.warn('[operators] setActive error:',err);
+    return false;
+  }
+}
+
+function renderOperadoresSection(){
+  const body=document.getElementById('ops-section-body');
+  if(!body) return;
+  const isAdmin=['owner','admin'].includes((window.getSupabaseActiveRole?.()||'').toLowerCase());
+  const ops=supabaseOperadoresCache||getActiveOperators();
+  const activeOps=ops.filter(op=>op.active!==false);
+  const inactiveOps=ops.filter(op=>op.active===false);
+  const meta=document.getElementById('acc-operadores-meta');
+  if(meta) meta.textContent=`${activeOps.length} activo${activeOps.length!==1?'s':''}${inactiveOps.length?` · ${inactiveOps.length} inactivo${inactiveOps.length!==1?'s':''}`:''}`;
+  const mkRow=(op)=>{
+    const roleLabel=op.role==='owner'?'Dueño':op.role==='admin'?'Admin':'Operador';
+    return `<div class="op-row">
+      <div>
+        <div class="op-row-name">${op.name}</div>
+        <div class="op-row-meta">${roleLabel}${!op.active?' · inactivo':''}</div>
+      </div>
+      <div class="op-row-actions">
+        <span class="op-tag${op.active===false?' inactive':''}">${op.active===false?'Inactivo':'Activo'}</span>
+        ${isAdmin&&op.id?`<button class="btn ghost" type="button" style="font-size:11px;padding:4px 8px"
+          onclick="window._toggleOpActive('${op.id}',${!op.active})">${op.active===false?'Activar':'Desactivar'}</button>`:''}
+      </div>
+    </div>`;
+  };
+  const listHtml=ops.length?`<div class="ops-list">${ops.map(mkRow).join('')}</div>`
+    :`<div style="font-size:12px;color:var(--ink3);margin-bottom:10px">No hay operadores guardados en Supabase aún.</div>`;
+  const addForm=isAdmin?`
+    <div style="display:flex;gap:6px;margin-top:4px">
+      <input class="modal-input" id="ops-new-name" type="text" placeholder="Nombre del operador"
+        autocomplete="off" data-lpignore="true" style="flex:1;height:36px;font-size:13px">
+      <button class="btn-sm primary" type="button" onclick="window._addOperadorFromAjustes()">Agregar</button>
+    </div>`:'';
+  const sourceNote=supabaseOperadoresCache===null?
+    `<div style="font-size:11px;color:var(--ink3);margin-top:6px">Mostrando datos locales — iniciá sesión en Supabase para sincronizar.</div>`:'';
+  body.innerHTML=listHtml+addForm+sourceNote;
+}
+
+window._toggleOpActive=async function(id,active){
+  const ok=await setOperatorActiveInSupabase(id,active);
+  if(ok) renderOperadoresSection();
+  else showToast('Error al actualizar operador');
+};
+
+window._addOperadorFromAjustes=async function(){
+  const input=document.getElementById('ops-new-name');
+  const name=(input?.value||'').trim();
+  if(!name){showToast('Ingresá un nombre');return;}
+  const normalized=normalizeOperatorName(name);
+  const existing=getActiveOperators().find(op=>op.normalized_name===normalized);
+  if(existing){showToast('Ya existe un operador con ese nombre');return;}
+  // Guardar local siempre
+  if(!operadores.includes(name)){operadores.push(name);save();syncOperadoresSheets();}
+  // Guardar en Supabase si hay sesión
+  const sbResult=await saveOperatorToSupabase(name);
+  if(input) input.value='';
+  renderOperadoresSection();
+  showToast(sbResult?`✓ Operador "${name}" guardado`:`✓ Operador "${name}" guardado (local)`);
+};
 
 // ══════════════════════════════════════════════════
 //  TURNO
@@ -1595,6 +1825,7 @@ function abrirTurno(){
   else{op=sel?.value||'';}
   if(!op){showToast('Seleccioná o ingresá un operador');return;}
   if(!operadores.includes(op)){operadores.push(op);save();syncOperadoresSheets();}
+  saveOperatorToSupabase(op).catch(()=>{});
   turno={abierto:true,operador:op,fondoCaja:parseFloat($('turno-fondo')?.value)||0,apertura:nowISO(),ventasIds:[]};
   save();syncTurnoSheets();cerrarModalTurno();renderTurnoPill();showToast(`✓ Turno abierto — ${op}`);
 }
@@ -1767,6 +1998,7 @@ function confirmarGastoOperador(){
   else { op=sel?.value||''; }
   if(!op){ showToast('Seleccioná o ingresá un operador'); return; }
   if(!operadores.includes(op)){ operadores.push(op); save(); syncOperadoresSheets(); }
+  saveOperatorToSupabase(op).catch(()=>{});
   const pending=JSON.parse($('modal-gasto-operador').dataset.pending||'{}');
   const g={id:'g_'+Date.now(),...pending,operador:op};
   gastos.push(g); save(); cerrarModalGastoOperador(); renderGastos(); syncGastosSheets();
@@ -1926,6 +2158,7 @@ function confirmarOperadorCobro(){
   else{op=sel?.value||'';}
   if(!op){showToast('Seleccioná o ingresá un operador');return;}
   if(!operadores.includes(op)){operadores.push(op);save();syncOperadoresSheets();}
+  saveOperatorToSupabase(op).catch(()=>{});
   $('modal-operador-cobro').classList.remove('open');
   ejecutarCobro(op);
 }
@@ -2249,10 +2482,18 @@ function renderDashboard(){
   const totalG=vg.reduce((s,g)=>s+g.monto,0);
   const ganancia=totalV-totalG;
   const txP=ticketGroups.length,promP=txP?Math.round(totalV/txP):0;
-  const ayer=addLocalDays(new Date(),-1);
-  const va=useSupabase||useFallback?[]:ventas.filter(v=>v.fecha===getLocalDateString(ayer));
-  const totalAyer=va.reduce((s,v)=>s+v.total,0);
-  const difPct=totalAyer>0?Math.round((totalV-totalAyer)/totalAyer*100):null;
+  // Comparación vs período anterior dinámico
+  const prevRange=getPreviousComparisonRange(dashFiltro,desde,hasta);
+  let prevTotal=null;
+  if(useSupabase||useFallback){
+    // Para Supabase: el total previo viene almacenado en dashboardState (cargado async)
+    prevTotal=typeof dashboardState?.prevPeriodTotal==='number'?dashboardState.prevPeriodTotal:null;
+  }else{
+    const prevRows=ventas.filter(v=>v.fecha>=prevRange.desde&&v.fecha<=prevRange.hasta);
+    prevTotal=prevRows.reduce((s,v)=>s+v.total,0);
+  }
+  const compDelta=calculatePeriodDelta(totalV,prevTotal);
+  const compLabel=dashboardState?.prevPeriodLabel||prevRange.label;
   const dashboardSourceLabel=useSupabase?'Supabase':useFallback?'Modo sin conexión (datos locales)':showLoading?'Cargando dashboard desde Supabase…':'Local';
   const dashboardMsg=useSupabase&&txP===0&&!dashboardState?.error?'No hay ventas en Supabase para este rango.':(dashboardState?.error||'');
   const dashStatus=$('dash-source-status');
@@ -2278,7 +2519,7 @@ function renderDashboard(){
 
   // KPIs
   $('kpi-grid').innerHTML=`
-    <div class="kpi"><div class="kpi-lbl">Total ventas</div><div class="kpi-val">${fmt(totalV)}</div><div class="kpi-sub ${difPct!==null?(difPct>=0?'kpi-up':'kpi-dn'):''}">${difPct!==null?(difPct>=0?'+':'')+difPct+'%':''} vs ayer</div></div>
+    <div class="kpi"><div class="kpi-lbl">Total ventas</div><div class="kpi-val">${fmt(totalV)}</div>${formatDeltaKpi(compDelta,compLabel)}</div>
     <div class="kpi"><div class="kpi-lbl">Gastos</div><div class="kpi-val" style="color:var(--red)">${fmt(totalG)}</div><div class="kpi-sub">${vg.length} registros</div></div>
     <div class="kpi"><div class="kpi-lbl">Ganancia neta</div><div class="kpi-val" style="color:${ganancia>=0?'var(--green)':'var(--red)'}">${fmt(ganancia)}</div><div class="kpi-sub">ventas − gastos</div></div>
     <div class="kpi"><div class="kpi-lbl">Ticket promedio</div><div class="kpi-val">${fmt(promP)}</div><div class="kpi-sub">${txP} transacciones</div></div>`;
@@ -2323,11 +2564,21 @@ function renderDashboard(){
   const avgRev=vals.reduce((s,p)=>s+(p.qty?p.rev/p.qty:0),0)/(vals.length||1);
   const quads={estrellas:[],caballos:[],rompecabezas:[],perros:[]};
   vals.forEach(p=>{const hi=p.qty>=avgQty,hr=(p.qty?p.rev/p.qty:0)>=avgRev;quads[hi&&hr?'estrellas':hi?'caballos':hr?'rompecabezas':'perros'].push({n:p.nombre,qty:p.qty});});
-  const quadDef=[{key:'estrellas',emoji:'⭐',label:'Estrellas',bg:'var(--green-bg)'},{key:'caballos',emoji:'🐴',label:'Caballos',bg:'var(--blue-bg)'},{key:'rompecabezas',emoji:'🧩',label:'Rompecabezas',bg:'var(--amber-bg)'},{key:'perros',emoji:'🐶',label:'Perros',bg:'var(--red-bg)'}];
+  const quadDef=[
+    {key:'estrellas',emoji:'⭐',label:'Estrellas',bg:'var(--green-bg)',
+     tip:'<strong>Alta venta + alto ticket.</strong><br>Tu producto más rentable. Mantenelo visible, no bajes el precio sin análisis.'},
+    {key:'caballos',emoji:'🐴',label:'Caballo de batalla',bg:'var(--blue-bg)',
+     tip:'<strong>Alta venta, ticket más bajo.</strong><br>Mueve volumen pero aporta menos por unidad. Optimizá costos o revisá precio.'},
+    {key:'rompecabezas',emoji:'🧩',label:'Potencial oculto',bg:'var(--amber-bg)',
+     tip:'<strong>Baja venta, alto ticket.</strong><br>Buena rentabilidad pero poca demanda. Mejorá visibilidad o probá una promo.'},
+    {key:'perros',emoji:'🐶',label:'Bajo rendimiento',bg:'var(--red-bg)',
+     tip:'<strong>Baja venta + bajo ticket.</strong><br>Revisá si conviene seguir en carta. Considerá cambiar precio, presentación o retirarlo.'}
+  ];
+  const mkTip=(tip)=>`<span class="tip-wrap"><span class="tip-icon" onclick="this.classList.toggle('open');event.stopPropagation()">?<div class="tip-bubble">${tip}</div></span></span>`;
   $('menu-eng-grid').innerHTML=quadDef.map(q=>`<div class="menu-eng-quad" style="background:${q.bg};border-color:transparent">
-    <div class="quad-titulo">${q.emoji} ${q.label}</div>
+    <div class="quad-titulo">${q.emoji} ${q.label} ${mkTip(q.tip)}</div>
     ${quads[q.key].length?quads[q.key].slice(0,5).map(p=>`<div class="quad-item"><span>${p.n}</span><span>${p.qty}ud</span></div>`).join(''):'<div style="font-size:11px;color:var(--ink3)">Sin datos</div>'}
-  </div>`).join('');
+  </div>`).join('')+'<div class="menu-eng-legend" style="grid-column:1/-1">📐 La ingeniería de menú cruza ventas y contribución al total para clasificar productos y orientar decisiones.</div>';
 
   // Resultado financiero
   const resEl=$('dash-resultado');
@@ -3224,6 +3475,21 @@ if(config.webappUrl){loadFromSheets();}
     // Google Sheets: solo visible en modo técnico
     const sheetsAcc=document.getElementById('acc-sheets');
     if(sheetsAcc) sheetsAcc.style.display=canTech?'':'none';
+    // Operadores: visible para owner/admin sin necesidad de modo técnico
+    const opsAcc=document.getElementById('acc-operadores');
+    if(opsAcc){
+      const showOps=loggedIn&&isAdmin;
+      opsAcc.style.display=showOps?'':'none';
+      if(showOps){
+        // Cargar operadores desde Supabase si cambió la store o no están cargados
+        const currentStoreId=config?.activeStoreId||'';
+        if(currentStoreId&&supabaseOperadoresCacheStoreId!==currentStoreId){
+          loadOperatorsFromSupabase().then(()=>renderOperadoresSection()).catch(()=>renderOperadoresSection());
+        }else{
+          renderOperadoresSection();
+        }
+      }
+    }
     // Card modo técnico: mismo formato visual que accordion Menú y Datos locales
     const techSection=document.getElementById('tech-mode-section');
     if(techSection){
@@ -7161,7 +7427,9 @@ if(config.webappUrl){loadFromSheets();}
       range:{desde,hasta}
     };
   }
-  function setDashboardState({source='pending',rows=[],tickets=[],itemsCount=0,paymentsCount=0,total=0,lastReadAt='',error='',loading=false,range=null}={}){
+  let dashboardVisiblePrevPeriodTotal=null;
+  let dashboardVisiblePrevPeriodLabel='';
+  function setDashboardState({source='pending',rows=[],tickets=[],itemsCount=0,paymentsCount=0,total=0,lastReadAt='',error='',loading=false,range=null,prevPeriodTotal=undefined,prevPeriodLabel=undefined}={}){
     dashboardVisibleSource=source;
     dashboardVisibleRows=Array.isArray(rows)?rows:[];
     dashboardVisibleTickets=Array.isArray(tickets)?tickets:[];
@@ -7172,6 +7440,8 @@ if(config.webappUrl){loadFromSheets();}
     dashboardVisibleLastError=error||'';
     dashboardVisibleLoading=!!loading;
     dashboardVisibleRange=range?{desde:range.desde||'',hasta:range.hasta||''}:dashboardVisibleRange;
+    if(prevPeriodTotal!==undefined) dashboardVisiblePrevPeriodTotal=typeof prevPeriodTotal==='number'?prevPeriodTotal:null;
+    if(prevPeriodLabel!==undefined) dashboardVisiblePrevPeriodLabel=prevPeriodLabel||'';
   }
   window.getDashboardState=function(){
     return{
@@ -7184,7 +7454,9 @@ if(config.webappUrl){loadFromSheets();}
       lastReadAt:dashboardVisibleLastReadAt,
       error:dashboardVisibleLastError,
       loading:dashboardVisibleLoading,
-      range:{...dashboardVisibleRange}
+      range:{...dashboardVisibleRange},
+      prevPeriodTotal:dashboardVisiblePrevPeriodTotal,
+      prevPeriodLabel:dashboardVisiblePrevPeriodLabel
     };
   };
   window.hasSalesSupabaseReady=hasSalesSupabaseReady;
@@ -7883,6 +8155,25 @@ if(config.webappUrl){loadFromSheets();}
       const rows=preview.comparableRows||[];
       const tickets=groupLocalSaleRowsByTicket(rows);
       const total=money2((preview.sales||[]).reduce((sum,sale)=>sum+(Number(sale.total_amount)||0),0));
+      // Cargar total del período anterior (lightweight query, best-effort)
+      const prevRange=getPreviousComparisonRange(dashFiltro,appliedRange.desde,appliedRange.hasta);
+      let prevPeriodTotal=null;
+      try{
+        const storeId=getSalesStoreId();
+        const client=getSalesSupabaseClient();
+        if(storeId&&client){
+          const{data:prevSales}=await client.from('sales')
+            .select('total_amount,legacy_source,metadata')
+            .eq('store_id',storeId)
+            .gte('business_date',prevRange.desde)
+            .lte('business_date',prevRange.hasta);
+          if(prevSales){
+            prevPeriodTotal=money2((prevSales||[])
+              .filter(s=>!shouldExcludePreviewSale(s,{}))
+              .reduce((sum,s)=>sum+(Number(s.total_amount)||0),0));
+          }
+        }
+      }catch(_){}
       setDashboardState({
         source:'supabase',
         rows,
@@ -7893,7 +8184,9 @@ if(config.webappUrl){loadFromSheets();}
         lastReadAt:stampSalesMoment(),
         error:'',
         loading:false,
-        range:appliedRange
+        range:appliedRange,
+        prevPeriodTotal,
+        prevPeriodLabel:prevRange.label
       });
       if(activeTab==='dashboard') renderDashboard();
       renderSalesSupabaseUi();
