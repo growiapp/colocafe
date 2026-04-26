@@ -533,6 +533,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .brand-panel-text{font-size:13px;line-height:1.5;color:var(--ink2);max-width:560px}
 .brand-panel-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--ink2);white-space:nowrap}
 .brand-panel-badge img{height:14px;max-width:72px;width:auto;object-fit:contain;display:block}
+.brand-panel-badge a{display:inline-flex;align-items:center;line-height:0}
 .tech-only-note{display:none}
 .settings-note{font-size:12px;color:var(--ink2);line-height:1.55;background:rgba(246,239,228,.88);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:12px}
 .settings-note strong{color:var(--ink)}
@@ -540,7 +541,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .page-footer-inner{max-width:1200px;margin:0 auto;font-size:12px;color:var(--ink3);line-height:1.5;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
 .page-footer-label{color:var(--ink3)}
 .page-footer-brand{display:inline-flex;align-items:center;gap:6px;min-height:24px}
-.page-footer-logo{height:18px;max-width:96px;width:auto;opacity:.9;vertical-align:middle;object-fit:contain}
+.page-footer-logo{height:18px;max-width:96px;width:auto;opacity:.9;display:block;object-fit:contain}
 .page-footer-brand-text{color:var(--ink2);font-weight:600}
 @media(max-width:767px){
   .brand-panel{padding:16px}
@@ -787,8 +788,10 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
       </div>
       <div class="brand-panel-badge">
         <span>Soporte y evolución</span>
-        <img src="./assets/growi-logo.png" alt="Growi" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">
-        <span style="display:none">Growi</span>
+        <a href="https://growi.ar/" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;line-height:0">
+          <img src="./assets/growi-logo.png" alt="Growi" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">
+          <span style="display:none">Growi</span>
+        </a>
       </div>
     </div>
     <!-- ACCORDION: Menú -->
@@ -893,7 +896,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
 <footer class="page-footer">
   <div class="page-footer-inner">
     <span class="page-footer-label">Solución desarrollada por</span>
-    <span class="page-footer-brand">
+    <a href="https://growi.ar/" target="_blank" rel="noopener noreferrer" class="page-footer-brand" style="text-decoration:none">
       <img
         src="./assets/growi-logo.png"
         alt="Growi"
@@ -901,7 +904,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
         onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';"
       >
       <span class="page-footer-brand-text" style="display:none">Growi</span>
-    </span>
+    </a>
   </div>
 </footer>
 
