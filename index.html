@@ -3423,7 +3423,7 @@ if(config.webappUrl){loadFromSheets();}
 </script>
 <script>
 (()=>{
-  let supabaseClient=null,supabaseSession=null,supabaseUser=null,supabaseProfile=null,supabaseStores=[],supabaseAuthSub=null,supabaseAuthSig='';
+  let supabaseClient=null,supabaseSession=null,supabaseUser=null,supabaseProfile=null,supabaseStores=[],supabaseAuthSub=null,supabaseAuthSig='',supabaseJustSignedIn=false;
 
   // ── Configuración por defecto (pública — anon key, NUNCA service_role) ──────
   const DEFAULT_SUPABASE_URL='https://xhtpahjsddfkwsytubgu.supabase.co';
@@ -3540,12 +3540,14 @@ if(config.webappUrl){loadFromSheets();}
             <div class="row">
               <span class="auth-store-chip" id="sb-user-store" style="display:none"></span>
             </div>
-            <label>
-              <div>Store activa</div>
-              <select id="sb-store-sel" onchange="onSupabaseStoreChange()"></select>
-            </label>
-            <div class="row">
-              <button class="btn ghost" onclick="refrescarSupabaseContexto()">Refrescar contexto</button>
+            <div id="sb-store-sel-wrap" style="display:none">
+              <label>
+                <div>Elegí la tienda</div>
+                <select id="sb-store-sel" onchange="onSupabaseStoreChange()"></select>
+              </label>
+            </div>
+            <div id="sb-no-stores-msg" style="display:none;color:var(--red);font-size:13px;padding:8px 0">Tu usuario no tiene una tienda asignada. Contactá al administrador.</div>
+            <div class="row" style="margin-top:8px">
               <button class="btn danger" onclick="supabaseSignOut()">Cerrar sesión</button>
             </div>
           </div>
@@ -3615,20 +3617,16 @@ if(config.webappUrl){loadFromSheets();}
             </div>
           </div>
           <div id="sb-auth-loggedin-modal" style="display:none">
-            <div class="auth-user-meta">
-              <strong id="sb-user-name-modal">Usuario autenticado</strong>
-              <span id="sb-user-email-modal"></span>
-            </div>
-            <div class="row">
-              <span class="auth-store-chip" id="sb-user-store-modal" style="display:none"></span>
-            </div>
-            <label>
-              <div>Store activa</div>
-              <select id="sb-store-sel-modal" onchange="onSupabaseStoreChange()"></select>
-            </label>
-            <div class="row">
-              <button class="btn ghost" onclick="refrescarSupabaseContexto()">Refrescar contexto</button>
-              <button class="btn danger" onclick="supabaseSignOut()">Cerrar sesión</button>
+            <div id="sb-no-stores-msg-modal" style="display:none;color:var(--red);font-size:13px;padding:8px 0">Tu usuario no tiene una tienda asignada. Contactá al administrador.</div>
+            <div id="sb-store-sel-wrap-modal" style="display:none">
+              <label>
+                <div>Elegí la tienda</div>
+                <select id="sb-store-sel-modal" onchange="onSupabaseStoreChange()"></select>
+              </label>
+              <div class="row" style="margin-top:12px">
+                <button class="btn alt" onclick="window.onSupabaseStoreConfirm()">Continuar</button>
+                <button class="btn ghost" style="font-size:12px" onclick="supabaseSignOut()">Cerrar sesión</button>
+              </div>
             </div>
           </div>
         </div>
@@ -3763,14 +3761,20 @@ if(config.webappUrl){loadFromSheets();}
     syncSupabaseText('sb-user-email-modal', email);
 
     const isAdmin=['owner','admin'].includes((getSupabaseActiveRole()||'').toLowerCase());
+    const storeCount=supabaseStores.length;
     for(const selectId of ['sb-store-sel','sb-store-sel-modal']){
       const storeSel=document.getElementById(selectId);
       if(storeSel){
         const currentStoreId=config.activeStoreId||'';
-        storeSel.innerHTML=`<option value="">${supabaseStores.length?'Seleccioná…':'Sin stores asignadas'}</option>`+
+        storeSel.innerHTML=`<option value="">${storeCount?'Seleccioná…':'Sin stores asignadas'}</option>`+
           supabaseStores.map(s=>`<option value="${s.id}"${s.id===currentStoreId?' selected':''}>${s.name}${canTech && s.role?` · ${s.role}`:''}</option>`).join('');
       }
     }
+    // Mostrar/ocultar selector según cantidad de tiendas
+    syncSupabaseDisplay('sb-store-sel-wrap', loggedIn && storeCount>1 ? 'block' : 'none');
+    syncSupabaseDisplay('sb-no-stores-msg', loggedIn && storeCount===0 ? 'block' : 'none');
+    syncSupabaseDisplay('sb-store-sel-wrap-modal', loggedIn && storeCount>1 ? 'block' : 'none');
+    syncSupabaseDisplay('sb-no-stores-msg-modal', loggedIn && storeCount===0 ? 'block' : 'none');
     const activeStore=supabaseStores.find(s=>s.id===config.activeStoreId);
     for(const chipId of ['sb-user-store','sb-user-store-modal']){
       const storeChip=document.getElementById(chipId);
@@ -3848,6 +3852,26 @@ if(config.webappUrl){loadFromSheets();}
       if(config.activeStoreId && !supabaseStores.some(s=>s.id===config.activeStoreId)) config.activeStoreId='';
       if(!config.activeStoreId && supabaseStores[0]) config.activeStoreId=supabaseStores[0].id;
       saveConfig();
+      // Auto-close modal after login: single store → close directly; multi-store → keep open for picker; no stores → keep open to show error
+      if(supabaseJustSignedIn){
+        supabaseJustSignedIn=false;
+        const _modal=document.getElementById('sb-modal');
+        if(_modal && _modal.style.display!=='none'){
+          if(supabaseStores.length===1){
+            renderSupabaseStatus();
+            setTimeout(()=>{ window.closeSupabaseModal?.(); if(window.showToast) showToast('✓ Sesión iniciada'); },80);
+            await loadOperatorsFromSupabase();
+            renderOperadoresSection();
+            setTimeout(()=>{
+              window.loadOpenOrdersFromSupabase?.({force:true,silent:true}).then(r=>{
+                if(r?.ok&&activeTab==='carga'){renderMesasSection();renderReservasSection();}
+              }).catch(()=>{});
+            },300);
+            return;
+          }
+          // 0 stores or >1 store: renderSupabaseStatus will show appropriate UI, modal stays open
+        }
+      }
       renderSupabaseStatus();
       await loadOperatorsFromSupabase();
       renderOperadoresSection();
@@ -3976,7 +4000,7 @@ if(config.webappUrl){loadFromSheets();}
     if(!email || !password){ if(window.showToast) showToast('Ingresá email y contraseña'); return; }
     const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
     if(error){ if(window.showToast) showToast(error.message||'No se pudo iniciar sesión'); return; }
-    if(window.showToast) showToast('✓ Sesión iniciada');
+    supabaseJustSignedIn=true;
   };
 
   window.supabaseSignOut=async function(){
@@ -3995,12 +4019,33 @@ if(config.webappUrl){loadFromSheets();}
   };
 
   window.onSupabaseStoreChange=function(){
-    config.activeStoreId=document.getElementById('sb-store-sel')?.value||'';
+    // Leer del selector activo según si el modal está visible
+    const _sbm=document.getElementById('sb-modal');
+    const _modalOpen=_sbm&&_sbm.style.display!=='none';
+    config.activeStoreId=_modalOpen
+      ? (document.getElementById('sb-store-sel-modal')?.value||'')
+      : (document.getElementById('sb-store-sel')?.value||'');
     saveConfig();
     supabaseOperadoresCache=null;
     supabaseOperadoresCacheStoreId=null;
     loadOperatorsFromSupabase().then(()=>renderOperadoresSection()).catch(()=>renderOperadoresSection());
     renderSupabaseStatus();
+  };
+
+  window.onSupabaseStoreConfirm=function(){
+    const sel=document.getElementById('sb-store-sel-modal');
+    if(sel && sel.value){
+      config.activeStoreId=sel.value;
+      saveConfig();
+      supabaseOperadoresCache=null;
+      supabaseOperadoresCacheStoreId=null;
+      loadOperatorsFromSupabase().then(()=>renderOperadoresSection()).catch(()=>renderOperadoresSection());
+      renderSupabaseStatus();
+      window.closeSupabaseModal?.();
+      if(window.showToast) showToast('✓ Sesión iniciada');
+    } else {
+      if(window.showToast) showToast('Seleccioná una tienda para continuar');
+    }
   };
   window.getActiveStore=function(){
     const activeStoreId=(config&&config.activeStoreId)||'';
