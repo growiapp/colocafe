@@ -1,8 +1,9 @@
 -- ================================================================
 --  MIGRACIÓN INCREMENTAL: tabla operators
 --  Gestiq / Colo Café
---  Ejecutar UNA SOLA VEZ en Supabase SQL Editor.
---  No toca schema existente (sales, shifts, expenses, products, etc.)
+--  Reejecutable: usa DROP POLICY IF EXISTS + CREATE TABLE IF NOT EXISTS.
+--  RLS usa public.has_store_role() y public.store_user_role enum,
+--  igual que el resto del schema existente.
 -- ================================================================
 
 -- ── 1. Tabla principal ──────────────────────────────────────────
@@ -21,21 +22,26 @@ create table if not exists public.operators (
 );
 
 comment on table public.operators is 'Staff / operadores por tienda.';
-comment on column public.operators.normalized_name is 'Nombre en minúsculas sin acentos, para deduplicar "Pepe" vs "pepe".';
-comment on column public.operators.pin_hash is 'Hash del PIN opcional; nunca se expone en la UI normal.';
+comment on column public.operators.normalized_name
+  is 'Nombre en minúsculas sin acentos, para deduplicar "Pepe" vs "pepe".';
+comment on column public.operators.pin_hash
+  is 'Hash del PIN opcional; nunca se expone en la UI normal.';
 
 -- ── 2. Índices ───────────────────────────────────────────────────
-create index if not exists idx_operators_store_id   on public.operators(store_id);
-create index if not exists idx_operators_active      on public.operators(store_id, active);
+create index if not exists idx_operators_store_id
+  on public.operators(store_id);
+create index if not exists idx_operators_active
+  on public.operators(store_id, active);
 
 -- ── 3. Trigger updated_at ─────────────────────────────────────────
--- Usa set_updated_at() si ya existe en el schema; si no, la crea.
+-- Reutiliza set_updated_at() si ya existe en el schema (lo tiene el resto
+-- de las tablas); si no existe, la crea mínimamente.
 do $$
 begin
   if not exists (
     select 1 from pg_proc
-    where proname = 'set_updated_at'
-      and pronamespace = (select oid from pg_namespace where nspname = 'public')
+    where proname        = 'set_updated_at'
+      and pronamespace   = (select oid from pg_namespace where nspname = 'public')
   ) then
     execute $func$
       create or replace function public.set_updated_at()
@@ -50,6 +56,8 @@ begin
 end;
 $$;
 
+-- El trigger es idempotente: lo droppea antes de recrear.
+drop trigger if exists trg_operators_updated_at on public.operators;
 create trigger trg_operators_updated_at
   before update on public.operators
   for each row execute function public.set_updated_at();
@@ -57,91 +65,73 @@ create trigger trg_operators_updated_at
 -- ── 4. RLS ────────────────────────────────────────────────────────
 alter table public.operators enable row level security;
 
--- Helper: ¿el usuario autenticado tiene un rol en esta tienda?
--- Reutiliza has_store_role si ya existe; si no, usa store_members directamente.
-do $$
-begin
-  -- SELECT: cualquier miembro activo de la tienda puede leer operadores
-  if not exists (
-    select 1 from pg_policies
-    where tablename = 'operators' and policyname = 'operators_select'
-  ) then
-    execute $pol$
-      create policy operators_select on public.operators
-        for select
-        using (
-          exists (
-            select 1 from public.store_members sm
-            where sm.store_id = operators.store_id
-              and sm.user_id  = auth.uid()
-              and sm.role     in ('owner','admin','operator')
-          )
-        );
-    $pol$;
-  end if;
+-- Usar has_store_role() igual que el resto del schema.
+-- Cast explícito al enum real: public.store_user_role[]
 
-  -- INSERT: solo owner/admin
-  if not exists (
-    select 1 from pg_policies
-    where tablename = 'operators' and policyname = 'operators_insert'
-  ) then
-    execute $pol$
-      create policy operators_insert on public.operators
-        for insert
-        with check (
-          exists (
-            select 1 from public.store_members sm
-            where sm.store_id = operators.store_id
-              and sm.user_id  = auth.uid()
-              and sm.role     in ('owner','admin')
-          )
-        );
-    $pol$;
-  end if;
+-- SELECT: owner / admin / operator pueden leer operadores de su tienda
+drop policy if exists operators_select on public.operators;
+create policy operators_select on public.operators
+  for select
+  using (
+    public.has_store_role(
+      store_id,
+      array['owner','admin','operator']::public.store_user_role[]
+    )
+  );
 
-  -- UPDATE: solo owner/admin
-  if not exists (
-    select 1 from pg_policies
-    where tablename = 'operators' and policyname = 'operators_update'
-  ) then
-    execute $pol$
-      create policy operators_update on public.operators
-        for update
-        using (
-          exists (
-            select 1 from public.store_members sm
-            where sm.store_id = operators.store_id
-              and sm.user_id  = auth.uid()
-              and sm.role     in ('owner','admin')
-          )
-        );
-    $pol$;
-  end if;
+-- INSERT: solo owner / admin pueden crear operadores
+drop policy if exists operators_insert on public.operators;
+create policy operators_insert on public.operators
+  for insert
+  with check (
+    public.has_store_role(
+      store_id,
+      array['owner','admin']::public.store_user_role[]
+    )
+  );
 
-  -- DELETE: solo owner/admin
-  if not exists (
-    select 1 from pg_policies
-    where tablename = 'operators' and policyname = 'operators_delete'
-  ) then
-    execute $pol$
-      create policy operators_delete on public.operators
-        for delete
-        using (
-          exists (
-            select 1 from public.store_members sm
-            where sm.store_id = operators.store_id
-              and sm.user_id  = auth.uid()
-              and sm.role     in ('owner','admin')
-          )
-        );
-    $pol$;
-  end if;
-end;
-$$;
+-- UPDATE: solo owner / admin pueden modificar (activar/desactivar, etc.)
+drop policy if exists operators_update on public.operators;
+create policy operators_update on public.operators
+  for update
+  using (
+    public.has_store_role(
+      store_id,
+      array['owner','admin']::public.store_user_role[]
+    )
+  );
 
--- ── 5. Verificación ───────────────────────────────────────────────
--- Después de ejecutar, deberías ver la tabla en Table Editor > operators.
--- Para probar, insertá manualmente un operador y verificá que:
---   1. Un miembro con role='operator' puede hacer SELECT pero no INSERT.
---   2. Un miembro con role='owner' puede hacer INSERT y UPDATE.
+-- DELETE: solo owner / admin
+drop policy if exists operators_delete on public.operators;
+create policy operators_delete on public.operators
+  for delete
+  using (
+    public.has_store_role(
+      store_id,
+      array['owner','admin']::public.store_user_role[]
+    )
+  );
+
+-- ── 5. Grant a authenticated ──────────────────────────────────────
+-- Necesario para que los clientes autenticados puedan operar sobre la tabla.
+grant select, insert, update, delete on public.operators to authenticated;
+
+-- ── 6. Verificación sugerida ──────────────────────────────────────
+-- Después de ejecutar, corré estas queries como verificación:
+--
+--   -- Tabla creada:
+--   select count(*) from public.operators;
+--
+--   -- Policies existentes:
+--   select policyname, cmd from pg_policies where tablename = 'operators';
+--
+--   -- Trigger activo:
+--   select trigger_name from information_schema.triggers
+--   where event_object_table = 'operators';
+--
+-- Para probar permisos:
+--   1. Iniciá sesión como usuario con role='operator':
+--      → debe poder SELECT, no puede INSERT.
+--   2. Iniciá sesión como usuario con role='owner' o 'admin':
+--      → puede SELECT, INSERT, UPDATE, DELETE.
 -- ================================================================
