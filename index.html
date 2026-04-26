@@ -75,12 +75,15 @@
 [data-theme="dark"] #sb-modal .auth-card{background:linear-gradient(180deg,rgba(44,28,14,.95),rgba(38,23,16,.96))!important}
 [data-theme="dark"] #sb-modal [style*="color:#4c3318"],[data-theme="dark"] #sb-modal [style*="color: #4c3318"]{color:var(--ink)!important}
 [data-theme="dark"] #sb-modal [style*="color:#a38763"],[data-theme="dark"] #sb-modal [style*="color: #a38763"]{color:var(--ink3)!important}
+[data-theme="dark"] .brand-mark{filter:brightness(1.55) drop-shadow(0 0 7px rgba(240,200,150,.22)) drop-shadow(0 8px 18px rgba(0,0,0,.50))}
+[data-theme="dark"] .page-footer-logo,[data-theme="dark"] .brand-panel-badge img{filter:brightness(0) invert(1) opacity(.80)}
 /* Transición suave al cambiar tema */
 .theme-switching,.theme-switching *{transition:background-color .18s ease,border-color .18s ease,color .18s ease!important}
 .theme-switching img,.theme-switching svg,.theme-switching .bar-fill,.theme-switching .nav-icon,.theme-switching .toast{transition:none!important}
 /* ── TOGGLE ── */
 .theme-toggle{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;border:1px solid var(--border2);background:var(--surf2);cursor:pointer;font-size:15px;flex-shrink:0;padding:0;line-height:1;transition:background .15s}
 .theme-toggle:hover{background:var(--surf3)}
+@media(max-width:400px){#sb-pill #sb-txt{display:none}#sb-pill{padding:4px 7px}}
 /* ─────────────────────────────────────────────────────────────────────────── */
 
 body{font-family:var(--ff);background:
@@ -352,6 +355,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .auth-row .btn-sm,.auth-row .btn-cfg{flex:1}
 .auth-row label{flex:1;display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink2)}
 .auth-user-meta{font-size:12px;color:var(--ink2);line-height:1.5;margin-bottom:10px}
+.auth-card label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--ink2);margin-bottom:10px}
+.auth-card label input{width:100%;padding:11px 13px;border:1px solid var(--border2);border-radius:var(--r-sm);background:var(--surf2);font-family:var(--ff);font-size:15px;color:var(--ink);outline:none}
+.auth-card label input:focus{border-color:var(--orange)}
+.auth-card label select{width:100%;padding:11px 13px;border:1px solid var(--border2);border-radius:var(--r-sm);background:var(--surf2);font-family:var(--ff);font-size:14px;color:var(--ink);outline:none}
 .auth-store-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;background:var(--surf);border:1px solid var(--border);font-size:11px;color:var(--ink2);margin-top:6px}
 .btn-cfg{width:100%;padding:10px;background:linear-gradient(180deg,var(--orange-mid),var(--orange));color:#fff;border:none;border-radius:var(--r-sm);font-family:var(--ff);font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 10px 22px rgba(185,76,30,.18)}
 .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
@@ -582,7 +589,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .page-footer-inner{max-width:1200px;margin:0 auto;font-size:12px;color:var(--ink3);line-height:1.5;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
 .page-footer-label{color:var(--ink3)}
 .page-footer-brand{display:inline-flex;align-items:center;gap:6px;min-height:24px}
-.page-footer-logo{height:18px;max-width:96px;width:auto;opacity:.9;display:block;object-fit:contain}
+.page-footer-logo{height:18px;max-width:96px;width:auto;opacity:1;display:block;object-fit:contain}
 .page-footer-brand-text{color:var(--ink2);font-weight:600}
 @media(max-width:767px){
   .brand-panel{padding:16px}
@@ -590,6 +597,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .brand-panel{flex-direction:column;align-items:flex-start}
   .page-footer-inner{gap:6px}
   .page-footer-logo{height:16px;max-width:84px}
+  .header-right{gap:6px}
+  .header-date{min-width:54px;font-size:10px}
+  .theme-toggle{width:24px;height:24px;font-size:13px}
 }
 /* ── STOCK EN PRODUCTO ── */
 .stock-toggle-row{display:flex;align-items:center;gap:10px;padding:8px 0}
@@ -3463,7 +3473,7 @@ if(config.webappUrl){loadFromSheets();}
           <div style="display:flex;align-items:center;gap:12px">
             <img src="logo.svg" alt="Colo Café" style="width:42px;height:42px;flex-shrink:0;filter:drop-shadow(0 8px 16px rgba(76,51,24,.10))">
             <div>
-              <div style="font-size:20px;font-weight:800;color:#4c3318">Colo Café · acceso</div>
+              <div style="font-size:20px;font-weight:800;color:#4c3318">Colo Café · Acceso</div>
               <div style="font-size:13px;color:#a38763">Iniciá sesión para arrancar el día ☕</div>
             </div>
           </div>
