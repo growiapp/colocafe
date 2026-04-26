@@ -1523,6 +1523,36 @@ function tipoBadgeClass(t){return t==='salon'?'mesa-tipo-salon':t==='delivery'?'
 function carritoItemTotal(item){return(item.precio+(item.vars||[]).reduce((s,v)=>s+v.precio,0))*item.qty;}
 function carritoTotalFn(c){return Object.values(c).reduce((s,i)=>s+carritoItemTotal(i),0);}
 function stockStatus(p){if(p.ilimitado)return'ok';return p.stock<=0?'out':p.stock<=5?'low':'ok';}
+function productRefs(product){
+  return [product?.id,product?._sb_id,product?.legacy_id].filter(v=>v!==undefined&&v!==null&&String(v)!=='').map(v=>String(v));
+}
+function getProductFrontId(product){return String(product?.id??product?._sb_id??product?.legacy_id??product?.name??'');}
+function findProductById(ref){
+  const key=String(ref??'');
+  if(!key) return null;
+  return (menu||[]).find(p=>productRefs(p).includes(key))
+    || (menu||[]).find(p=>normalizeOperatorName(p?.name)===normalizeOperatorName(key))
+    || null;
+}
+function safeProductPrice(product){
+  const price=Number(product?.price);
+  if(Number.isFinite(price)) return price;
+  if(window.canShowClientTechnicalUi?.()) console.warn('[products] precio inválido',product);
+  return 0;
+}
+function logProductDiag(message,details){
+  if(window.canShowClientTechnicalUi?.()) console.warn(`[products] ${message}`,details||'');
+}
+function getCartQtyForProduct(cart,product){
+  const refs=new Set(productRefs(product));
+  return Object.values(cart||{}).reduce((sum,item)=>sum+(refs.has(String(item?.prodId))?(Number(item.qty)||0):0),0);
+}
+function attachProductCardHandlers(container,handlerName){
+  if(!container) return;
+  container.querySelectorAll('[data-product-id]').forEach(card=>{
+    card.addEventListener('click',()=>window[handlerName]?.(card.dataset.productId));
+  });
+}
 function dashRango(){const hoy=today();if(dashFiltro==='hoy')return{desde:hoy,hasta:hoy};if(dashFiltro==='semana'){const d=addLocalDays(new Date(),-6);return{desde:getLocalDateString(d),hasta:hoy};}if(dashFiltro==='mes'){const d=new Date();d.setDate(1);return{desde:getLocalDateString(d),hasta:hoy};}return{desde:$('dash-desde')?.value||hoy,hasta:$('dash-hasta')?.value||hoy};}
 
 // ── Dashboard: comparación vs período anterior ────────────────
@@ -1613,7 +1643,7 @@ function switchHistSubtab(t){
 function toggleAccordion(key){
   const body=$(`acc-body-${key}`),arr=$(`acc-arr-${key}`);
   const isOpen=body?.classList.contains('open');
-  ['menu','sheets','datos'].forEach(k=>{$(`acc-body-${k}`)?.classList.remove('open');$(`acc-arr-${k}`)?.classList.remove('open');});
+  ['menu','operadores','sheets','datos'].forEach(k=>{$(`acc-body-${k}`)?.classList.remove('open');$(`acc-arr-${k}`)?.classList.remove('open');});
   if(!isOpen){body?.classList.add('open');arr?.classList.add('open');}
 }
 function switchMenuTab(tab){
@@ -1632,27 +1662,51 @@ function normalizeOperatorName(name){
     .normalize('NFD').replace(/[̀-ͯ]/g,'')
     .replace(/\s+/g,' ');
 }
+function escapeHtml(value){
+  return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function escapeAttr(value){return escapeHtml(value);}
+function isSupabaseAdminRole(){
+  const role=String(window.getSupabaseActiveRole?.()||window.getActiveStoreRole?.()||'').toLowerCase();
+  return role==='owner'||role==='admin';
+}
+function logOperatorsDiag(message,details){
+  if(window.canShowClientTechnicalUi?.()) console.warn(`[operators] ${message}`,details||'');
+}
+function getOperatorsStoreId(){
+  return String(window.getCatalogStoreId?.()||window.getActiveStoreId?.()||config?.activeStoreId||'');
+}
 function getActiveOperators(){
   if(supabaseOperadoresCache && supabaseOperadoresCache.length>0){
     return supabaseOperadoresCache.filter(op=>op.active!==false);
   }
   return (operadores||[]).map(name=>({id:null,name,normalized_name:normalizeOperatorName(name),active:true,role:'operator'}));
 }
+function getOperatorByName(name){
+  const normalized=normalizeOperatorName(name);
+  return getActiveOperators().find(op=>op.normalized_name===normalized)||null;
+}
 function getOperadoresOpts(includeNuevo=true){
   const ops=getActiveOperators();
-  const opts=ops.map(op=>`<option value="${op.name}">${op.name}</option>`).join('');
-  const nuevoOpt=includeNuevo?'<option value="__nuevo__">➕ Nuevo operador</option>':'';
+  const opts=ops.map(op=>`<option value="${escapeAttr(op.name)}" data-operator-id="${escapeAttr(op.id||'')}">${escapeHtml(op.name)}</option>`).join('');
+  const nuevoOpt=(includeNuevo&&isSupabaseAdminRole())?'<option value="__nuevo__">+ Nuevo operador</option>':'';
   return `<option value="">Seleccioná…</option>${opts}${nuevoOpt}`;
+}
+function renderOperatorSelect(selectEl,includeNuevo=true){
+  if(!selectEl) return;
+  const previous=selectEl.value;
+  selectEl.innerHTML=getOperadoresOpts(includeNuevo);
+  if(previous && [...selectEl.options].some(opt=>opt.value===previous)) selectEl.value=previous;
 }
 function syncOperadoresSheets(){sheetsPost({action:'updateOperadores',rows:operadores.map(op=>({nombre:op}))});}
 
 async function loadOperatorsFromSupabase(){
   try{
     const client=window.getSupabaseClient?.();
-    const storeId=window.getCatalogStoreId?.();
-    if(!client||!storeId||!isValidUuid(storeId)) return false;
+    const storeId=getOperatorsStoreId();
+    if(!client||!storeId||!isValidUuid(storeId)){logOperatorsDiag('load skipped: missing client/store',{storeId});return false;}
     const {data:sess}=await client.auth.getSession();
-    if(!sess?.session) return false;
+    if(!sess?.session){logOperatorsDiag('load skipped: no session',{storeId});return false;}
     const {data,error}=await client.from('operators')
       .select('id,name,normalized_name,active,role,metadata')
       .eq('store_id',storeId)
@@ -1667,9 +1721,10 @@ async function loadOperatorsFromSupabase(){
     const sbNames=(supabaseOperadoresCache||[]).filter(op=>op.active!==false).map(op=>op.name);
     sbNames.forEach(n=>{if(!operadores.includes(n)){operadores.push(n);}});
     if(sbNames.length) save();
+    logOperatorsDiag('loaded',{storeId,count:supabaseOperadoresCache.length,activeCount:sbNames.length});
     return true;
   }catch(err){
-    if((err?.code||'')!=='42P01') console.warn('[operators] load error:',err);
+    if((err?.code||'')!=='42P01') logOperatorsDiag('load error',err);
     return false;
   }
 }
@@ -1679,7 +1734,7 @@ async function saveOperatorToSupabase(name){
   if(!normalized) return null;
   try{
     const client=window.getSupabaseClient?.();
-    const storeId=window.getCatalogStoreId?.();
+    const storeId=getOperatorsStoreId();
     if(!client||!storeId||!isValidUuid(storeId)) return null;
     const {data:sess}=await client.auth.getSession();
     if(!sess?.session) return null;
@@ -1698,7 +1753,7 @@ async function saveOperatorToSupabase(name){
     else supabaseOperadoresCache.push(data);
     return data;
   }catch(err){
-    if((err?.code||'')!=='42P01') console.warn('[operators] save error:',err);
+    if((err?.code||'')!=='42P01') logOperatorsDiag('save error',err);
     return null;
   }
 }
@@ -1706,7 +1761,7 @@ async function saveOperatorToSupabase(name){
 async function setOperatorActiveInSupabase(id,active){
   try{
     const client=window.getSupabaseClient?.();
-    const storeId=window.getCatalogStoreId?.();
+    const storeId=getOperatorsStoreId();
     if(!client||!storeId) return false;
     const {data:sess}=await client.auth.getSession();
     if(!sess?.session) return false;
@@ -1719,7 +1774,33 @@ async function setOperatorActiveInSupabase(id,active){
     }
     return true;
   }catch(err){
-    console.warn('[operators] setActive error:',err);
+    logOperatorsDiag('setActive error',err);
+    return false;
+  }
+}
+
+async function updateOperatorNameInSupabase(id,name){
+  const normalized=normalizeOperatorName(name);
+  if(!id||!normalized) return false;
+  try{
+    const client=window.getSupabaseClient?.();
+    const storeId=getOperatorsStoreId();
+    if(!client||!storeId) return false;
+    const {data:sess}=await client.auth.getSession();
+    if(!sess?.session) return false;
+    const {data,error}=await client.from('operators')
+      .update({name:name.trim(),normalized_name:normalized})
+      .eq('id',id).eq('store_id',storeId)
+      .select('id,name,normalized_name,active,role,metadata')
+      .single();
+    if(error) throw error;
+    if(supabaseOperadoresCache){
+      const idx=supabaseOperadoresCache.findIndex(op=>String(op.id)===String(id));
+      if(idx>=0) supabaseOperadoresCache[idx]=data;
+    }
+    return true;
+  }catch(err){
+    logOperatorsDiag('update name error',err);
     return false;
   }
 }
@@ -1727,7 +1808,7 @@ async function setOperatorActiveInSupabase(id,active){
 function renderOperadoresSection(){
   const body=document.getElementById('ops-section-body');
   if(!body) return;
-  const isAdmin=['owner','admin'].includes((window.getSupabaseActiveRole?.()||'').toLowerCase());
+  const isAdmin=isSupabaseAdminRole();
   const ops=supabaseOperadoresCache||getActiveOperators();
   const activeOps=ops.filter(op=>op.active!==false);
   const inactiveOps=ops.filter(op=>op.active===false);
@@ -1737,13 +1818,15 @@ function renderOperadoresSection(){
     const roleLabel=op.role==='owner'?'Dueño':op.role==='admin'?'Admin':'Operador';
     return `<div class="op-row">
       <div>
-        <div class="op-row-name">${op.name}</div>
+        <div class="op-row-name">${escapeHtml(op.name)}</div>
         <div class="op-row-meta">${roleLabel}${!op.active?' · inactivo':''}</div>
       </div>
       <div class="op-row-actions">
         <span class="op-tag${op.active===false?' inactive':''}">${op.active===false?'Inactivo':'Activo'}</span>
         ${isAdmin&&op.id?`<button class="btn ghost" type="button" style="font-size:11px;padding:4px 8px"
-          onclick="window._toggleOpActive('${op.id}',${!op.active})">${op.active===false?'Activar':'Desactivar'}</button>`:''}
+          onclick="window._editOperadorName('${escapeAttr(op.id)}')">Editar</button>
+        <button class="btn ghost" type="button" style="font-size:11px;padding:4px 8px"
+          onclick="window._toggleOpActive('${escapeAttr(op.id)}',${!op.active})">${op.active===false?'Activar':'Desactivar'}</button>`:''}
       </div>
     </div>`;
   };
@@ -1764,6 +1847,25 @@ window._toggleOpActive=async function(id,active){
   const ok=await setOperatorActiveInSupabase(id,active);
   if(ok) renderOperadoresSection();
   else showToast('Error al actualizar operador');
+};
+
+window._editOperadorName=async function(id){
+  if(!isSupabaseAdminRole()){showToast('No tenés permiso para editar operadores');return;}
+  const op=(supabaseOperadoresCache||[]).find(x=>String(x.id)===String(id));
+  if(!op){showToast('Operador no encontrado');return;}
+  const name=(prompt('Nuevo nombre del operador',op.name)||'').trim();
+  if(!name||name===op.name)return;
+  const normalized=normalizeOperatorName(name);
+  const duplicate=(supabaseOperadoresCache||[]).find(x=>String(x.id)!==String(id)&&normalizeOperatorName(x.name)===normalized);
+  if(duplicate){showToast('Ya existe un operador con ese nombre');return;}
+  const oldName=op.name;
+  const ok=await updateOperatorNameInSupabase(id,name);
+  if(!ok){showToast('Error al editar operador');return;}
+  operadores=operadores.map(n=>normalizeOperatorName(n)===normalizeOperatorName(oldName)?name:n);
+  if(!operadores.some(n=>normalizeOperatorName(n)===normalized)) operadores.push(name);
+  save();syncOperadoresSheets();
+  renderOperadoresSection();
+  showToast('✓ Operador actualizado');
 };
 
 window._addOperadorFromAjustes=async function(){
@@ -1790,7 +1892,14 @@ function renderTurnoPill(){
   if(turno&&turno.abierto){pill.innerHTML=`<span class="turno-dot on"></span>${turno.operador}`;pill.className='turno-pill abierto';}
   else{pill.innerHTML=`<span class="turno-dot"></span>Sin turno`;pill.className='turno-pill';}
 }
-function openTurnoModal(){turno&&turno.abierto?mostrarResumenTurno():mostrarAbrirTurno();$('modal-turno').classList.add('open');}
+async function openTurnoModal(){
+  if(turno&&turno.abierto) mostrarResumenTurno();
+  else{
+    await loadOperatorsFromSupabase();
+    mostrarAbrirTurno();
+  }
+  $('modal-turno').classList.add('open');
+}
 function cerrarModalTurno(){$('modal-turno').classList.remove('open');}
 function closeModalTurno(e){if(e.target===$('modal-turno'))cerrarModalTurno();}
 
@@ -1818,15 +1927,23 @@ function onTurnoOperadorChange(){
   const sel=$('turno-operador-sel');
   $('turno-nuevo-op-wrap').style.display=sel?.value==='__nuevo__'?'block':'none';
 }
-function abrirTurno(){
+async function abrirTurno(){
   const sel=$('turno-operador-sel');
   let op='';
+  let operatorId=sel?.selectedOptions?.[0]?.dataset?.operatorId||'';
   if(sel?.value==='__nuevo__'){op=($('turno-nuevo-op')?.value||'').trim();}
   else{op=sel?.value||'';}
   if(!op){showToast('Seleccioná o ingresá un operador');return;}
+  if(sel?.value==='__nuevo__'&&!isSupabaseAdminRole()){showToast('No tenés permiso para crear operadores');return;}
   if(!operadores.includes(op)){operadores.push(op);save();syncOperadoresSheets();}
-  saveOperatorToSupabase(op).catch(()=>{});
-  turno={abierto:true,operador:op,fondoCaja:parseFloat($('turno-fondo')?.value)||0,apertura:nowISO(),ventasIds:[]};
+  if(sel?.value==='__nuevo__'){
+    const saved=await saveOperatorToSupabase(op);
+    operatorId=saved?.id||'';
+  }else if(!operatorId){
+    const existing=getOperatorByName(op);
+    operatorId=existing?.id||'';
+  }
+  turno={abierto:true,operador:op,operator_id:operatorId||null,metadata:{operator_id:operatorId||null},fondoCaja:parseFloat($('turno-fondo')?.value)||0,apertura:nowISO(),ventasIds:[]};
   save();syncTurnoSheets();cerrarModalTurno();renderTurnoPill();showToast(`✓ Turno abierto — ${op}`);
 }
 
@@ -1964,7 +2081,7 @@ function openGastoModal(){
 }
 function cerrarModalGasto(){$('modal-gasto').classList.remove('open');}
 function closeModalGasto(e){if(e.target===$('modal-gasto'))cerrarModalGasto();}
-function guardarGasto(){
+async function guardarGasto(){
   const desc=($('gasto-desc').value||'').trim();
   const monto=parseFloat($('gasto-monto').value)||0;
   if(!desc||!monto){showToast('Completá descripción y monto');return;}
@@ -1977,9 +2094,10 @@ function guardarGasto(){
     pago: $('gasto-pago').value
   };
   cerrarModalGasto();
+  await loadOperatorsFromSupabase();
   const sel=$('gasto-operador-sel');
   if(sel){
-    sel.innerHTML=getOperadoresOpts(true);
+    renderOperatorSelect(sel,true);
     if(turno&&turno.abierto) sel.value=turno.operador;
   }
   $('gasto-nuevo-op-wrap').style.display='none';
@@ -1991,16 +2109,23 @@ function onGastoOperadorChange(){
   $('gasto-nuevo-op-wrap').style.display=sel?.value==='__nuevo__'?'block':'none';
 }
 function cerrarModalGastoOperador(){ $('modal-gasto-operador').classList.remove('open'); }
-function confirmarGastoOperador(){
+async function confirmarGastoOperador(){
   const sel=$('gasto-operador-sel');
   let op='';
+  let operatorId=sel?.selectedOptions?.[0]?.dataset?.operatorId||'';
   if(sel?.value==='__nuevo__'){ op=($('gasto-nuevo-op')?.value||'').trim(); }
   else { op=sel?.value||''; }
   if(!op){ showToast('Seleccioná o ingresá un operador'); return; }
+  if(sel?.value==='__nuevo__'&&!isSupabaseAdminRole()){showToast('No tenés permiso para crear operadores');return;}
   if(!operadores.includes(op)){ operadores.push(op); save(); syncOperadoresSheets(); }
-  saveOperatorToSupabase(op).catch(()=>{});
+  if(sel?.value==='__nuevo__'){
+    const saved=await saveOperatorToSupabase(op);
+    operatorId=saved?.id||'';
+  }else if(!operatorId){
+    operatorId=getOperatorByName(op)?.id||'';
+  }
   const pending=JSON.parse($('modal-gasto-operador').dataset.pending||'{}');
-  const g={id:'g_'+Date.now(),...pending,operador:op};
+  const g={id:'g_'+Date.now(),...pending,operador:op,_operator_id:operatorId||null,metadata:{operator_id:operatorId||null}};
   gastos.push(g); save(); cerrarModalGastoOperador(); renderGastos(); syncGastosSheets();
   showToast('✓ Gasto registrado');
 }
@@ -2133,14 +2258,15 @@ function saveMesaCarrito(){
 }
 
 // ── Operador al cobrar ─────────────────────────────
-function cerrarMesaOReserva(){
+async function cerrarMesaOReserva(){
   const items=Object.values(carrito);
   if(!items.length){showToast('El pedido está vacío');return;}
   const paymentState=getCurrentPaymentState();
   if(!paymentState.valido){showToast(paymentState.mensaje||'Revisá los pagos');return;}
+  await loadOperatorsFromSupabase();
   // Ask which operator served this table
   const sel=$('cobro-operador-sel');if(!sel)return;
-  sel.innerHTML=getOperadoresOpts(true);
+  renderOperatorSelect(sel,true);
   $('cobro-nuevo-op-wrap').style.display='none';
   // Store pending data and show operator modal
   pendingCobroCallback=()=>ejecutarCobro();
@@ -2151,18 +2277,25 @@ function onCobroOperadorChange(){
   $('cobro-nuevo-op-wrap').style.display=sel?.value==='__nuevo__'?'block':'none';
 }
 function cerrarModalOperadorCobro(){$('modal-operador-cobro').classList.remove('open');pendingCobroCallback=null;}
-function confirmarOperadorCobro(){
+async function confirmarOperadorCobro(){
   const sel=$('cobro-operador-sel');
   let op='';
+  let operatorId=sel?.selectedOptions?.[0]?.dataset?.operatorId||'';
   if(sel?.value==='__nuevo__'){op=($('cobro-nuevo-op')?.value||'').trim();}
   else{op=sel?.value||'';}
   if(!op){showToast('Seleccioná o ingresá un operador');return;}
+  if(sel?.value==='__nuevo__'&&!isSupabaseAdminRole()){showToast('No tenés permiso para crear operadores');return;}
   if(!operadores.includes(op)){operadores.push(op);save();syncOperadoresSheets();}
-  saveOperatorToSupabase(op).catch(()=>{});
+  if(sel?.value==='__nuevo__'){
+    const saved=await saveOperatorToSupabase(op);
+    operatorId=saved?.id||'';
+  }else if(!operatorId){
+    operatorId=getOperatorByName(op)?.id||'';
+  }
   $('modal-operador-cobro').classList.remove('open');
-  ejecutarCobro(op);
+  ejecutarCobro(op,operatorId);
 }
-async function ejecutarCobro(operadorCobro){
+async function ejecutarCobro(operadorCobro,operatorIdCobro){
   const esReserva=mesaActivaId&&mesaActivaId.startsWith('reserva_');
   const items=Object.values(carrito);
   const btn=$('btn-confirm');btn.disabled=true;btn.textContent='Cerrando…';
@@ -2173,6 +2306,7 @@ async function ejecutarCobro(operadorCobro){
   const fecha=getLocalDateString(momentoVenta),hora=getLocalTimeString(momentoVenta),ts=getLocalTimestamp(momentoVenta);
   const turnoActivo=turno&&turno.abierto?turno:null;
   const operador=operadorCobro||(turnoActivo?turnoActivo.operador:'Sin turno');
+  const operatorId=operatorIdCobro||turnoActivo?.operator_id||turnoActivo?.metadata?.operator_id||getOperatorByName(operador)?.id||null;
   const ventaIds=[];
   const ticketId='t_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
   let tipoVenta='salon',nombreMesa='';
@@ -2180,7 +2314,7 @@ async function ejecutarCobro(operadorCobro){
   if(esReserva){const r=reservas.find(x=>x.id===mesaActivaId.replace('reserva_',''));if(r){reservaActiva=r;tipoVenta=r.tipo||'salon';nombreMesa=r.nombre;clienteReserva=customers.find(c=>String(c.id||'')===String(r.clienteId||''))||null;}}
   else{const m=mesas.find(x=>x.id===mesaActivaId);if(m){tipoVenta=m.tipo||'salon';nombreMesa=m.nombre;}}
   const nuevas=items.map(item=>{
-     const p=menu.find(x=>x.id==item.prodId);
+     const p=findProductById(item.prodId);
      const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
      const ventaId='v_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
      ventaIds.push(ventaId);
@@ -2190,9 +2324,10 @@ async function ejecutarCobro(operadorCobro){
        producto:p?p.name:'?',variantes:(item.vars||[]).map(v=>v.nombre).join(', '),
        nota:item.nota||'',categoria:getCat(p?.cat).name,seccion:getCat(p?.cat).seccion,
        cantidad:item.qty,precioBase:item.precio,precioVars:varsExtra,
-       total:(item.precio+varsExtra)*item.qty,pago:paymentState.pago,cat:p?.cat,
-       prodId:item.prodId,_product_sb_id:p?._sb_id||null,_product_legacy_id:p?.legacy_id||(!window.isValidUuid?.(String(p?.id||''))?String(p?.id||''):''),
-       _shift_sb_id:turnoActivo?turnoActivo._sb_id||null:null,
+        total:(item.precio+varsExtra)*item.qty,pago:paymentState.pago,cat:p?.cat,
+        prodId:item.prodId,_product_sb_id:p?._sb_id||null,_product_legacy_id:p?.legacy_id||(!window.isValidUuid?.(String(p?.id||''))?String(p?.id||''):''),
+        _operator_id:operatorId,
+        _shift_sb_id:turnoActivo?turnoActivo._sb_id||null:null,
        _reservation_local_id:reservaActiva?.id||null,_reservation_sb_id:reservaActiva?._sb_id||null,
        _customer_local_id:reservaActiva?.clienteId||null,_customer_sb_id:clienteReserva?._sb_id||null,
        _source_kind:esReserva?'reserva':'mesa',
@@ -2227,30 +2362,37 @@ function renderCargaCats(){
 function setCargaCat(id){catCarga=id;renderCargaCats();renderProdGrid();}
 function renderProdGrid(){
   const el=$('prod-grid');if(!el)return;
-  const list=catCarga==='todos'?menu:menu.filter(p=>p.cat===catCarga);
+  const activeMenu=(menu||[]).filter(p=>p.active!==false);
+  const list=catCarga==='todos'?activeMenu:activeMenu.filter(p=>p.cat===catCarga);
   if(!list.length){el.innerHTML='<div class="empty">No hay productos</div>';return;}
-  const qtyMap={};Object.values(carrito).forEach(item=>{qtyMap[item.prodId]=(qtyMap[item.prodId]||0)+item.qty;});
   el.innerHTML=list.map(p=>{
-    const qty=qtyMap[p.id]||0,cat=getCat(p.cat),st=stockStatus(p),hasVars=(p.variantes||[]).length>0;
-    return `<div class="prod-card${qty>0?' in-cart':''}${st==='out'?' disabled':''}" onclick="addItem(${p.id})">
+    const productId=getProductFrontId(p);
+    if(!productId) logProductDiag('producto visible sin ID usable',p);
+    if(!Number.isFinite(Number(p.price))) logProductDiag('producto visible con precio inválido',p);
+    if(!cats.some(c=>c.id===p.cat)) logProductDiag('producto visible con categoría inválida',p);
+    if(!p.ilimitado&&Number(p.stock)<=0) logProductDiag('producto visible con stock 0; venta permitida por regla cafetería',p);
+    const qty=getCartQtyForProduct(carrito,p),cat=getCat(p.cat),st=stockStatus(p),hasVars=(p.variantes||[]).length>0;
+    return `<div class="prod-card${qty>0?' in-cart':''}" data-product-id="${escapeAttr(productId)}">
       <div class="cat-dot" style="background:${cat.color}"></div>
-      <div class="prod-name">${p.name}</div>
-      <div class="prod-price">${fmt(p.price)}</div>
+      <div class="prod-name">${escapeHtml(p.name)}</div>
+      <div class="prod-price">${fmt(safeProductPrice(p))}</div>
       ${!p.ilimitado&&st==='low'?`<div class="prod-low-txt">⚠ ${p.stock} restantes`:''}
-      ${!p.ilimitado&&st==='out'?'<div class="out-lbl">Agotado</div>':''}
+      ${!p.ilimitado&&st==='out'?'<div class="out-lbl">Stock 0</div>':''}
       ${hasVars?`<div class="prod-mods-hint">🔧 Variantes</div>`:''}
       ${qty>0?`<div class="prod-badge">${qty}</div>`:''}
     </div>`;
   }).join('');
+  attachProductCardHandlers(el,'addItem');
 }
 function addItem(id){
-  const p=menu.find(x=>x.id===id);if(!p)return;
-  if(!p.ilimitado&&p.stock<=0){showToast(`Sin stock: ${p.name}`);return;}
+  const p=findProductById(id);
+  if(!p){logProductDiag('handler no encontró producto',{id});showToast('Producto no encontrado');return;}
+  if(!p.ilimitado&&Number(p.stock)<=0) logProductDiag('stock 0 no bloquea venta',{id,product:p});
   if((p.variantes||[]).length>0){abrirModalVariantes(p);}
   else{
-    const key=`${id}_plain`;
-    if(!p.ilimitado&&carrito[key]&&carrito[key].qty>=p.stock){showToast(`Solo ${p.stock} disponibles`);return;}
-    carrito[key]?carrito[key].qty++:(carrito[key]={prodId:id,qty:1,vars:[],nota:'',precio:p.price});
+    const productId=getProductFrontId(p);
+    const key=`${productId}_plain`;
+    carrito[key]?carrito[key].qty++:(carrito[key]={prodId:productId,qty:1,vars:[],nota:'',precio:safeProductPrice(p)});
     saveMesaCarrito();renderProdGrid();renderCart();
   }
 }
@@ -2266,19 +2408,19 @@ function renderCart(){
   if(!items.length){ce.style.display='block';cr.style.display='none';ct.textContent='$0';updatePaymentUI(0,{valido:false,mensaje:''});if(bc)bc.disabled=true;return;}
   ce.style.display='none';cr.style.display='flex';
   cr.innerHTML=items.map(([key,item])=>{
-    const p=menu.find(x=>x.id==item.prodId);if(!p)return'';
+    const p=findProductById(item.prodId);if(!p){logProductDiag('carrito con producto no resoluble',item);return'';}
     const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
     const sub=(item.precio+varsExtra)*item.qty;
     const varsStr=(item.vars||[]).map(v=>v.nombre+(v.precio?` +${fmt(v.precio)}`:'')).join(' · ');
     return `<div class="cart-row">
-      <div class="c-name-wrap"><div class="c-name">${p.name}</div>
+      <div class="c-name-wrap"><div class="c-name">${escapeHtml(p.name)}</div>
         ${varsStr?`<div class="c-mods">${varsStr}</div>`:''}
         ${item.nota?`<div class="c-nota">${item.nota}</div>`:''}
       </div>
       <div class="qty-wrap">
-        <button class="qty-btn" onclick="changeQty('${key}',-1)">−</button>
+        <button class="qty-btn" onclick="changeQty(${JSON.stringify(key)},-1)">−</button>
         <span class="qty-n">${item.qty}</span>
-        <button class="qty-btn" onclick="changeQty('${key}',1)">+</button>
+        <button class="qty-btn" onclick="changeQty(${JSON.stringify(key)},1)">+</button>
       </div>
       <span class="c-sub">${fmt(sub)}</span>
     </div>`;
@@ -2331,14 +2473,15 @@ function toggleVariante(gi,oi,tipo){
 function actualizarTotalVariantes(){
   if(!prodParaVariantes)return;
   const extra=Object.values(variantesSeleccionadas).flat().reduce((s,v)=>s+v.precio,0);
-  $('modal-variantes-total').textContent=fmt(prodParaVariantes.price+extra);
+  $('modal-variantes-total').textContent=fmt(safeProductPrice(prodParaVariantes)+extra);
 }
 function confirmarVariantes(){
   if(!prodParaVariantes)return;
   const vars=Object.values(variantesSeleccionadas).flat();
   const nota=$('modal-variantes-nota').value.trim();
-  const key=`${prodParaVariantes.id}_${vars.map(v=>v.nombre).sort().join(',')}_${Date.now()}`;
-  carrito[key]={prodId:prodParaVariantes.id,qty:1,vars,nota,precio:prodParaVariantes.price};
+  const productId=getProductFrontId(prodParaVariantes);
+  const key=`${productId}_${vars.map(v=>v.nombre).sort().join(',')}_${Date.now()}`;
+  carrito[key]={prodId:productId,qty:1,vars,nota,precio:safeProductPrice(prodParaVariantes)};
   cerrarModalVariantes();saveMesaCarrito();renderProdGrid();renderCart();
 }
 
@@ -2420,24 +2563,26 @@ function setCatReserva(id){catReserva=id;renderReservaProdChips();renderReservaP
 function renderReservaProductoGrid(){
   const el=$('res-prod-grid');if(!el)return;
   const rcIds=cats.filter(c=>c.reservable).map(c=>c.id);
-  const base=menu.filter(p=>rcIds.includes(p.cat));
+  const base=(menu||[]).filter(p=>p.active!==false&&rcIds.includes(p.cat));
   const list=catReserva==='todos'?base:base.filter(p=>p.cat===catReserva);
-  const qtyMap={};Object.values(reservaCarrito).forEach(item=>{qtyMap[item.prodId]=(qtyMap[item.prodId]||0)+item.qty;});
   el.innerHTML=list.map(p=>{
-    const qty=qtyMap[p.id]||0,cat=getCat(p.cat);
-    return `<div class="prod-card${qty>0?' in-cart':''}" onclick="addItemReserva(${p.id})" style="cursor:pointer">
+    const productId=getProductFrontId(p);
+    const qty=getCartQtyForProduct(reservaCarrito,p),cat=getCat(p.cat);
+    return `<div class="prod-card${qty>0?' in-cart':''}" data-product-id="${escapeAttr(productId)}" style="cursor:pointer">
       <div class="cat-dot" style="background:${cat.color}"></div>
-      <div class="prod-name">${p.name}</div>
-      <div class="prod-price">${fmt(p.price)}</div>
+      <div class="prod-name">${escapeHtml(p.name)}</div>
+      <div class="prod-price">${fmt(safeProductPrice(p))}</div>
       ${qty>0?`<div class="prod-badge">${qty}</div>`:''}
     </div>`;
   }).join('');
+  attachProductCardHandlers(el,'addItemReserva');
   $('res-total').textContent=fmt(carritoTotalFn(reservaCarrito));
 }
 function addItemReserva(id){
-  const p=menu.find(x=>x.id===id);if(!p)return;
-  const key=`${id}_plain`;
-  reservaCarrito[key]?reservaCarrito[key].qty++:(reservaCarrito[key]={prodId:id,qty:1,vars:[],nota:'',precio:p.price});
+  const p=findProductById(id);if(!p){logProductDiag('handler reserva no encontró producto',{id});showToast('Producto no encontrado');return;}
+  const productId=getProductFrontId(p);
+  const key=`${productId}_plain`;
+  reservaCarrito[key]?reservaCarrito[key].qty++:(reservaCarrito[key]={prodId:productId,qty:1,vars:[],nota:'',precio:safeProductPrice(p)});
   renderReservaProductoGrid();
 }
 function cerrarModalReserva(){$('modal-reserva').classList.remove('open');}
@@ -3341,6 +3486,7 @@ if(config.webappUrl){loadFromSheets();}
     }
     return stores[0]?.role||'';
   }
+  window.getSupabaseActiveRole=getSupabaseActiveRole;
   function canShowSupabaseTechnicalUi(){
     return ['owner','admin'].includes((getSupabaseActiveRole()||'').toLowerCase()) && getSupabaseTechnicalModeEnabled();
   }
@@ -3538,6 +3684,8 @@ if(config.webappUrl){loadFromSheets();}
       if(!config.activeStoreId && supabaseStores[0]) config.activeStoreId=supabaseStores[0].id;
       saveConfig();
       renderSupabaseStatus();
+      await loadOperatorsFromSupabase();
+      renderOperadoresSection();
     }catch(err){
       console.error('Supabase context error', err);
       renderSupabaseStatus();
@@ -3685,6 +3833,9 @@ if(config.webappUrl){loadFromSheets();}
   window.onSupabaseStoreChange=function(){
     config.activeStoreId=document.getElementById('sb-store-sel')?.value||'';
     saveConfig();
+    supabaseOperadoresCache=null;
+    supabaseOperadoresCacheStoreId=null;
+    loadOperatorsFromSupabase().then(()=>renderOperadoresSection()).catch(()=>renderOperadoresSection());
     renderSupabaseStatus();
   };
   window.getActiveStore=function(){
@@ -6015,6 +6166,8 @@ if(config.webappUrl){loadFromSheets();}
       notes: expense.nota || null,
       metadata:{
         ...(existingRow?.metadata||{}),
+        ...(expense?.metadata||{}),
+        operator_id: expense?._operator_id || expense?.metadata?.operator_id || null,
         local_hora: localTime
       }
     };
@@ -6699,7 +6852,9 @@ if(config.webappUrl){loadFromSheets();}
       apertura: row?.opened_at || getLocalTimestamp(),
       ventasIds: Array.from(new Set([...(localVentas||[]), ...(remoteVentas||[])])),
       _sb_id: row?.id || '',
-      legacy_id: row?.legacy_id || null
+      legacy_id: row?.legacy_id || null,
+      operator_id: row?.metadata?.operator_id || null,
+      metadata: row?.metadata || {}
     };
   }
   function mapShiftToSupabase(turnoLocal,session,existingRow){
@@ -6714,6 +6869,8 @@ if(config.webappUrl){loadFromSheets();}
       opening_cash: money2(turnoLocal?.fondoCaja),
       metadata:{
         ...(existingRow?.metadata||{}),
+        ...(turnoLocal?.metadata||{}),
+        operator_id: turnoLocal?.operator_id || turnoLocal?.metadata?.operator_id || existingRow?.metadata?.operator_id || null,
         ventasIds:Array.isArray(turnoLocal?.ventasIds)?turnoLocal.ventasIds:[],
         local_turno:true
       }
@@ -6744,6 +6901,8 @@ if(config.webappUrl){loadFromSheets();}
       total_cocina: money2(cierre?.totalCocina),
       metadata:{
         ...(existingRow?.metadata||{}),
+        ...(turnoLocal?.metadata||{}),
+        operator_id: turnoLocal?.operator_id || turnoLocal?.metadata?.operator_id || existingRow?.metadata?.operator_id || null,
         ventasIds:Array.isArray(turnoLocal?.ventasIds)?turnoLocal.ventasIds:[],
         legacy_close:cierre||{},
         local_turno:true
@@ -7140,7 +7299,7 @@ if(config.webappUrl){loadFromSheets();}
           console.error('[abrirTurno preflight Supabase failed]',err);
         }
       }
-      const res=_abrirTurnoShifts.apply(this,args);
+      const res=await _abrirTurnoShifts.apply(this,args);
       if(turno&&turno.abierto&&hasShiftsSupabaseReady()){
         try{
           await saveShiftToSupabase(turno);
@@ -8318,6 +8477,7 @@ if(config.webappUrl){loadFromSheets();}
       notes:null,
       metadata:{
         ticket_id:ref.ticket_id||null,
+        operator_id:ref._operator_id||null,
         fallback_key:group.fallbackKey||null,
         legacy_pago:ref.pago||null,
         ventas_ids:(group.rows||[]).map(r=>r.id),
