@@ -745,7 +745,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
             <span class="cart-title">Pedido</span>
             <span class="cart-total" id="cart-total">$0</span>
           </div>
-          <div class="cart-empty" id="cart-empty">El carrito está vacío</div>
+          <div class="cart-empty" id="cart-empty">Todavía no agregaste productos.</div>
           <div class="cart-rows" id="cart-rows" style="display:none"></div>
           <div class="divider"></div>
           <div class="pago-lbl">Forma de pago</div>
@@ -753,14 +753,12 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
             <div class="pago-opt active" id="popt-ef" onclick="setPago('ef')">Efectivo</div>
             <div class="pago-opt" id="popt-mp" onclick="setPago('mp')">Mercado Pago</div>
             <div class="pago-opt" id="popt-tr" onclick="setPago('transferencia')">Transferencia</div>
-            <div class="pago-opt" id="popt-otro" onclick="setPago('otro')">Otro</div>
             <div class="pago-opt" id="popt-mixed" onclick="setPago('mixed')">Pago mixto</div>
           </div>
           <div class="pago-mixed-box" id="mixed-payments-box">
             <div class="pago-mixed-row"><span>Efectivo</span><input id="mpay-efectivo" type="number" min="0" step="0.01" placeholder="0" oninput="setMixedPaymentValue('efectivo',this.value)"></div>
             <div class="pago-mixed-row"><span>Mercado Pago</span><input id="mpay-mercado_pago" type="number" min="0" step="0.01" placeholder="0" oninput="setMixedPaymentValue('mercado_pago',this.value)"></div>
             <div class="pago-mixed-row"><span>Transferencia</span><input id="mpay-transferencia" type="number" min="0" step="0.01" placeholder="0" oninput="setMixedPaymentValue('transferencia',this.value)"></div>
-            <div class="pago-mixed-row"><span>Otro</span><input id="mpay-otro" type="number" min="0" step="0.01" placeholder="0" oninput="setMixedPaymentValue('otro',this.value)"></div>
             <div class="pago-mixed-status" id="mixed-payments-status"></div>
           </div>
           <button class="btn-confirmar" id="btn-confirm" onclick="cerrarMesaOReserva()">Cerrar y cobrar</button>
@@ -949,7 +947,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
         <button class="btn-sm" style="color:var(--red);border-color:rgba(176,48,48,.3)" onclick="pedirConfirm('¿Limpiar todo el historial local de ventas?',limpiarVentas,'Limpiar','var(--red)','🗑')">🗑 Limpiar ventas e historial</button>
         <!-- Diagnóstico mesas abiertas (solo modo técnico) -->
         <div id="oo-sb-box" style="display:none;margin-top:14px">
-          <div style="font-size:11px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Mesas abiertas · Supabase sync</div>
+          <div style="font-size:11px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Mesas abiertas · Estado de sincronización</div>
           <div id="oo-sb-diag" style="font-size:12px;color:var(--ink2);background:var(--surf2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;line-height:1.7"></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
             <button class="btn-sm ghost" id="btn-actualizar-mesas-tech" onclick="actualizarMesas()">↻ Actualizar mesas</button>
@@ -1178,6 +1176,11 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
       <label class="modal-lbl">Productos reservados</label>
       <div id="res-prod-chips" class="cat-chips" style="margin-bottom:8px"></div>
       <div class="prod-grid" id="res-prod-grid" style="max-height:240px;overflow-y:auto"></div>
+    </div>
+    <!-- Carrito de reserva: ítems seleccionados con controles -->
+    <div id="res-carrito-wrap" style="margin-bottom:12px">
+      <div id="res-carrito-empty" style="display:none;font-size:13px;color:var(--ink3);padding:6px 0">Todavía no agregaste productos a la reserva.</div>
+      <div id="res-carrito-rows"></div>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surf2);border-radius:var(--r-sm);margin-bottom:12px">
       <span style="font-size:13px;color:var(--ink2)">Total</span>
@@ -1987,7 +1990,7 @@ window._addOperadorFromAjustes=async function(){
   const sbResult=await saveOperatorToSupabase(name);
   if(input) input.value='';
   renderOperadoresSection();
-  showToast(sbResult?`✓ Operador "${name}" guardado`:`✓ Operador "${name}" guardado (local)`);
+  showToast(`✓ Operador "${name}" guardado`);
 };
 
 // ══════════════════════════════════════════════════
@@ -2486,10 +2489,9 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
   showToast(ok?'✓ Venta guardada en Sheets':(config.webappUrl?'✓ Registrada (sin internet)':'✓ Venta registrada'));
   try{
     const salesSync=await window.saveSaleRowsToSupabase?.(nuevas);
-    if(salesSync?.ok)showToast('Venta sincronizada con Supabase');
+    if(salesSync?.ok)showToast('✓ Venta guardada');
   }catch(err){
-    const partial=String(err?._sb_sync_status||'').includes('partial')||String(err?.message||'').toLowerCase().includes('partial');
-    showToast(partial?`Venta guardada local, pero Supabase quedó parcial: ${err?.message||String(err)}`:`Venta guardada local, pero Supabase falló: ${err?.message||String(err)}`);
+    showToast('Venta registrada. Se actualizará cuando vuelva la conexión.');
   }
   btn.disabled=false;btn.textContent='Cerrar y cobrar';
   renderVentas();
@@ -2545,6 +2547,10 @@ function changeQty(key,d){
   if(carrito[key].qty<=0)delete carrito[key];
   saveMesaCarrito();renderProdGrid();renderCart();
 }
+function deleteFromCart(key){
+  delete carrito[key];
+  saveMesaCarrito();renderProdGrid();renderCart();
+}
 function renderCart(){
   const items=Object.entries(carrito);
   const ct=$('cart-total'),ce=$('cart-empty'),cr=$('cart-rows'),bc=$('btn-confirm');
@@ -2556,15 +2562,17 @@ function renderCart(){
     const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
     const sub=(item.precio+varsExtra)*item.qty;
     const varsStr=(item.vars||[]).map(v=>v.nombre+(v.precio?` +${fmt(v.precio)}`:'')).join(' · ');
+    const safeKey=key.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     return `<div class="cart-row">
       <div class="c-name-wrap"><div class="c-name">${escapeHtml(p.name)}</div>
         ${varsStr?`<div class="c-mods">${varsStr}</div>`:''}
         ${item.nota?`<div class="c-nota">${item.nota}</div>`:''}
       </div>
       <div class="qty-wrap">
-        <button class="qty-btn" onclick="changeQty(${JSON.stringify(key)},-1)">−</button>
+        <button class="qty-btn" onclick="changeQty('${safeKey}',-1)">−</button>
         <span class="qty-n">${item.qty}</span>
-        <button class="qty-btn" onclick="changeQty(${JSON.stringify(key)},1)">+</button>
+        <button class="qty-btn" onclick="changeQty('${safeKey}',1)">+</button>
+        <button class="qty-btn" onclick="deleteFromCart('${safeKey}')" style="color:var(--red);margin-left:2px" title="Eliminar">×</button>
       </div>
       <span class="c-sub">${fmt(sub)}</span>
     </div>`;
@@ -2660,7 +2668,7 @@ function openReservaModal(id){
     $('res-fecha').value=today();$('res-estado').value='pendiente';$('res-cliente').value='';
     $('reserva-modal-actions').innerHTML=`<button class="btn-cancel" type="button" onclick="cerrarModalReserva()">Cancelar</button><button class="btn-save" type="button" onclick="guardarReserva()">Guardar</button>`;
   }
-  renderReservaProductoGrid();renderReservaProdChips();
+  renderReservaProductoGrid();renderReservaProdChips();renderReservaCarrito();
   $('modal-reserva').classList.add('open');
 }
 
@@ -2682,7 +2690,7 @@ function restoreReservaSnapshot(snap){
   $('res-fecha').value=snap.fecha;
   $('res-estado').value=snap.estado;
   $('res-nota').value=snap.nota;
-  renderReservaProductoGrid();renderReservaProdChips();
+  renderReservaProductoGrid();renderReservaProdChips();renderReservaCarrito();
 }
 
 function openClienteDesdeReserva(){
@@ -2728,6 +2736,48 @@ function addItemReserva(id){
   const key=`${productId}_plain`;
   reservaCarrito[key]?reservaCarrito[key].qty++:(reservaCarrito[key]={prodId:productId,qty:1,vars:[],nota:'',precio:safeProductPrice(p)});
   renderReservaProductoGrid();
+  renderReservaCarrito();
+}
+function changeQtyReserva(key,d){
+  if(!reservaCarrito[key])return;
+  reservaCarrito[key].qty+=d;
+  if(reservaCarrito[key].qty<=0)delete reservaCarrito[key];
+  renderReservaProductoGrid();
+  renderReservaCarrito();
+}
+function removeItemReserva(key){
+  delete reservaCarrito[key];
+  renderReservaProductoGrid();
+  renderReservaCarrito();
+}
+function renderReservaCarrito(){
+  const emptyEl=$('res-carrito-empty');
+  const rowsEl=$('res-carrito-rows');
+  if(!rowsEl)return;
+  const items=Object.entries(reservaCarrito).filter(([,v])=>v.qty>0);
+  if(!items.length){
+    if(emptyEl)emptyEl.style.display='block';
+    rowsEl.innerHTML='';
+    return;
+  }
+  if(emptyEl)emptyEl.style.display='none';
+  rowsEl.innerHTML=items.map(([key,item])=>{
+    const p=findProductById(item.prodId);
+    const name=p?escapeHtml(p.name):escapeHtml(item.prodId);
+    const sub=item.precio*item.qty;
+    const safeKey=key.replace(/'/g,"\\'");
+    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1;font-size:13px;color:var(--ink)">${name}</div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <button class="qty-btn" onclick="changeQtyReserva('${safeKey}',-1)" style="width:28px;height:28px;font-size:16px">−</button>
+        <span style="min-width:20px;text-align:center;font-size:13px;font-weight:500">${item.qty}</span>
+        <button class="qty-btn" onclick="changeQtyReserva('${safeKey}',1)" style="width:28px;height:28px;font-size:16px">+</button>
+      </div>
+      <span style="font-size:13px;color:var(--orange);min-width:52px;text-align:right">${fmt(sub)}</span>
+      <button onclick="removeItemReserva('${safeKey}')" style="background:none;border:none;color:var(--ink3);cursor:pointer;font-size:16px;padding:2px 4px;line-height:1" title="Eliminar">×</button>
+    </div>`;
+  }).join('');
+  $('res-total').textContent=fmt(carritoTotalFn(reservaCarrito));
 }
 function cerrarModalReserva(){$('modal-reserva').classList.remove('open');}
 function closeModalReserva(e){if(e.target===$('modal-reserva'))cerrarModalReserva();}
@@ -2801,7 +2851,7 @@ function renderDashboard(){
       if(showLoading) simpleMsg='Actualizando dashboard…';
       else if((dashboardState?.error||'').toLowerCase().includes('sesión')) simpleMsg='Iniciá sesión para ver el dashboard sincronizado.';
       else if((dashboardState?.error||'').toLowerCase().includes('store')) simpleMsg='Elegí una tienda activa para ver el dashboard.';
-      else if(useSupabase&&txP===0&&!dashboardState?.error) simpleMsg='No hay ventas en Supabase para este rango.';
+      else if(useSupabase&&txP===0&&!dashboardState?.error) simpleMsg='No hay ventas para este período.';
       else if(useFallback) simpleMsg='Mostrando datos disponibles.';
       else if(dashboardSmartRangeMessage) simpleMsg=dashboardSmartRangeMessage;
       dashStatus.style.display=simpleMsg?'block':'none';
@@ -3423,7 +3473,7 @@ if(config.webappUrl){loadFromSheets();}
 </script>
 <script>
 (()=>{
-  let supabaseClient=null,supabaseSession=null,supabaseUser=null,supabaseProfile=null,supabaseStores=[],supabaseAuthSub=null,supabaseAuthSig='',supabaseJustSignedIn=false;
+  let supabaseClient=null,supabaseSession=null,supabaseUser=null,supabaseProfile=null,supabaseStores=[],supabaseAuthSub=null,supabaseAuthSig='',supabaseJustSignedIn=false,supabaseContextLoading=false;
 
   // ── Configuración por defecto (pública — anon key, NUNCA service_role) ──────
   const DEFAULT_SUPABASE_URL='https://xhtpahjsddfkwsytubgu.supabase.co';
@@ -3517,7 +3567,7 @@ if(config.webappUrl){loadFromSheets();}
         <div class="auth-card">
           <div class="auth-title">Acceso</div>
           <div class="auth-subtitle">Ingresá con tu cuenta para operar con ventas, historial, dashboard y turnos sincronizados.</div>
-          <div class="cfg-status" id="sb-auth-status">Sistema sincronizado con Supabase.</div>
+          <div class="cfg-status" id="sb-auth-status">Listo para iniciar sesión.</div>
           <div id="sb-auth-loggedout">
             <input id="sb-auth-name" type="hidden" value="">
             <label>
@@ -3601,7 +3651,7 @@ if(config.webappUrl){loadFromSheets();}
         </details>
         <div class="auth-card" style="margin-top:12px">
           <div class="auth-title">Acceso</div>
-          <div class="cfg-status" id="sb-auth-status-modal">Sistema sincronizado con Supabase.</div>
+          <div class="cfg-status" id="sb-auth-status-modal">Listo para iniciar sesión.</div>
           <div id="sb-auth-loggedout-modal">
             <input id="sb-auth-name-modal" type="hidden" value="">
             <label>
@@ -3617,6 +3667,16 @@ if(config.webappUrl){loadFromSheets();}
             </div>
           </div>
           <div id="sb-auth-loggedin-modal" style="display:none">
+            <div id="sb-context-loading-msg" style="display:none;color:var(--ink2);font-size:13px;padding:8px 0">Preparando tu acceso…</div>
+            <div id="sb-account-info-modal" style="display:none">
+              <div class="auth-user-meta">
+                <strong id="sb-user-name-modal">Usuario autenticado</strong>
+                <span id="sb-user-email-modal"></span>
+              </div>
+              <div class="row" style="margin:6px 0">
+                <span class="auth-store-chip" id="sb-user-store-modal" style="display:none"></span>
+              </div>
+            </div>
             <div id="sb-no-stores-msg-modal" style="display:none;color:var(--red);font-size:13px;padding:8px 0">Tu usuario no tiene una tienda asignada. Contactá al administrador.</div>
             <div id="sb-store-sel-wrap-modal" style="display:none">
               <label>
@@ -3627,6 +3687,9 @@ if(config.webappUrl){loadFromSheets();}
                 <button class="btn alt" onclick="window.onSupabaseStoreConfirm()">Continuar</button>
                 <button class="btn ghost" style="font-size:12px" onclick="supabaseSignOut()">Cerrar sesión</button>
               </div>
+            </div>
+            <div id="sb-signout-modal-wrap" style="display:none;margin-top:10px">
+              <button class="btn danger" style="width:100%" onclick="supabaseSignOut();window.closeSupabaseModal?.()">Cerrar sesión</button>
             </div>
           </div>
         </div>
@@ -3726,9 +3789,11 @@ if(config.webappUrl){loadFromSheets();}
     const txt=document.getElementById('sb-txt');
     if(pill) pill.classList.toggle('on', loggedIn);
     if(dot) dot.classList.toggle('on', loggedIn);
-    if(txt) txt.textContent=loggedIn
-      ? (supabaseProfile?.display_name||supabaseProfile?.full_name||(supabaseUser?.email||'').split('@')[0]||'Sesión activa')
-      : 'Iniciar sesión';
+    if(txt) txt.textContent=supabaseContextLoading
+      ? 'Cargando…'
+      : (loggedIn
+          ? (supabaseProfile?.display_name||supabaseProfile?.full_name||(supabaseUser?.email||'').split('@')[0]||'Sesión activa')
+          : 'Iniciar sesión');
     const meta=document.getElementById('acc-supabase-meta');
     if(meta) meta.textContent=!configured ? 'Sin configurar' : (loggedIn ? 'Sesión iniciada' : 'Listo para login');
 
@@ -3770,11 +3835,20 @@ if(config.webappUrl){loadFromSheets();}
           supabaseStores.map(s=>`<option value="${s.id}"${s.id===currentStoreId?' selected':''}>${s.name}${canTech && s.role?` · ${s.role}`:''}</option>`).join('');
       }
     }
-    // Mostrar/ocultar selector según cantidad de tiendas
-    syncSupabaseDisplay('sb-store-sel-wrap', loggedIn && storeCount>1 ? 'block' : 'none');
-    syncSupabaseDisplay('sb-no-stores-msg', loggedIn && storeCount===0 ? 'block' : 'none');
-    syncSupabaseDisplay('sb-store-sel-wrap-modal', loggedIn && storeCount>1 ? 'block' : 'none');
-    syncSupabaseDisplay('sb-no-stores-msg-modal', loggedIn && storeCount===0 ? 'block' : 'none');
+    // Mostrar/ocultar selector según cantidad de tiendas (nunca mostrar error mientras carga)
+    const contextReady=loggedIn && !supabaseContextLoading;
+    syncSupabaseDisplay('sb-store-sel-wrap', contextReady && storeCount>1 ? 'block' : 'none');
+    syncSupabaseDisplay('sb-no-stores-msg', contextReady && storeCount===0 ? 'block' : 'none');
+    syncSupabaseDisplay('sb-store-sel-wrap-modal', contextReady && storeCount>1 ? 'block' : 'none');
+    syncSupabaseDisplay('sb-no-stores-msg-modal', contextReady && storeCount===0 ? 'block' : 'none');
+    // Indicador de carga en modal
+    const loadingMsgEl=document.getElementById('sb-context-loading-msg');
+    if(loadingMsgEl) loadingMsgEl.style.display=loggedIn && supabaseContextLoading ? 'block' : 'none';
+    // Info de cuenta: visible cuando logueado, contexto listo y tiene tienda
+    const showAccountInfo=contextReady && storeCount>=1;
+    syncSupabaseDisplay('sb-account-info-modal', showAccountInfo ? 'block' : 'none');
+    // Botón cerrar sesión standalone (visible cuando logueado con contexto listo y 0 o 1 tienda)
+    syncSupabaseDisplay('sb-signout-modal-wrap', contextReady && storeCount<=1 ? 'block' : 'none');
     const activeStore=supabaseStores.find(s=>s.id===config.activeStoreId);
     for(const chipId of ['sb-user-store','sb-user-store-modal']){
       const storeChip=document.getElementById(chipId);
@@ -3831,11 +3905,14 @@ if(config.webappUrl){loadFromSheets();}
     supabaseUser=null;
     supabaseProfile=null;
     supabaseStores=[];
+    supabaseContextLoading=false;
     if(render) renderSupabaseStatus();
   }
 
   async function loadSupabaseContext(){
     if(!(supabaseClient && supabaseUser)){ clearSupabaseContext(); return; }
+    supabaseContextLoading=true;
+    renderSupabaseStatus();
     try{
       const [{data:profile,error:profileErr},{data:stores,error:storesErr},{data:memberships,error:membershipsErr}] = await Promise.all([
         supabaseClient.from('profiles').select('id,email,full_name,display_name').eq('id', supabaseUser.id).maybeSingle(),
@@ -3858,6 +3935,7 @@ if(config.webappUrl){loadFromSheets();}
         const _modal=document.getElementById('sb-modal');
         if(_modal && _modal.style.display!=='none'){
           if(supabaseStores.length===1){
+            supabaseContextLoading=false;
             renderSupabaseStatus();
             setTimeout(()=>{ window.closeSupabaseModal?.(); if(window.showToast) showToast('✓ Sesión iniciada'); },80);
             await loadOperatorsFromSupabase();
@@ -3872,6 +3950,7 @@ if(config.webappUrl){loadFromSheets();}
           // 0 stores or >1 store: renderSupabaseStatus will show appropriate UI, modal stays open
         }
       }
+      supabaseContextLoading=false;
       renderSupabaseStatus();
       await loadOperatorsFromSupabase();
       renderOperadoresSection();
@@ -3882,9 +3961,10 @@ if(config.webappUrl){loadFromSheets();}
         }).catch(()=>{});
       },300);
     }catch(err){
+      supabaseContextLoading=false;
       console.error('Supabase context error', err);
       renderSupabaseStatus();
-      setSupabaseStatus(`Sesión iniciada, pero falló la carga del contexto: ${err.message||err}`);
+      setSupabaseStatus('No pudimos cargar los datos de tu cuenta. Reintentá en unos segundos.');
     }
   }
 
@@ -4281,7 +4361,7 @@ if(config.webappUrl){loadFromSheets();}
       if(!silent && typeof window.showToast==='function'){
         const isPermission=msg.toLowerCase().includes('permission')||msg.toLowerCase().includes('rls')||msg.toLowerCase().includes('policy');
         if(isPermission){
-          showToast('Sin acceso a mesas en la nube. Verificá permisos en Supabase.');
+          showToast('No pudimos cargar las mesas. Pedile al administrador que verifique los permisos.');
         } else {
           showToast('Trabajando sin conexión. Los cambios se sincronizarán cuando vuelva la conexión.');
         }
@@ -6462,7 +6542,7 @@ if(config.webappUrl){loadFromSheets();}
       if(customer && hasCrSupabaseReady()){
         try{
           await saveCustomerToSupabase(customer);
-          showToast('Cliente sincronizado con Supabase');
+          showToast('✓ Cliente guardado');
         }catch(err){
           const msg=getSupabaseErrorMessage(err);
           setCrState('error',msg);
@@ -6473,7 +6553,7 @@ if(config.webappUrl){loadFromSheets();}
             details:err?.details||'',
             hint:err?.hint||''
           });
-          showToast(`Cliente guardado local, pero Supabase falló: ${msg}`);
+          showToast('Cliente guardado. Se actualizará cuando vuelva la conexión.');
         }
       }
       return res;
@@ -6503,7 +6583,7 @@ if(config.webappUrl){loadFromSheets();}
       if(reservation && hasCrSupabaseReady()){
         try{
           await saveReservationToSupabase(reservation);
-          showToast('Reserva sincronizada con Supabase');
+          showToast('✓ Reserva guardada');
         }catch(err){
           const msg=getSupabaseErrorMessage(err);
           setCrState('error',msg);
@@ -6514,7 +6594,7 @@ if(config.webappUrl){loadFromSheets();}
             details:err?.details||'',
             hint:err?.hint||''
           });
-          showToast(`Reserva guardada local, pero Supabase falló: ${msg}`);
+          showToast('Reserva guardada. Se actualizará cuando vuelva la conexión.');
         }
       }
       return res;
@@ -7099,7 +7179,7 @@ if(config.webappUrl){loadFromSheets();}
       if(expense && hasExpensesSupabaseReady()){
         try{
           await saveExpenseToSupabase(expense);
-          showToast('Gasto sincronizado con Supabase');
+          showToast('✓ Gasto registrado');
         }catch(err){
           const msg=getExpenseSupabaseErrorMessage(err);
           setExpensesState('error',msg);
@@ -7110,7 +7190,7 @@ if(config.webappUrl){loadFromSheets();}
             details:err?.details||'',
             hint:err?.hint||''
           });
-          showToast(`Gasto guardado local, pero Supabase falló: ${msg}`);
+          showToast('Gasto guardado. Se actualizará cuando vuelva la conexión.');
         }
       }
       return res;
@@ -7648,12 +7728,12 @@ if(config.webappUrl){loadFromSheets();}
       shiftsLastSyncAt=stampShiftsMoment();
       setShiftsState('supabase');
       renderShiftsSupabaseUi();
-      showToast(row?.id?'✓ Turno sincronizado con Supabase':'Turno local sin cambios remotos');
+      showToast('✓ Turno guardado');
       return true;
     }catch(err){
       console.error('[Shift sync failed]',err);
       setShiftsState('error',err?.message||String(err));
-      showToast(`Turno abierto local, pero Supabase falló: ${getShiftSupabaseErrorMessage(err)}`);
+      showToast('Turno abierto. Se actualizará cuando vuelva la conexión.');
       return false;
     }
   };
@@ -7852,7 +7932,7 @@ if(config.webappUrl){loadFromSheets();}
               setShiftsState('supabase');
               cerrarModalTurno();
               refreshShiftUi();
-              showToast('Ya existía un turno abierto en Supabase. Se cargó el turno remoto.');
+              showToast('Ya había un turno abierto. Se cargó el turno anterior.');
               return false;
             }
           }
@@ -7864,12 +7944,12 @@ if(config.webappUrl){loadFromSheets();}
       if(turno&&turno.abierto&&hasShiftsSupabaseReady()){
         try{
           await saveShiftToSupabase(turno);
-          showToast('Turno sincronizado con Supabase');
+          showToast('✓ Turno guardado');
         }catch(err){
           const msg=getShiftSupabaseErrorMessage(err);
           setShiftsState('error',msg);
           console.error('[abrirTurno -> saveShiftToSupabase failed]',{turno:{...turno},message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''});
-          showToast(`Turno abierto local, pero Supabase falló: ${msg}`);
+          showToast('Turno abierto. Se actualizará cuando vuelva la conexión.');
         }
       }
       return res;
@@ -7983,14 +8063,14 @@ if(config.webappUrl){loadFromSheets();}
           await closeShiftInSupabase(turnoSnapshot,cierreResumen);
           shiftCloseSource=cierreSource==='supabase'?'supabase':'local_fallback';
           shiftCloseLastError='';
-          showToast(cierreWarnings.length?(cierreSource==='supabase'?'Turno cerrado con datos Supabase · revisar warnings':'Cierre realizado en modo local/fallback. Revisar warnings'):'Turno cerrado y sincronizado con Supabase');
+          showToast(cierreWarnings.length?'Turno cerrado con advertencias. Revisá el resumen.':'✓ Turno cerrado');
         }catch(err){
           const msg=getShiftSupabaseErrorMessage(err);
           setShiftsState('error',msg);
           shiftCloseSource='local_fallback';
           shiftCloseLastError=msg;
           console.error('[cerrarTurno -> closeShiftInSupabase failed]',{turno:turnoSnapshot,cierre:cierreResumen,message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''});
-          showToast(`Cierre realizado en modo local/fallback. Revisar sincronización. ${msg}`);
+          showToast('Turno cerrado. Revisá la sincronización cuando vuelva la conexión.');
         }
       }else if(cierreWarnings.length){
         showToast(cierreWarnings[0]);
@@ -9230,7 +9310,7 @@ if(config.webappUrl){loadFromSheets();}
     const rows=ventas.filter(v=>(v.ticket_id||getSaleFallbackKey(v))===key);
     try{
       const res=await saveSaleRowsToSupabase(rows);
-      if(res?.ok) showToast('Última venta sincronizada con Supabase');
+      if(res?.ok) showToast('✓ Venta actualizada');
     }catch(err){
       showToast(`No se pudo sincronizar la última venta: ${err?.message||String(err)}`);
     }
