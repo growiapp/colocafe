@@ -2351,7 +2351,7 @@ function renderVentas(){
 async function actualizarMesas(){
   const btn=document.getElementById('btn-actualizar-mesas-tech');
   if(btn){btn.disabled=true;btn.textContent='…';}
-  const r=await window.loadOpenOrdersFromSupabase?.({force:true,silent:false});
+  const r=await window.loadOpenOrdersFromSupabase?.({force:true,silent:false,reason:'manual'});
   renderMesasSection();renderReservasSection();
   if(btn){btn.disabled=false;btn.textContent='↻ Actualizar mesas';}
 }
@@ -2366,16 +2366,17 @@ function setVentasFiltro(t){ventasFiltroTipo=t;renderVentasFiltroChips();renderM
 function renderMesasSection(){
   const c=$('mesas-container'),e=$('mesas-empty');if(!c)return;
   const ooSync=window.getOpenOrdersSyncState?.();
-  if(ooSync?.state==='syncing' && !ooSync?.hasSupabaseRead && !(mesas||[]).length){
+  const loadingTooLong=ooSync?.state==='syncing'&&ooSync?.loadingStartedAt&&(Date.now()-ooSync.loadingStartedAt>11000);
+  if(ooSync?.state==='syncing' && !ooSync?.hasSupabaseRead && !(mesas||[]).length && !loadingTooLong){
     c.innerHTML='<div class="empty">Cargando mesas…</div>';
     if(e)e.style.display='none';
     return;
   }
   const f=ventasFiltroTipo==='todos'?mesas:mesas.filter(m=>m.tipo===ventasFiltroTipo);
   if(!f.length){
-    c.innerHTML='';
+    c.innerHTML=ooSync?.state==='error'||loadingTooLong?'<button class="btn-sm" type="button" onclick="window.triggerOORefresh?.(\'manual\')">Reintentar</button>':'';
     if(e){
-      e.textContent=ooSync?.state==='error'?'No pudimos cargar las mesas. Reintentá en unos segundos.':'No hay mesas abiertas.';
+      e.textContent=ooSync?.state==='error'||loadingTooLong?'No pudimos cargar las mesas. Reintentá.':'No hay mesas abiertas.';
       e.style.display='block';
     }
     return;
@@ -2566,11 +2567,15 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
   const esReserva=mesaActivaId&&mesaActivaId.startsWith('reserva_');
   const items=Object.values(carrito);
   const btn=$('btn-confirm');btn.disabled=true;btn.textContent='Cerrando…';
+  window.__cajaCobroEnCurso=true;
+  window.__cajaCobroEnCursoHasta=Date.now()+30000;
   // ── Anti-double-cobro: verificar que la mesa siga abierta en Supabase ──
   if(!esReserva&&window.checkOpenOrderStillOpen){
     const mesaChk=findMesaByAnyId(mesaActivaId);
     if(!mesaChk){
       btn.disabled=false;btn.textContent='Cerrar y cobrar';
+      window.__cajaCobroEnCurso=false;
+      window.__cajaCobroEnCursoHasta=0;
       showToast('No pudimos cargar esta mesa. Reintentá.');
       return;
     }
@@ -2578,6 +2583,8 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
       const stillOpen=await window.checkOpenOrderStillOpen(mesaChk._sb_id).catch(()=>true);
       if(stillOpen===false){
         btn.disabled=false;btn.textContent='Cerrar y cobrar';
+        window.__cajaCobroEnCurso=false;
+        window.__cajaCobroEnCursoHasta=0;
         showToast('Esta mesa ya fue cerrada desde otro dispositivo.');
         removeMesaByAnyId(mesaActivaId);save();renderVentas();return;
       }
@@ -2585,7 +2592,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
   }
   const totalVenta=money2(carritoTotalFn(carrito));
   const paymentState=getCurrentPaymentState(totalVenta);
-  if(!paymentState.valido){showToast(paymentState.mensaje||'Revisá los pagos');btn.disabled=false;btn.textContent=esReserva?'Cobrar reserva':'Cerrar y cobrar';return;}
+  if(!paymentState.valido){showToast(paymentState.mensaje||'Revisá los pagos');btn.disabled=false;btn.textContent=esReserva?'Cobrar reserva':'Cerrar y cobrar';window.__cajaCobroEnCurso=false;window.__cajaCobroEnCursoHasta=0;return;}
   const momentoVenta=new Date();
   const fecha=getLocalDateString(momentoVenta),hora=getLocalTimeString(momentoVenta),ts=getLocalTimestamp(momentoVenta);
   const turnoActivo=turno&&turno.abierto?turno:null;
@@ -2637,6 +2644,8 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
     showToast('Venta registrada. Se actualizará cuando vuelva la conexión.');
   }
   btn.disabled=false;btn.textContent='Cerrar y cobrar';
+  window.__cajaCobroEnCurso=false;
+  window.__cajaCobroEnCursoHasta=0;
   renderVentas();
 }
 
@@ -4461,12 +4470,16 @@ if(config.webappUrl){loadFromSheets();}
   let ooRealtimeDebounce=null;
   let ooRecentLocalCreateUntil=0;
   let ooLastUserErrorToast=0;
+  let ooRefreshPromise=null;
+  let ooLoadingStartedAt=0;
+  let ooLastRefreshReason='';
 
   // ── Debounce / cooldown ────────────────────────────
   let ooFetching=false;
   let ooLastFetch=0;
   const OO_COOLDOWN=2500;   // mín 2.5s entre lecturas automáticas
   const OO_FORCE_COOLDOWN=800; // mín 0.8s para refresh manual
+  const OO_REFRESH_TIMEOUT=10000;
 
   // ── Helpers ───────────────────────────────────────
   function ooClient(){
@@ -4486,7 +4499,25 @@ if(config.webappUrl){loadFromSheets();}
     try{return(typeof window.getLocalDateString==='function')?`${window.getLocalDateString()} ${window.getLocalTimeString?.()??''}`:new Date().toLocaleString();}
     catch{return new Date().toLocaleString();}
   }
-  function ooSetState(s,err){ooState=s;ooError=err||'';ooUpdateDiag();}
+  function ooTechLog(eventName,data){
+    if(window.canShowClientTechnicalUi?.()) console.log(`[Caja] ${eventName}`,data||{});
+  }
+  function ooSetState(s,err){
+    ooState=s;ooError=err||'';
+    if(s==='syncing')ooLoadingStartedAt=Date.now();
+    else ooLoadingStartedAt=0;
+    ooUpdateDiag();
+  }
+  function ooWithTimeout(promise,label,ms=OO_REFRESH_TIMEOUT){
+    let timer;
+    const timeout=new Promise((_,reject)=>{
+      timer=setTimeout(()=>reject(new Error(`timeout:${label}`)),ms);
+    });
+    return Promise.race([
+      Promise.resolve(promise).finally(()=>clearTimeout(timer)),
+      timeout
+    ]);
+  }
   function ooLocalMesaCount(){return Array.isArray(mesas)?mesas.length:0;}
   function ooToastLoadError(silent,msg){
     if(silent||typeof window.showToast!=='function')return;
@@ -4547,12 +4578,45 @@ if(config.webappUrl){loadFromSheets();}
 
   // ── Load: Supabase → local mesas ──────────────────
   // options: { force=false (fuerza aunque cooldown), silent=true (sin toasts al cliente) }
-  async function loadOpenOrdersFromSupabase({force=false,silent=true}={}){
+  function loadOpenOrdersFromSupabase(options={}){
+    const reason=options.reason||'direct';
+    if(ooRefreshPromise){
+      ooTechLog('refresh skipped concurrent',{reason,activeReason:ooLastRefreshReason});
+      return ooRefreshPromise;
+    }
+    ooLastRefreshReason=reason;
+    ooTechLog('refresh start',{reason});
+    ooRefreshPromise=loadOpenOrdersFromSupabaseInner(options)
+      .then(r=>{
+        if(r?.ok)ooTechLog((r.count||0)>0?'refresh success count=N':'refresh empty',{reason,count:r.count||0});
+        else ooTechLog('refresh error',{reason,result:r});
+        return r;
+      })
+      .catch(err=>{
+        const msg=err?.message||String(err)||'Error desconocido';
+        ooSetState('error',msg);
+        ooToastLoadError(options.silent!==false);
+        ooRenderVisible();
+        ooTechLog('refresh error',{reason,error:msg});
+        return{ok:false,error:err,message:msg};
+      })
+      .finally(()=>{
+        ooFetching=false;
+        if(ooState==='syncing'){
+          ooSetState(ooLocalMesaCount()?'local':'error',ooError||'No pudimos cargar las mesas');
+        }
+        ooRenderVisible();
+        ooTechLog('refresh finally loading=false',{reason});
+        ooRefreshPromise=null;
+        ooLastRefreshReason='';
+      });
+    return ooRefreshPromise;
+  }
+  async function loadOpenOrdersFromSupabaseInner({force=false,silent=true,reason='direct'}={}){
     const now=Date.now();
     const minCooldown=force?OO_FORCE_COOLDOWN:OO_COOLDOWN;
     // Cooldown: evitar spam
     if(ooFetching){
-      ooRenderVisible();
       return{ok:false,reason:'already_fetching'};
     }
     if(!force && now-ooLastFetch<minCooldown){
@@ -4587,20 +4651,20 @@ if(config.webappUrl){loadFromSheets();}
       // SELECT con columnas que existen en cualquier schema estándar de open_orders
       let orders,ordersErr;
       const extendedCols='id,store_id,shift_id,operator_name,operator_id,service_type,table_label,metadata,created_at';
-      ({data:orders,error:ordersErr}=await client
+      ({data:orders,error:ordersErr}=await ooWithTimeout(client
         .from('open_orders')
         .select(extendedCols)
         .eq('store_id',storeId)
-        .eq('status','open'));
+        .eq('status','open'),'open_orders'));
       if(ordersErr)throw ordersErr;
 
       if((!orders||!orders.length)&&Date.now()<ooRecentLocalCreateUntil&&ooLocalMesaCount()){
         await new Promise(r=>setTimeout(r,800));
-        ({data:orders,error:ordersErr}=await client
+        ({data:orders,error:ordersErr}=await ooWithTimeout(client
           .from('open_orders')
           .select(extendedCols)
           .eq('store_id',storeId)
-          .eq('status','open'));
+          .eq('status','open'),'open_orders_retry'));
         if(ordersErr)throw ordersErr;
       }
 
@@ -4616,17 +4680,17 @@ if(config.webappUrl){loadFromSheets();}
         // Supabase dice 0 mesas abiertas sin creación reciente → limpiar local
         mesas=[];
         if(typeof window.save==='function')window.save();
-        ooHasSupabaseRead=true;ooState='supabase';ooError='';ooLastRead=ooStamp();ooCount=0;ooItemCount=0;ooUpdateDiag();
+        ooHasSupabaseRead=true;ooSetState('supabase','');ooLastRead=ooStamp();ooCount=0;ooItemCount=0;ooUpdateDiag();
         ooRenderVisible();
         return{ok:true,count:0};
       }
 
       const orderIds=orders.map(o=>o.id);
-      const{data:items,error:itemsErr}=await client
+      const{data:items,error:itemsErr}=await ooWithTimeout(client
         .from('open_order_items')
         .select('id,open_order_id,product_id,product_legacy_id,product_name,quantity,unit_price,variants,note,sort_order,metadata')
         .eq('store_id',storeId)
-        .in('open_order_id',orderIds);
+        .in('open_order_id',orderIds),'open_order_items');
       if(itemsErr)throw itemsErr;
 
       // Agrupar items por pedido
@@ -4680,7 +4744,7 @@ if(config.webappUrl){loadFromSheets();}
 
       mesas=newMesas;
       if(typeof window.save==='function')window.save();
-      ooHasSupabaseRead=true;ooState='supabase';ooError='';ooLastRead=ooStamp();ooCount=orders.length;ooItemCount=(items||[]).length;ooUpdateDiag();
+      ooHasSupabaseRead=true;ooSetState('supabase','');ooLastRead=ooStamp();ooCount=orders.length;ooItemCount=(items||[]).length;ooUpdateDiag();
       ooRenderVisible();
       return{ok:true,count:orders.length};
     }catch(err){
@@ -4715,30 +4779,30 @@ if(config.webappUrl){loadFromSheets();}
     if(!client||!storeId||!sid)return null;
     try{
       const orderSelect='id,store_id,shift_id,operator_name,operator_id,service_type,table_label,metadata,created_at,status';
-      let {data:order,error}=await client
+      let {data:order,error}=await ooWithTimeout(client
         .from('open_orders')
         .select(orderSelect)
         .eq('store_id',storeId)
         .eq('id',sid)
-        .maybeSingle();
+        .maybeSingle(),'single_open_order');
       if(error)throw error;
       if(!order){
-        const byLegacy=await client
+        const byLegacy=await ooWithTimeout(client
           .from('open_orders')
           .select(orderSelect)
           .eq('store_id',storeId)
           .eq('status','open')
           .contains('metadata',{legacy_local_id:sid})
-          .maybeSingle();
+          .maybeSingle(),'single_open_order_legacy');
         if(byLegacy.error)throw byLegacy.error;
         order=byLegacy.data||null;
       }
       if(!order||order.status!=='open')return null;
-      const {data:items,error:itemsErr}=await client
+      const {data:items,error:itemsErr}=await ooWithTimeout(client
         .from('open_order_items')
         .select('id,open_order_id,product_id,product_legacy_id,product_name,quantity,unit_price,variants,note,sort_order,metadata')
         .eq('store_id',storeId)
-        .eq('open_order_id',order.id);
+        .eq('open_order_id',order.id),'single_open_order_items');
       if(itemsErr)throw itemsErr;
       const itemMap={};
       (items||[]).forEach(item=>{
@@ -4757,7 +4821,7 @@ if(config.webappUrl){loadFromSheets();}
       const idx=(mesas||[]).findIndex(m=>[m.id,m._sb_id,m.open_order_id,m.legacy_local_id].some(v=>String(v||'')===sid||String(v||'')===String(order.id)));
       if(idx>=0)mesas[idx]=mesa;else mesas.push(mesa);
       if(typeof window.save==='function')window.save();
-      ooState='supabase';ooError='';ooLastRead=ooStamp();ooUpdateDiag();
+      ooSetState('supabase','');ooLastRead=ooStamp();ooUpdateDiag();
       return mesa;
     }catch(err){
       ooSetState('error',err?.message||String(err));
@@ -4938,6 +5002,7 @@ if(config.webappUrl){loadFromSheets();}
       +`<div><strong>Store ID:</strong> ${ooStoreId()||'❌ no detectado'}</div>`
       +`<div><strong>Mesa activa:</strong> ${window.__cajaLastNavEvent?.selectedOpenOrderId||mesaActivaId||'—'}</div>`
       +`<div><strong>Última navegación Caja:</strong> ${window.__cajaLastNavEvent?.event||'—'}${window.__cajaLastNavEvent?.at?' · '+window.__cajaLastNavEvent.at:''}</div>`
+      +`<div><strong>Refresh mesas:</strong> ${ooRefreshPromise?'en curso':'idle'}${ooLastRefreshReason?' · '+ooLastRefreshReason:''}</div>`
       +`<div><strong>Realtime:</strong> ${ooRealtimeActive?'✅ activo':'❌ inactivo'}</div>`
       +`<div><strong>open_orders:</strong> ${ooCount} &nbsp;|&nbsp; <strong>items:</strong> ${ooItemCount}</div>`
       +(ooLastRead?`<div><strong>Última lectura:</strong> ${ooLastRead}</div>`:'')
@@ -4949,9 +5014,14 @@ if(config.webappUrl){loadFromSheets();}
   // ctx: contexto de llamada ('tab'|'focus'|'interval'|'post_action') — solo para debug
   async function triggerOORefresh(ctx){
     startOORealtime();
-    const force=['post_action','realtime','focus','tab','online'].includes(ctx);
+    if(window.__cajaCobroEnCurso&&Date.now()>(window.__cajaCobroEnCursoHasta||0))window.__cajaCobroEnCurso=false;
+    if(window.__cajaCobroEnCurso&&ctx!=='manual'){
+      ooTechLog('refresh skipped payment_processing',{reason:ctx});
+      return{ok:false,reason:'payment_processing'};
+    }
+    const force=['post_action','realtime','focus','tab','online','manual'].includes(ctx);
     const silent=!['post_action','manual'].includes(ctx);
-    const r=await loadOpenOrdersFromSupabase({force,silent});
+    const r=await loadOpenOrdersFromSupabase({force,silent,reason:ctx||'direct'});
     ooRenderVisible();
     if(ooActiveTab()==='carga'&&!ooDetailVisible()&&typeof window.reloadCustomersReservationsFromSupabase==='function'){
       window.reloadCustomersReservationsFromSupabase(true).then(()=>renderReservasSection()).catch(()=>{});
@@ -5037,6 +5107,9 @@ if(config.webappUrl){loadFromSheets();}
       sessionActive:!!ooClient()?.auth,
       realtimeActive:ooRealtimeActive,
       hasSupabaseRead:ooHasSupabaseRead,
+      loadingStartedAt:ooLoadingStartedAt,
+      refreshRunning:!!ooRefreshPromise,
+      lastRefreshReason:ooLastRefreshReason,
       ready:ooReady()
     };
   };
@@ -6519,7 +6592,7 @@ if(config.webappUrl){loadFromSheets();}
   }
   function refreshCrUi(){
     try{renderClientesTab();}catch(_){}
-    try{isMesaDetalleVisible()?renderReservasSection():renderVentas();}catch(_){}
+    try{activeTab==='carga'?renderReservasSection():renderVentas();}catch(_){}
     try{popularClienteSelectReserva();}catch(_){}
     try{renderAjustes();}catch(_){}
   }
@@ -6585,7 +6658,7 @@ if(config.webappUrl){loadFromSheets();}
       crWarnings=[];
       reservas=[...reservationRows].map(r=>mapReservationFromSupabase(r,customerRows)).sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')));
       save();
-      if(isMesaDetalleVisible()) renderReservasSection();
+      if(activeTab==='carga') renderReservasSection();
       else renderVentas();
       renderCrSupabaseUi();
       return true;
