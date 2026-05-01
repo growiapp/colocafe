@@ -2450,7 +2450,11 @@ async function confirmarNuevaMesa(){
   m._syncing=!synced;
   save();
   if(synced===false && window.getOpenOrdersSyncState?.()?.ready){
-    showToast('No pudimos cargar las mesas. Reintentá en unos segundos.');
+    removeMesaByAnyId(m.id);
+    save();
+    renderMesasSection();
+    showToast('No pudimos crear la mesa. Reintentá.');
+    return;
   }
   // Post-creación: forzar refresh rápido para sincronizar con otros dispositivos
   setTimeout(()=>window.triggerOORefresh?.('post_action'),700);
@@ -4760,7 +4764,7 @@ if(config.webappUrl){loadFromSheets();}
     try{
       // SELECT con columnas que existen en cualquier schema estándar de open_orders
       let orders,ordersErr;
-      const extendedCols='id,store_id,shift_id,operator_name,operator_id,service_type,table_label,metadata,created_at';
+      const extendedCols='id,store_id,shift_id,operator_name,operator_id,service_type,label,table_label,metadata,created_at';
       ooRememberOperation('open_orders','select',`select ${extendedCols} where store_id=${storeId} and status=open`);
       ({data:orders,error:ordersErr}=await ooWithTimeout(client
         .from('open_orders')
@@ -4835,7 +4839,7 @@ if(config.webappUrl){loadFromSheets();}
           status:'open',
           store_id:o.store_id||storeId,
           shift_id:o.shift_id||null,
-          nombre:o.table_label||meta.table_label||'Mesa',
+          nombre:o.table_label||o.label||meta.table_label||meta.label||'Mesa',
           tipo:o.service_type||meta.service_type||'salon',
           items:byOrder[o.id]||{},
           pago:meta.pago||'ef',
@@ -4892,7 +4896,7 @@ if(config.webappUrl){loadFromSheets();}
     const client=ooClient(),storeId=ooStoreId(),sid=String(id||'');
     if(!client||!storeId||!sid)return null;
     try{
-      const orderSelect='id,store_id,shift_id,operator_name,operator_id,service_type,table_label,metadata,created_at,status';
+      const orderSelect='id,store_id,shift_id,operator_name,operator_id,service_type,label,table_label,metadata,created_at,status';
       ooRememberOperation('open_orders','select_single',`select ${orderSelect} where store_id=${storeId} and id=${sid}`);
       let {data:order,error}=await ooWithTimeout(client
         .from('open_orders')
@@ -4931,7 +4935,7 @@ if(config.webappUrl){loadFromSheets();}
       const mesa={
         id:order.id,_sb_id:order.id,open_order_id:order.id,legacy_local_id:meta.legacy_local_id||'',
         status:'open',store_id:order.store_id||storeId,shift_id:order.shift_id||null,
-        nombre:order.table_label||meta.table_label||'Mesa',tipo:order.service_type||meta.service_type||'salon',
+        nombre:order.table_label||order.label||meta.table_label||meta.label||'Mesa',tipo:order.service_type||meta.service_type||'salon',
         items:itemMap,pago:meta.pago||'ef',payment_mode:meta.payment_mode||'single',pagos:meta.pagos||[],
         apertura:meta.apertura||order.created_at||'',operator_name:order.operator_name||meta.operator_name||''
       };
@@ -4957,36 +4961,76 @@ if(config.webappUrl){loadFromSheets();}
     const client=ooClient(),storeId=ooStoreId();
     if(!client||!storeId)return null;
     const turnoActivo=window.turno&&window.turno.abierto?window.turno:null;
+    const mesaLabel=String(mesa.nombre||mesa.label||mesa.table_label||'Mesa').trim()||'Mesa';
+    const payload={
+      store_id:storeId,
+      status:'open',
+      service_type:mesa.tipo||'salon',
+      label:mesaLabel,
+      table_label:mesaLabel,
+      shift_id:turnoActivo?._sb_id||null,
+      operator_name:turnoActivo?.operador||null,
+      operator_id:turnoActivo?.operator_id||turnoActivo?.metadata?.operator_id||null,
+      // Campos de app en metadata (compatibilidad de schema)
+      metadata:{
+        pago:mesa.pago||'ef',
+        payment_mode:mesa.payment_mode||'single',
+        pagos:mesa.pagos||[],
+        apertura:mesa.apertura||new Date().toISOString(),
+        legacy_local_id:mesa.legacy_local_id||mesa.id,
+        label:mesaLabel,
+        table_label:mesaLabel,
+        service_type:mesa.tipo||'salon',
+        operator_name:turnoActivo?.operador||null
+      }
+    };
     try{
+      ooRememberOperation('open_orders','insert','insert open_order with label/table_label');
       const{data,error}=await client
         .from('open_orders')
-        .insert({
-          store_id:storeId,
-          status:'open',
-          service_type:mesa.tipo||'salon',
-          table_label:mesa.nombre||'Mesa',
-          shift_id:turnoActivo?._sb_id||null,
-          operator_name:turnoActivo?.operador||null,
-          operator_id:turnoActivo?.operator_id||turnoActivo?.metadata?.operator_id||null,
-          // Campos de app en metadata (compatibilidad de schema)
-          metadata:{
-            pago:mesa.pago||'ef',
-            payment_mode:mesa.payment_mode||'single',
-            pagos:mesa.pagos||[],
-            apertura:mesa.apertura||new Date().toISOString(),
-            legacy_local_id:mesa.legacy_local_id||mesa.id,
-            table_label:mesa.nombre||'Mesa',
-            service_type:mesa.tipo||'salon',
-            operator_name:turnoActivo?.operador||null
-          }
-        })
+        .insert(payload)
         .select('id')
         .single();
       if(error)throw error;
       return data?.id||null;
     }catch(err){
-      console.warn('[open_orders] create failed:',err);
+      mesa._lastSyncError=err?.message||String(err)||'Error desconocido';
+      ooRememberError(err,{table:'open_orders',operation:'insert',query:'insert open_order with label/table_label',store_id:storeId});
+      console.warn('[open_orders] create failed:',{
+        code:err?.code||'',
+        message:err?.message||String(err)||'',
+        details:err?.details||'',
+        hint:err?.hint||'',
+        payload
+      });
       return null;
+    }
+  }
+
+  async function updateOpenOrderHeaderInSupabase(mesa,storeId){
+    const client=ooClient();
+    if(!client||!storeId||!mesa?._sb_id)return false;
+    const mesaLabel=String(mesa.nombre||mesa.label||mesa.table_label||'Mesa').trim()||'Mesa';
+    const metadata={...(mesa.metadata||{}),label:mesaLabel,table_label:mesaLabel,legacy_local_id:mesa.legacy_local_id||mesa.id};
+    try{
+      ooRememberOperation('open_orders','update','update open_order label/table_label');
+      const {error}=await client
+        .from('open_orders')
+        .update({label:mesaLabel,table_label:mesaLabel,metadata})
+        .eq('id',mesa._sb_id)
+        .eq('store_id',storeId);
+      if(error)throw error;
+      return true;
+    }catch(err){
+      ooRememberError(err,{table:'open_orders',operation:'update',query:'update open_order label/table_label',store_id:storeId});
+      console.warn('[open_orders] update label failed:',{
+        code:err?.code||'',
+        message:err?.message||String(err)||'',
+        details:err?.details||'',
+        hint:err?.hint||'',
+        payload:{label:mesaLabel,table_label:mesaLabel,metadata}
+      });
+      return false;
     }
   }
 
@@ -5060,6 +5104,7 @@ if(config.webappUrl){loadFromSheets();}
       }
     }
     if(!mesa._sb_id)return false;
+    await updateOpenOrderHeaderInSupabase(mesa,storeId);
     const ok=await syncOpenOrderItems(mesa._sb_id,mesa.items||{},storeId);
     mesa._syncing=!ok;
     const idx=(mesas||[]).findIndex(m=>[m.id,m._sb_id,m.open_order_id,m.legacy_local_id].some(v=>String(v||'')===String(mesa.id)||String(v||'')===String(mesa._sb_id)||String(v||'')===String(previousId)));
