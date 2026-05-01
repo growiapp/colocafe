@@ -3280,7 +3280,8 @@ function openProdModal(id){
     $('m-stock').value=p.stock||0;$('m-ilimitado').checked=!!p.ilimitado;
     $('m-stock-wrap').style.display=p.ilimitado?'none':'block';
     _variantesEdit=JSON.parse(JSON.stringify(p.variantes||[]));
-    $('prod-modal-actions').innerHTML=`<button class="btn-cancel" type="button" onclick="pedirEliminarProducto(${id})">Eliminar</button><button class="btn-save" type="button" onclick="guardarProducto()">Guardar</button>`;
+    const safeId=String(id).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    $('prod-modal-actions').innerHTML=`<button class="btn-cancel" type="button" onclick="pedirEliminarProducto('${safeId}')">Eliminar</button><button class="btn-save" type="button" onclick="guardarProducto()">Guardar</button>`;
   }else{
     $('prod-modal-title').textContent='Nuevo producto';
     ['m-nombre','m-precio','m-stock'].forEach(fid=>$(fid).value='');
@@ -3293,16 +3294,33 @@ function openProdModal(id){
 function pedirEliminarProducto(id){const p=menu.find(x=>sameId(x.id,id));closeProdModal();pedirConfirm(`¿Eliminar "${p?.name||''}"?`,()=>{menu=menu.filter(x=>!sameId(x.id,id));save();renderMenuAdm();renderProdGrid();syncMenuSheets();showToast('✓ Producto eliminado');});}
 function closeProdModal(){$('modal-prod').classList.remove('open');}
 function closeProdModalOutside(e){if(e.target===$('modal-prod'))closeProdModal();}
-function guardarProducto(){
+async function guardarProducto(){
   const name=($('m-nombre')?.value||'').trim(),price=parseInt($('m-precio')?.value),cat=$('m-cat')?.value;
   if(!name||!price){showToast('Completá nombre y precio');return;}
   const ilimitado=!!$('m-ilimitado')?.checked;
   // No resetear stock a 0 al marcar ilimitado — conservar el valor para cuando se desactive
   const stock=Math.max(0,parseInt($('m-stock')?.value)||0);
-  if(editId){Object.assign(menu.find(x=>sameId(x.id,editId)),{name,price,cat,stock,ilimitado,variantes:_variantesEdit});}
-  else{menu.push({id:menu.reduce((m,p)=>Math.max(m,p.id),0)+1,name,price,cat,stock,ilimitado,variantes:_variantesEdit});}
-  save();renderMenuAdm();renderProdGrid();renderCargaCats();syncMenuSheets();closeProdModal();showToast(editId?'✓ Actualizado':'✓ Agregado');
+  const existing=editId?menu.find(x=>sameId(x.id,editId)):null;
+  const product={...(existing||{}),id:existing?.id||`prod_${Date.now()}`,name,price,cat,stock,ilimitado,variantes:_variantesEdit,active:true};
+  const btn=$('prod-modal-actions')?.querySelector('.btn-save');
+  if(btn){btn.disabled=true;btn.textContent='Guardando…';}
+  try{
+    await window.saveProductToSupabase(product,{categoryRows:cats});
+    if(existing) Object.assign(existing,product);
+    else menu.push(product);
+    localStorage.setItem('menu',JSON.stringify(menu));
+    localStorage.setItem(APP_DATA_VERSION_KEY,APP_DATA_VERSION);
+    closeProdModal();
+    await window.loadCatalogFromSupabase?.({silent:true});
+    renderMenuAdm();renderProdGrid();renderCargaCats();renderStockAlerts();syncMenuSheets();
+    showToast('Datos actualizados.');
+  }catch(err){
+    window.handleCatalogWriteError?.(err,'producto');
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='Guardar';}
+  }
 }
+guardarProducto.__remoteFirst=true;
 function toggleVariantesModal(){const arr=$('variantes-arr'),body=$('variantes-body');const open=body.classList.toggle('open');arr.classList.toggle('open',open);}
 function updateVariantesBadge(){const el=$('variantes-count-badge');if(el)el.textContent=_variantesEdit.length?`(${_variantesEdit.length} grupos)`:''}
 function renderVariantesModalBody(){
@@ -3373,29 +3391,40 @@ function togglePrIlimitado(){
 function cerrarModalProdRapido(){$('modal-prod-rapido').classList.remove('open');}
 function closeModalProdRapido(e){if(e.target===$('modal-prod-rapido'))cerrarModalProdRapido();}
 
-function guardarProdRapido(){
+async function guardarProdRapido(){
   const name=($('pr-nombre')?.value||'').trim();
   const price=parseInt($('pr-precio')?.value)||0;
   const cat=$('pr-cat')?.value;
   const ilimitado=!!$('pr-ilimitado')?.checked;
   const stock=ilimitado?0:parseInt($('pr-stock')?.value)||10;
   if(!name||!price){showToast('Completá nombre y precio');return;}
-  const newId=menu.reduce((m,p)=>Math.max(m,p.id),0)+1;
+  const newId='prod_'+Date.now();
   const newProd={id:newId,name,price,cat,stock,ilimitado,variantes:[]};
-  menu.push(newProd);
-  save();syncMenuSheets();
-  if(_prodRapidoContexto==='pedido'){
-    const key=`${newId}_plain`;
-    carrito[key]={prodId:newId,qty:1,vars:[],nota:'',precio:price};
-    saveMesaCarrito();renderProdGrid();renderCart();
-    cerrarModalProdRapido();
-    showToast(`✓ "${name}" creado y agregado al pedido`);
-  } else {
+  const btn=$('modal-prod-rapido')?.querySelector('.btn-save');
+  if(btn){btn.disabled=true;btn.textContent='Guardando…';}
+  try{
+    await window.saveProductToSupabase(newProd,{categoryRows:cats});
+    menu.push(newProd);
+    localStorage.setItem('menu',JSON.stringify(menu));
+    localStorage.setItem(APP_DATA_VERSION_KEY,APP_DATA_VERSION);
+    await window.loadCatalogFromSupabase?.({silent:true});
     cerrarModalProdRapido();
     renderMenuAdm();renderCargaCats();renderProdGrid();
-    showToast(`✓ "${name}" creado`);
+    syncMenuSheets();
+    if(_prodRapidoContexto==='pedido'){
+      const synced=findProductById(newProd._sb_id||newProd.legacy_id||newProd.id)||newProd;
+      const key=`${getProductFrontId(synced)}_plain`;
+      carrito[key]={prodId:getProductFrontId(synced),qty:1,vars:[],nota:'',precio:price};
+      saveMesaCarrito();renderProdGrid();renderCart();
+    }
+    showToast('Datos actualizados.');
+  }catch(err){
+    window.handleCatalogWriteError?.(err,'producto');
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=_prodRapidoContexto==='ajustes'?'Guardar':'Crear y agregar';}
   }
 }
+guardarProdRapido.__remoteFirst=true;
 
 // Cuando el + de Categoría se presiona dentro del modal de producto
 function abrirNuevaCatDesdeProducto(contexto){
@@ -3470,7 +3499,7 @@ function cerrarModalNuevaCat(){
 }
 function closeModalNuevaCat(e){ if(e.target===$('modal-nueva-cat')) cerrarModalNuevaCat(); }
 
-function guardarNuevaCat(){
+async function guardarNuevaCat(){
   const nombre = ($('nueva-cat-nombre').value||'').trim();
   if(!nombre){ showToast('Ingresá un nombre para la categoría'); return; }
   const id = 'cat_'+Date.now();
@@ -3480,12 +3509,22 @@ function guardarNuevaCat(){
     seccion: $('nueva-cat-seccion').value,
     reservable: $('nueva-cat-reservable').checked
   };
+  const btn=$('modal-nueva-cat')?.querySelector('.btn-save');
+  if(btn){btn.disabled=true;btn.textContent='Guardando…';}
+  try{
+    await window.saveCategoryToSupabase(nuevaCat,{categoryRows:cats});
+  }catch(err){
+    window.handleCatalogWriteError?.(err,'categoría');
+    if(btn){btn.disabled=false;btn.textContent='Crear categoría';}
+    return;
+  }
   cats.push(nuevaCat);
-  save();
+  localStorage.setItem('cats',JSON.stringify(cats));
+  localStorage.setItem(APP_DATA_VERSION_KEY,APP_DATA_VERSION);
   cerrarModalNuevaCat();
   renderCatMgr();
   renderCargaCats();
-  showToast(`✓ Categoría "${nombre}" creada`);
+  showToast('Datos actualizados.');
 
   // Retornar al contexto original
   if(_nuevaCatRetorno === 'producto' || _nuevaCatRetorno === 'ajustes-prod-modal' || _nuevaCatRetorno === 'prod-modal'){
@@ -3515,7 +3554,9 @@ function guardarNuevaCat(){
   } else {
     // 'ajustes' — just stay on cat list (already rendered)
   }
+  if(btn){btn.disabled=false;btn.textContent='Crear categoría';}
 }
+guardarNuevaCat.__remoteFirst=true;
 
 
 // ── Editar categoría desde lista ──────────────────
@@ -3537,19 +3578,28 @@ function openCatModal(i){
   setTimeout(()=>$('nueva-cat-nombre').focus(),120);
 }
 
-function guardarEditCat(i){
+async function guardarEditCat(i){
   const nombre=($('nueva-cat-nombre').value||'').trim();
   if(!nombre){showToast('Ingresá un nombre');return;}
-  cats[i].name=nombre;
-  cats[i].color=_nuevaCatColorSel;
-  cats[i].seccion=$('nueva-cat-seccion').value;
-  cats[i].reservable=$('nueva-cat-reservable').checked;
-  save();cerrarModalNuevaCat();renderCatMgr();renderCargaCats();
+  const next={...cats[i],name:nombre,color:_nuevaCatColorSel,seccion:$('nueva-cat-seccion').value,reservable:$('nueva-cat-reservable').checked};
+  const btn=$('modal-nueva-cat')?.querySelector('.btn-save');
+  if(btn){btn.disabled=true;btn.textContent='Guardando…';}
+  try{
+    await window.saveCategoryToSupabase(next,{categoryRows:cats});
+    Object.assign(cats[i],next);
+    localStorage.setItem('cats',JSON.stringify(cats));
+    localStorage.setItem(APP_DATA_VERSION_KEY,APP_DATA_VERSION);
+    cerrarModalNuevaCat();renderCatMgr();renderCargaCats();
+    await window.loadCatalogFromSupabase?.({silent:true});
+  }catch(err){
+    window.handleCatalogWriteError?.(err,'categoría');
+  }
   // Restore save button for nueva-cat
   const actionsEl=$('modal-nueva-cat').querySelector('.modal-actions');
   if(actionsEl) actionsEl.innerHTML=`<button class="btn-cancel" type="button" onclick="cerrarModalNuevaCat()">Cancelar</button><button class="btn-save" type="button" onclick="guardarNuevaCat()">Crear categoría</button>`;
-  showToast('✓ Categoría actualizada');
+  if(btn){btn.disabled=false;btn.textContent='Guardar';}
 }
+guardarEditCat.__remoteFirst=true;
 
 // ── Eliminar producto desde lista (sin abrir modal) ──
 function pedirEliminarProductoInline(id){
@@ -5136,6 +5186,46 @@ if(config.webappUrl){loadFromSheets();}
     catalogSbClient=window.__coloSupabaseClient||null;
     return catalogSbClient;
   }
+  function catalogCanTechLog(){return window.canShowClientTechnicalUi?.()||false;}
+  function isCatalogPermissionError(err){
+    const raw=`${err?.message||''} ${err?.details||''} ${err?.hint||''} ${err?.code||''}`.toLowerCase();
+    return err?.code==='42501'||raw.includes('row-level security')||raw.includes('permission denied')||raw.includes('policy')||raw.includes('rls')||err?.code==='CATALOG_PERMISSION';
+  }
+  function showCatalogPermissionMessage(){
+    showToast('No tenés permisos para editar el menú. Pedile a un administrador que revise tu acceso.',4200);
+  }
+  window.handleCatalogWriteError=function(err,kind='producto'){
+    setCatalogLoadState('error',err?.message||String(err));
+    if(catalogCanTechLog()) console.error('[Catalog write UI error]',{kind,error:err});
+    if(isCatalogPermissionError(err)){
+      showCatalogPermissionMessage();
+    }else{
+      const label=kind==='categoría'?'la categoría':kind==='catálogo'?'el catálogo':'el producto';
+      showToast(`No pudimos guardar ${label}. Revisá conexión/permisos.`,4200);
+    }
+  };
+  async function getCatalogWriteContext(){
+    if(!hasCatalogSupabaseReady()) throw new Error('No hay conexión activa para guardar el menú');
+    const client=getCatalogSupabaseClient();
+    const storeId=getCatalogStoreId();
+    if(!client) throw new Error('Cliente Supabase no disponible');
+    if(!storeId || !isValidUuid(storeId)) throw new Error('Store activa inválida para guardar menú');
+    const session=await getCatalogSession(client);
+    if(!session) throw new Error('No hay sesión activa en Supabase');
+    let role=String(window.getActiveStoreRole?.()||catalogCurrentRole||'').toLowerCase();
+    if(!role){
+      const {data,error}=await client.from('store_users').select('role').eq('store_id',storeId).eq('user_id',session.user.id).maybeSingle();
+      if(error) throw error;
+      role=String(data?.role||'').toLowerCase();
+      catalogCurrentRole=role;
+    }
+    if(!['owner','admin'].includes(role)){
+      const err=new Error('No tenés permisos para editar el menú');
+      err.code='CATALOG_PERMISSION';
+      throw err;
+    }
+    return{client,storeId,session,role};
+  }
   function setCatalogLoadState(state,error=''){
     catalogLoadState=state;
     catalogLoadError=error||'';
@@ -5251,21 +5341,26 @@ if(config.webappUrl){loadFromSheets();}
   }
   function mapProductToSupabase(product,storeId,existingRow,ctx={}){
     const categorySbId=resolveCategorySupabaseId(product.cat,ctx.categoryRows||cats);
-    if(!categorySbId && getFirstAvailableCategorySupabaseId(ctx.categoryRows||cats)){
-      const warning=`Guardado producto "${product?.name||product?.id}" sin category_id resoluble; usando fallback`;
-      if(!catalogWarnings.includes(warning)) catalogWarnings.push(warning);
-      console.warn('[Catalog Supabase mapping warning]', warning, {product,categoryRows:ctx.categoryRows||cats});
+    if(!categorySbId){
+      const err=new Error(`No se pudo resolver la categoría del producto "${product?.name||product?.id||''}"`);
+      err.code='CATALOG_CATEGORY_UNRESOLVED';
+      throw err;
     }
     const payload={
       store_id: storeId,
-      category_id: categorySbId || getFirstAvailableCategorySupabaseId(ctx.categoryRows||cats) || null,
+      category_id: categorySbId,
       name: product.name || 'Sin nombre',
       price: Number(product.price)||0,
       stock: Number(product.stock)||0,
       unlimited: !!product.ilimitado,
       active: product.active!==false,
       variants: Array.isArray(product.variantes) ? product.variantes : [],
-      legacy_id: product.legacy_id || (!isValidUuid(String(product.id||'')) ? String(product.id) : null)
+      legacy_id: product.legacy_id || (!isValidUuid(String(product.id||'')) ? String(product.id) : null),
+      metadata:{
+        source:'colocafe_app',
+        app_version:APP_VERSION,
+        legacy_front_id:String(product.id||'')
+      }
     };
     const sbId=existingRow?.id || product._sb_id || (isValidUuid(String(product.id||''))?String(product.id):'');
     if(sbId) payload.id=sbId;
@@ -5275,7 +5370,10 @@ if(config.webappUrl){loadFromSheets();}
     const rows=Array.isArray(categoryRows)?categoryRows:[];
     const ref=String(catRef||'');
     const found=rows.find(r=>String(r.id||'')===ref || String(r._sb_id||'')===ref || String(r.legacy_id||'')===ref || String((r.id&&isValidUuid(String(r.id)))?r.id:'')===ref);
-    return found? (found._sb_id||found.id) : null;
+    if(!found) return null;
+    if(found._sb_id && isValidUuid(String(found._sb_id))) return found._sb_id;
+    if(found.id && isValidUuid(String(found.id))) return found.id;
+    return null;
   }
   function getFirstAvailableCategorySupabaseId(categoryRows){
     const rows=Array.isArray(categoryRows)?categoryRows:[];
@@ -5283,6 +5381,7 @@ if(config.webappUrl){loadFromSheets();}
     return first?(first._sb_id||first.id):null;
   }
   function logCatalogSupabaseWriteError(kind,meta,err){
+    if(!catalogCanTechLog()) return;
     console.error(`[Catalog Supabase write failed] ${kind}`,{
       operation: meta.operation,
       payload: meta.payload,
@@ -5483,21 +5582,20 @@ if(config.webappUrl){loadFromSheets();}
     return null;
   }
   window.saveCategoryToSupabase=async function(cat,opts={}){
-    if(!hasCatalogSupabaseReady()||!cat) return null;
-    const client=getCatalogSupabaseClient();
-    const storeId=getCatalogStoreId();
-    const session=await getCatalogSession(client);
-    if(!session) throw new Error('No hay sesión activa en Supabase');
+    if(!cat) return null;
+    const {client,storeId,role}=await getCatalogWriteContext();
     const existingRow=await findExistingCategoryRow(client,storeId,cat,opts.categoryRows);
     const payload=mapCategoryToSupabase(cat,storeId,existingRow);
     let res;
     try{
+      if(catalogCanTechLog()) console.log('[Catalog category -> Supabase]',{operation:existingRow?'update':'insert',role,storeId,payload,existingRow});
       if(existingRow){
         res=await client.from('categories').update(payload).eq('id',existingRow.id).eq('store_id',storeId).select('id,store_id,legacy_id,name,color,section,reservable,active').single();
       }else{
         res=await client.from('categories').insert(payload).select('id,store_id,legacy_id,name,color,section,reservable,active').single();
       }
       if(res.error) throw res.error;
+      if(catalogCanTechLog()) console.log('[Catalog category <- Supabase]',res.data);
     }catch(err){
       logCatalogSupabaseWriteError('category',{
         operation: existingRow?'update':'insert',
@@ -5524,22 +5622,49 @@ if(config.webappUrl){loadFromSheets();}
     return data;
   };
   window.saveProductToSupabase=async function(product,opts={}){
-    if(!hasCatalogSupabaseReady()||!product) return null;
-    const client=getCatalogSupabaseClient();
-    const storeId=getCatalogStoreId();
-    const session=await getCatalogSession(client);
-    if(!session) throw new Error('No hay sesión activa en Supabase');
-    const categoryRows=opts.categoryRows || cats;
+    if(!product) return null;
+    const {client,storeId,role}=await getCatalogWriteContext();
+    let categoryRows=Array.isArray(opts.categoryRows)?opts.categoryRows:await queryStoreCategories(client,storeId,false);
+    let categorySbId=resolveCategorySupabaseId(product.cat,categoryRows);
+    if(!categorySbId){
+      const localCat=(cats||[]).find(c=>String(c.id)===String(product.cat)||String(c._sb_id||'')===String(product.cat)||String(c.legacy_id||'')===String(product.cat));
+      if(!localCat){
+        const err=new Error('La categoría seleccionada no existe. Creá o elegí una categoría válida.');
+        err.code='CATALOG_CATEGORY_UNRESOLVED';
+        throw err;
+      }
+      const savedCat=await window.saveCategoryToSupabase(localCat,{categoryRows});
+      if(savedCat){
+        localCat._sb_id=savedCat.id;
+        localCat.legacy_id=savedCat.legacy_id||localCat.legacy_id||(!isValidUuid(String(localCat.id||''))?String(localCat.id):null);
+        categoryRows=[...categoryRows,savedCat];
+      }
+      categorySbId=resolveCategorySupabaseId(product.cat,categoryRows);
+    }
+    if(!categorySbId){
+      const err=new Error('No se pudo resolver category_id para guardar el producto.');
+      err.code='CATALOG_CATEGORY_UNRESOLVED';
+      throw err;
+    }
     const existingRow=await findExistingProductRow(client,storeId,product,opts.productRows);
     const payload=mapProductToSupabase(product,storeId,existingRow,{categoryRows});
     let res;
     try{
+      if(catalogCanTechLog()) console.log('[Catalog product -> Supabase]',{operation:existingRow?'update':'insert',role,storeId,category_id:payload.category_id,payload,existingRow});
       if(existingRow){
         res=await client.from('products').update(payload).eq('id',existingRow.id).eq('store_id',storeId).select('id,store_id,category_id,legacy_id,name,price,stock,unlimited,active,variants').single();
       }else{
         res=await client.from('products').insert(payload).select('id,store_id,category_id,legacy_id,name,price,stock,unlimited,active,variants').single();
       }
+      const productErrText=`${res.error?.message||''} ${res.error?.details||''} ${res.error?.hint||''}`.toLowerCase();
+      if(res.error && productErrText.includes('metadata')){
+        const {metadata,...payloadWithoutMetadata}=payload;
+        res=existingRow
+          ? await client.from('products').update(payloadWithoutMetadata).eq('id',existingRow.id).eq('store_id',storeId).select('id,store_id,category_id,legacy_id,name,price,stock,unlimited,active,variants').single()
+          : await client.from('products').insert(payloadWithoutMetadata).select('id,store_id,category_id,legacy_id,name,price,stock,unlimited,active,variants').single();
+      }
       if(res.error) throw res.error;
+      if(catalogCanTechLog()) console.log('[Catalog product <- Supabase]',res.data);
     }catch(err){
       logCatalogSupabaseWriteError('product',{
         operation: existingRow?'update':'insert',
@@ -5567,13 +5692,8 @@ if(config.webappUrl){loadFromSheets();}
   };
   // Actualización rápida y segura de stock/unlimited — sin tocar category_id
   window.saveProductStockToSupabase=async function(product){
-    if(!hasCatalogSupabaseReady()||!product) return null;
-    const client=getCatalogSupabaseClient();
-    if(!client) return null;
-    const storeId=getCatalogStoreId();
-    if(!storeId||!isValidUuid(storeId)) return null;
-    const session=await getCatalogSession(client);
-    if(!session) return null; // Sin sesión: falla silenciosa
+    if(!product) return null;
+    const {client,storeId}=await getCatalogWriteContext();
     const sbId=product._sb_id||(isValidUuid(String(product.id||''))?String(product.id):'');
     if(sbId){
       // UPDATE directo con sólo los campos de stock — sin FK de category_id
@@ -5632,6 +5752,11 @@ if(config.webappUrl){loadFromSheets();}
           summary.errors.push(`Producto ${product.name}: ${err.message||err}`);
         }
       }
+      if(summary.errors.length){
+        const err=new Error(summary.errors.join(' | '));
+        err.summary=summary;
+        throw err;
+      }
       save();
       setCatalogLoadState('supabase');
       catalogLastSyncAt=`subida ${stampCatalogMoment()}`;
@@ -5640,18 +5765,15 @@ if(config.webappUrl){loadFromSheets();}
       console.log('[Catalog Supabase sync summary]',summary);
       await loadCatalogFromSupabase({silent:true});
     }catch(err){
-      console.error('[Catalog Supabase sync failed]', err);
+      if(catalogCanTechLog()) console.error('[Catalog Supabase sync failed]', err);
       setCatalogLoadState('error', err.message||String(err));
-      showToast('Menú guardado. Falló la sincronización con el servidor.');
+      window.handleCatalogWriteError?.(err,'catálogo');
     }
   };
   function warnSupabaseCatalogFailure(kind,err){
-    console.warn(`[Catalog Supabase ${kind} failed]`, err);
+    if(catalogCanTechLog()) console.warn(`[Catalog Supabase ${kind} failed]`, err);
     setCatalogLoadState('error', err?.message||String(err));
-    const msg=String(err?.message||err||'');
-    showToast(msg.toLowerCase().includes('row-level security')||msg.toLowerCase().includes('rls')
-      ? `Supabase rechazó update ${kind}: ${msg}`
-      : `Supabase rechazó ${kind}: ${msg}`);
+    window.handleCatalogWriteError?.(err,kind);
   }
   function scheduleCatalogLoad(){
     updateCatalogBootState({state:'syncing',source:'pending',fallbackReason:''});
@@ -5794,7 +5916,7 @@ if(config.webappUrl){loadFromSheets();}
     };
   }
   const _guardarNuevaCat=window.guardarNuevaCat;
-  if(typeof _guardarNuevaCat==='function'){
+  if(typeof _guardarNuevaCat==='function'&&!_guardarNuevaCat.__remoteFirst){
     window.guardarNuevaCat=function(...args){
       const beforeIds=new Set(cats.map(c=>String(c.id)));
       const res=_guardarNuevaCat.apply(this,args);
@@ -5804,7 +5926,7 @@ if(config.webappUrl){loadFromSheets();}
     };
   }
   const _guardarEditCat=window.guardarEditCat;
-  if(typeof _guardarEditCat==='function'){
+  if(typeof _guardarEditCat==='function'&&!_guardarEditCat.__remoteFirst){
     window.guardarEditCat=function(i,...args){
       const res=_guardarEditCat.call(this,i,...args);
       const cat=cats[i];
@@ -5823,7 +5945,7 @@ if(config.webappUrl){loadFromSheets();}
     };
   }
   const _guardarProducto=window.guardarProducto;
-  if(typeof _guardarProducto==='function'){
+  if(typeof _guardarProducto==='function'&&!_guardarProducto.__remoteFirst){
     window.guardarProducto=function(...args){
       const wasEdit=!!editId;
       const prevIds=new Set(menu.map(p=>String(p.id)));
@@ -5835,7 +5957,7 @@ if(config.webappUrl){loadFromSheets();}
     };
   }
   const _guardarProdRapido=window.guardarProdRapido;
-  if(typeof _guardarProdRapido==='function'){
+  if(typeof _guardarProdRapido==='function'&&!_guardarProdRapido.__remoteFirst){
     window.guardarProdRapido=function(...args){
       const prevIds=new Set(menu.map(p=>String(p.id)));
       const res=_guardarProdRapido.apply(this,args);
