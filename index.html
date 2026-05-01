@@ -3490,6 +3490,7 @@ function renderAjustes(){
   const accSheets=$('acc-sheets'); if(accSheets) accSheets.style.display=canTech?'block':'none';
   // acc-datos (Datos locales) siempre visible — no tiene datos técnicos peligrosos
   const gsLegacyNote=$('gs-legacy-note'); if(gsLegacyNote) gsLegacyNote.style.display=canTech?'block':'none';
+  window.renderTechnicalSupportPanel?.();
 }
 function renderCatMgr(){
   const el=$('cat-mgr');if(!el)return;
@@ -4165,6 +4166,7 @@ if(config.webappUrl){loadFromSheets();}
   window.canShowClientTechnicalUi=function(){
     return !!supabaseUser && canShowSupabaseTechnicalUi();
   };
+  window.__technicalSupportRedesign=true;
 
   function syncSupabaseFieldValue(id, value){
     const el=document.getElementById(id);
@@ -4217,6 +4219,171 @@ if(config.webappUrl){loadFromSheets();}
     if(gsAcc && gsAcc.nextSibling) targetParent.insertBefore(panel, gsAcc.nextSibling);
     else targetParent.appendChild(panel);
   }
+
+  function supportStamp(){return `${getLocalDateString()} ${getLocalTimeString()}`;}
+  function setSupportLastResult(message){
+    window.__supportLastResult={message,at:supportStamp()};
+    window.renderTechnicalSupportPanel?.();
+  }
+  window.supportRefreshAllData=async function(){
+    if(!window.canShowClientTechnicalUi?.()){showToast('Herramienta disponible sólo en modo técnico.');return;}
+    showToast('Actualizando…');
+    const tasks=[
+      window.loadCatalogFromSupabase?.({silent:true}),
+      window.reloadCustomersReservationsFromSupabase?.(true),
+      window.reloadExpensesFromSupabase?.(true),
+      window.triggerOORefresh?.('manual'),
+      window.reloadVisibleHistoryFromSupabase?.({silent:true,forceRefresh:true}),
+      window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true})
+    ].filter(Boolean);
+    const results=await Promise.allSettled(tasks);
+    const failed=results.filter(r=>r.status==='rejected').length;
+    setSupportLastResult(failed?`Actualización completada con ${failed} aviso(s).`:'Datos actualizados.');
+    showToast(failed?'Actualización completada con avisos.':'Actualizado.');
+  };
+  window.supportDiagnoseSynchronization=async function(){
+    if(!window.canShowClientTechnicalUi?.()){showToast('Herramienta disponible sólo en modo técnico.');return;}
+    const tasks=[
+      window.diagnoseLocalRecoveryData?.(),
+      window.compareLocalSalesVsSupabase?.({forceRefresh:true,silent:true}),
+      window.diagnoseCajaSmoke?.()
+    ].filter(Boolean);
+    const results=await Promise.allSettled(tasks);
+    const failed=results.filter(r=>r.status==='rejected').length;
+    setSupportLastResult(failed?`Diagnóstico completado con ${failed} aviso(s).`:'Diagnóstico completado. Revisá el resumen y la consola.');
+  };
+  window.supportRetryPendingData=async function(){
+    if(!window.canShowClientTechnicalUi?.()){showToast('Herramienta disponible sólo en modo técnico.');return;}
+    const tasks=[window.retryPendingSalesSync?.()].filter(Boolean);
+    if(!tasks.length){showToast('No hay reintentos disponibles.');return;}
+    const results=await Promise.allSettled(tasks);
+    const failed=results.filter(r=>r.status==='rejected').length;
+    setSupportLastResult(failed?'Reintento finalizado con avisos.':'Reintento finalizado.');
+  };
+  function supportButton(label,onclick,kind='ghost'){
+    return `<button class="btn ${kind}" type="button" onclick="${onclick}">${label}</button>`;
+  }
+  function supportMetric(label,value){
+    return `<div style="display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--ink2);padding:3px 0"><span>${label}</span><strong style="color:var(--ink)">${value}</strong></div>`;
+  }
+  function supportCard(title,text,metrics='',buttons='',details=''){
+    return `<section style="background:var(--surf);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px">
+      <div>
+        <div style="font-size:14px;font-weight:800;color:var(--ink)">${title}</div>
+        <div style="font-size:12px;color:var(--ink2);line-height:1.45;margin-top:3px">${text}</div>
+      </div>
+      ${metrics?`<div>${metrics}</div>`:''}
+      ${buttons?`<div class="row" style="gap:8px;flex-wrap:wrap">${buttons}</div>`:''}
+      ${details||''}
+    </section>`;
+  }
+  window.renderTechnicalSupportPanel=function(){
+    const techSection=document.getElementById('tech-mode-section');
+    if(!techSection) return;
+    const loggedIn=!!supabaseUser;
+    const role=(getSupabaseActiveRole()||'').toLowerCase();
+    const isAdmin=['owner','admin'].includes(role);
+    const canTech=window.canShowClientTechnicalUi?.()||false;
+    if(!loggedIn||!isAdmin){
+      techSection.style.display='none';
+      techSection.innerHTML='';
+      return;
+    }
+    techSection.style.display='';
+    const activeStore=supabaseStores.find(s=>s.id===config.activeStoreId);
+    const historyState=window.getVisibleHistoryState?.()||{};
+    const dashboardState=window.getDashboardState?.()||{};
+    const ooState=window.getOpenOrdersSyncState?.()||{};
+    const pendingSales=window.findPendingSalesSyncGroups?.(ventas||[])?.length||0;
+    const lastResult=window.__supportLastResult;
+    if(!canTech){
+      techSection.innerHTML=`<div class="accordion-item" style="margin-bottom:10px">
+        <div class="accordion-hdr" style="cursor:default">
+          <div>
+            <div class="accordion-titulo">Modo técnico</div>
+            <div class="accordion-meta">Herramientas avanzadas para revisar conexión, sincronización, datos locales y diagnóstico. Usar sólo cuando haya un problema o se necesite soporte.</div>
+          </div>
+          <button class="btn ghost" type="button" style="font-size:12px;flex-shrink:0" onclick="toggleSalesTechnicalMode(true)">Activar modo técnico</button>
+        </div>
+      </div>`;
+      return;
+    }
+    const generalDetails=`<details style="font-size:12px;color:var(--ink2)">
+      <summary style="cursor:pointer;font-weight:700;color:var(--ink)">Ver detalles técnicos</summary>
+      <div style="margin-top:8px;line-height:1.6;background:var(--surf2);border:1px solid var(--border);border-radius:10px;padding:10px">
+        <div><strong>Store ID:</strong> ${config.activeStoreId||'—'}</div>
+        <div><strong>User ID:</strong> ${supabaseUser?.id||'—'}</div>
+        <div><strong>APP_VERSION:</strong> ${window.APP_VERSION||APP_VERSION}</div>
+        <div><strong>APP_DATA_VERSION:</strong> ${window.APP_DATA_VERSION||APP_DATA_VERSION}</div>
+        <div><strong>Últimos errores:</strong> ${historyState.error||dashboardState.error||ooState.lastError||'—'}</div>
+      </div>
+    </details>`;
+    const cards=[
+      supportCard('Estado general','Resumen rápido del acceso y de los datos pendientes.',
+        supportMetric('Conexión', loggedIn?'Correcta':'Requiere atención')+
+        supportMetric('Sesión', loggedIn?'Activa':'No iniciada')+
+        supportMetric('Tienda activa', activeStore?.name||'Sin tienda')+
+        supportMetric('Rol', role||'—')+
+        supportMetric('Datos pendientes', pendingSales)+
+        supportMetric('Última actualización', lastResult?`${lastResult.at} · ${lastResult.message}`:'—'),
+        supportButton('Revisar estado','supportDiagnoseSynchronization()')+
+        supportButton('Actualizar datos ahora','supportRefreshAllData()','alt'),
+        generalDetails),
+      supportCard('Sincronización','Usá esta sección si una venta, reserva, gasto o mesa no aparece actualizada.',
+        supportMetric('Ventas pendientes', pendingSales)+
+        supportMetric('Mesas abiertas', ooState.openOrders??(mesas||[]).length)+
+        supportMetric('Último intento', ooState.lastRefreshEndedAt||historyState.lastReadAt||dashboardState.lastReadAt||'—')+
+        supportMetric('Último resultado', lastResult?.message||'—'),
+        supportButton('Actualizar datos ahora','supportRefreshAllData()','alt')+
+        supportButton('Diagnosticar sincronización','supportDiagnoseSynchronization()')+
+        supportButton('Reintentar pendientes','supportRetryPendingData()')),
+      supportCard('Recuperación de datos','Usá esta sección si se cargaron ventas, reservas o gastos y no aparecen en Historial o Dashboard.',
+        `<div style="font-size:12px;color:var(--red);line-height:1.45;background:rgba(176,48,48,.08);border:1px solid rgba(176,48,48,.18);border-radius:10px;padding:9px">Antes de reintentar sincronización, exportá un respaldo local. No borres datos ni cierres sesión si estás intentando recuperar información.</div>`,
+        `<div style="display:grid;gap:8px">
+          <div><strong>Paso 1</strong><br><span style="font-size:12px;color:var(--ink2)">Descarga una copia de seguridad de los datos guardados en este dispositivo.</span><div style="margin-top:6px">${supportButton('Exportar respaldo local','exportLocalRecoveryBackup()','alt')}</div></div>
+          <div><strong>Paso 2</strong><br><span style="font-size:12px;color:var(--ink2)">Busca ventas, reservas o gastos que estén en este dispositivo pero no en la base.</span><div style="margin-top:6px">${supportButton('Diagnosticar datos locales','diagnoseLocalRecoveryData()')}</div></div>
+          <div><strong>Paso 3</strong><br><span style="font-size:12px;color:var(--ink2)">Sube datos faltantes evitando duplicados. Usar después del respaldo.</span><div style="margin-top:6px">${supportButton('Reintentar sincronización local','resyncMissingLocalSales()','danger')}</div></div>
+        </div>`),
+      supportCard('Catálogo','Revisá productos y categorías cuando el menú no se ve actualizado.',
+        supportMetric('Categorías en este dispositivo', (cats||[]).length)+
+        supportMetric('Productos en este dispositivo', (menu||[]).length),
+        supportButton('Actualizar catálogo','reloadCatalogFromSupabase()','alt')+
+        supportButton('Diagnosticar catálogo','probeCatalogSupabaseRead()'),
+        `<details style="font-size:12px;color:var(--ink2)"><summary style="cursor:pointer;font-weight:700;color:var(--ink)">Acciones avanzadas</summary><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:8px">${supportButton('Subir catálogo actual','syncLocalCatalogToSupabase()')}${supportButton('Probar guardado de catálogo','debugCatalogWritePermissions()')}${supportButton('Revisar catálogo','debugCatalogSupabase()')}${supportButton('Limpiar datos guardados en este dispositivo','clearLocalTechnicalCache()','danger')}</div></details>`),
+      supportCard('Ventas / Historial / Dashboard','Revisá que las ventas impacten correctamente en los reportes.',
+        supportMetric('Ventas locales', (ventas||[]).length)+
+        supportMetric('Última actualización de Historial', historyState.lastReadAt||'—')+
+        supportMetric('Última actualización de Dashboard', dashboardState.lastReadAt||'—'),
+        supportButton('Actualizar historial','reloadVisibleHistoryFromSupabase({silent:false,forceRefresh:true})','alt')+
+        supportButton('Actualizar dashboard','reloadDashboardFromSupabase({silent:false,forceRefresh:true})','alt')+
+        supportButton('Diagnosticar ventas','debugSalesSupabase()'),
+        `<details style="font-size:12px;color:var(--ink2)"><summary style="cursor:pointer;font-weight:700;color:var(--ink)">Acciones avanzadas</summary><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:8px">${supportButton('Comparar dispositivo vs base','compareLocalSalesVsSupabase()')}${supportButton('Revisar ventas pendientes','debugPendingSalesSync()')}${supportButton('Generar SQL limpieza de pruebas','generateCleanupSqlForSaleLegacyIds()')}${supportButton('Marcar última venta como prueba','markLastSaleAsManualTest()')}${supportButton('Listar ventas candidatas a prueba','listCandidateTestSales()')}${supportButton('Revisar historial','debugHistorySupabasePreview()')}</div></details>`),
+      supportCard('Caja / Mesas / Turnos','Revisá mesas abiertas, pedidos en curso y cierre de turno.',
+        supportMetric('Turno actual', turno&&turno.abierto?'Abierto':'Sin turno abierto')+
+        supportMetric('Mesas abiertas', ooState.openOrders??(mesas||[]).length)+
+        supportMetric('Último cierre', 'Ver detalle avanzado'),
+        supportButton('Diagnosticar Caja','diagnoseCajaSmoke()')+
+        supportButton('Diagnosticar cierre','debugShiftCloseSupabase()')+
+        supportButton('Actualizar mesas',`triggerOORefresh('manual')`,'alt'),
+        `<details style="font-size:12px;color:var(--ink2)"><summary style="cursor:pointer;font-weight:700;color:var(--ink)">Acciones avanzadas</summary><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:8px">${supportButton('Revisar cierre de caja','debugShiftCloseSupabase()')}${supportButton('Revisar turnos','debugShiftsSupabase()')}${supportButton('Probar guardado de turnos','debugShiftsWritePermissions()')}</div></details>`)
+    ].join('');
+    techSection.innerHTML=`<div class="accordion-item" style="margin-bottom:12px;border-color:rgba(185,76,30,.25);background:rgba(251,232,222,.20)">
+      <div class="accordion-hdr" style="cursor:default">
+        <div>
+          <div class="accordion-titulo" style="display:flex;align-items:center;gap:8px">Modo técnico <span style="font-size:10px;font-weight:600;color:var(--orange);background:var(--orange-bg);padding:2px 7px;border-radius:20px;letter-spacing:.04em">ACTIVO</span></div>
+          <div class="accordion-meta">Herramientas avanzadas para revisar conexión, sincronización, datos locales y diagnóstico. Usar sólo cuando haya un problema o se necesite soporte.</div>
+        </div>
+        <button class="btn ghost" type="button" style="font-size:12px;flex-shrink:0" onclick="toggleSalesTechnicalMode(false)">Desactivar modo técnico</button>
+      </div>
+      <div style="padding:0 12px 12px;display:grid;gap:10px">${cards}
+        <details style="background:var(--surf);border:1px solid var(--border);border-radius:12px;padding:12px">
+          <summary style="cursor:pointer;font-weight:800;color:var(--ink)">Herramientas avanzadas</summary>
+          <div style="font-size:12px;color:var(--ink2);line-height:1.45;margin:8px 0">Estas acciones son para soporte técnico. Usalas sólo si sabés qué estás revisando.</div>
+          <div class="row" style="gap:8px;flex-wrap:wrap">${supportButton('Debug lectura ventas','debugSalesReadSupabase()')}${supportButton('Comparar historial dispositivo/base','compareLocalHistoryVsSupabaseHistory()')}${supportButton('Probar guardado de ventas','debugSalesWritePermissions()')}${supportButton('Mostrar últimos tickets locales','listRecentLocalSaleTickets()')}</div>
+        </details>
+      </div>
+    </div>`;
+  };
 
   function renderSupabaseStatus(){
     ensureSupabaseHeaderPill();
@@ -4319,25 +4486,7 @@ if(config.webappUrl){loadFromSheets();}
         }
       }
     }
-    // Card modo técnico: mismo formato visual que accordion Menú y Datos locales
-    const techSection=document.getElementById('tech-mode-section');
-    if(techSection){
-      if(loggedIn && isAdmin){
-        techSection.style.display='';
-        techSection.innerHTML=`<div class="accordion-item" style="margin-bottom:10px${canTech?';border-color:rgba(185,76,30,.25);background:rgba(251,232,222,.35)':''}">
-  <div class="accordion-hdr" style="cursor:default">
-    <div>
-      <div class="accordion-titulo" style="display:flex;align-items:center;gap:8px">Modo técnico${canTech?'<span style="font-size:10px;font-weight:600;color:var(--orange);background:var(--orange-bg);padding:2px 7px;border-radius:20px;letter-spacing:.04em">ACTIVO</span>':''}</div>
-      <div class="accordion-meta">Herramientas avanzadas para administración</div>
-    </div>
-    <button class="btn ghost" type="button" style="font-size:12px;flex-shrink:0" onclick="toggleSalesTechnicalMode()">${canTech?'Desactivar':'Activar'}</button>
-  </div>
-</div>`;
-      }else{
-        techSection.style.display='none';
-        techSection.innerHTML='';
-      }
-    }
+    window.renderTechnicalSupportPanel?.();
   }
 
   function clearSupabaseContext(render=true){
@@ -5322,6 +5471,7 @@ if(config.webappUrl){loadFromSheets();}
   function ooUpdateDiag(){
     const box=document.getElementById('oo-sb-box');
     const canTech=window.canShowClientTechnicalUi?.()??false;
+    if(window.__technicalSupportRedesign){if(box)box.style.display='none';return;}
     if(box)box.style.display=canTech?'block':'none';
     if(!canTech)return;
     const el=document.getElementById('oo-sb-diag');
@@ -5963,6 +6113,7 @@ if(config.webappUrl){loadFromSheets();}
     ensureCatalogSupabaseButton();
     const box=$('catalog-sb-box');
     const canTech=window.canShowClientTechnicalUi?.()||false;
+    if(window.__technicalSupportRedesign){if(box)box.style.display='none';return;}
     if(box) box.style.display=canTech?'flex':'none';
     if(!canTech) return;
     const el=$('catalog-sb-status');
@@ -6780,6 +6931,7 @@ if(config.webappUrl){loadFromSheets();}
     ensureCrSupabasePanel();
     const box=$('cr-sb-box');
     const canTech=window.canShowClientTechnicalUi?.()||false;
+    if(window.__technicalSupportRedesign){if(box)box.style.display='none';return;}
     if(box) box.style.display=canTech?'flex':'none';
     if(!canTech) return;
     const status=$('cr-sb-status');
@@ -7831,6 +7983,7 @@ if(config.webappUrl){loadFromSheets();}
     ensureExpensesSupabasePanel();
     const box=$('expenses-sb-box');
     const canTech=window.canShowClientTechnicalUi?.()||false;
+    if(window.__technicalSupportRedesign){if(box)box.style.display='none';return;}
     if(box) box.style.display=canTech?'flex':'none';
     if(!canTech) return;
     const status=$('expenses-sb-status');
@@ -8407,6 +8560,7 @@ if(config.webappUrl){loadFromSheets();}
     ensureShiftsSupabasePanel();
     const box=$('shifts-sb-box');
     const canTech=window.canShowClientTechnicalUi?.()||false;
+    if(window.__technicalSupportRedesign){if(box)box.style.display='none';return;}
     if(box) box.style.display=canTech?'flex':'none';
     if(!canTech) return;
     const status=$('shifts-sb-status');
@@ -9444,6 +9598,7 @@ if(config.webappUrl){loadFromSheets();}
       ensureSalesSupabaseUi();
       const box=$('sales-sb-box');
       const canTechUi=window.canShowClientTechnicalUi?.()||false;
+      if(window.__technicalSupportRedesign){if(box)box.style.display='none';return;}
       if(box) box.style.display=canTechUi?'flex':'none';
       if(!canTechUi) return;
       const statusEl=$('sales-sb-status');
