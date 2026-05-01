@@ -1525,6 +1525,40 @@ const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
 const fmtK=n=>n>=1000000?'$'+(n/1000000).toFixed(1).replace('.0','')+'M':n>=1000?'$'+Math.round(n/1000)+'k':fmt(n);
 function pad2(n){return String(n).padStart(2,'0');}
 function sameId(a,b){return String(a)===String(b);}
+const RESERVA_INACTIVE_STATUSES=new Set(['paid','pagada','pagado','cobrada','cobrado','closed','cerrada','cerrado','cancelled','canceled','cancelada','cancelado','deleted','eliminada','eliminado']);
+const reservaHiddenUntil=new Map();
+function normalizeReservaStatus(status){
+  return String(status||'pendiente').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+function getReservationIdentityValues(reservation){
+  return [reservation?.id,reservation?._sb_id,reservation?.legacy_id].map(v=>String(v||'')).filter(Boolean);
+}
+function markReservationHidden(reservation,reason='optimistic',ttlMs=90000){
+  const until=Date.now()+ttlMs;
+  getReservationIdentityValues(reservation).forEach(id=>reservaHiddenUntil.set(id,{until,reason}));
+}
+function clearReservationHidden(reservation){
+  getReservationIdentityValues(reservation).forEach(id=>reservaHiddenUntil.delete(id));
+}
+function isReservationOptimisticallyHidden(reservation){
+  const now=Date.now();
+  for(const id of getReservationIdentityValues(reservation)){
+    const entry=reservaHiddenUntil.get(id);
+    if(!entry)continue;
+    if(entry.until>now)return true;
+    reservaHiddenUntil.delete(id);
+  }
+  return false;
+}
+function isReservationVisibleInCaja(reservation){
+  if(!reservation||isReservationOptimisticallyHidden(reservation))return false;
+  if(typeof findExistingReservationSaleRows==='function'&&findExistingReservationSaleRows(reservation).length)return false;
+  return !RESERVA_INACTIVE_STATUSES.has(normalizeReservaStatus(reservation.estado||reservation.status));
+}
+function cloneReservasState(){
+  try{return JSON.parse(JSON.stringify(reservas||[]));}
+  catch(_){return [...(reservas||[])];}
+}
 function getMesaOpenOrderId(m){return m?._sb_id||m?.open_order_id||m?.id||'';}
 function findMesaByAnyId(id){
   const sid=String(id||'');
@@ -2406,8 +2440,9 @@ function renderMesasSection(){
 
 function renderReservasSection(){
   const c=$('reservas-container'),e=$('reservas-empty');if(!c)return;
-  let lista=ventasFiltroTipo==='todos'?reservas:reservas.filter(r=>r.tipo===ventasFiltroTipo);
-  lista=[...lista].sort((a,b)=>{const fa=a.estado==='cancelada'?1:0,fb=b.estado==='cancelada'?1:0;return fa-fb||(a.fecha||'').localeCompare(b.fecha||'');});
+  let lista=(reservas||[]).filter(isReservationVisibleInCaja);
+  lista=ventasFiltroTipo==='todos'?lista:lista.filter(r=>r.tipo===ventasFiltroTipo);
+  lista=[...lista].sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
   if(!lista.length){c.innerHTML='';e.style.display='block';return;}
   e.style.display='none';
   c.innerHTML=lista.map(r=>{
@@ -2422,8 +2457,8 @@ function renderReservasSection(){
         ${r.fecha?`<div style="font-size:11px;color:var(--ink3)">📅 ${r.fecha}</div>`:''}
         ${r.nota?`<div class="reserva-nota">${r.nota}</div>`:''}
         <div class="reserva-actions">
-          <button class="btn-sm" onclick="openReservaModal('${r.id}')">Editar</button>
-          ${r.estado!=='cancelada'&&r.estado!=='pagada'?`<button class="btn-sm primary" onclick="abrirReservaComoVenta('${r.id}')">→ Cobrar</button>`:''}
+          <button class="btn-sm" onclick="openReservaModal('${escapeJsArg(r.id)}')">Editar</button>
+          <button class="btn-sm primary" onclick="abrirReservaComoVenta('${escapeJsArg(r.id)}')">→ Cobrar</button>
         </div>
       </div>
       <span class="reserva-estado ${r.estado||'pendiente'}">${r.estado||'pendiente'}</span>
@@ -2497,7 +2532,8 @@ async function abrirMesa(id){
   loadPaymentState(m);renderCargaCats();renderProdGrid();renderCart();
 }
 function abrirReservaComoVenta(id){
-  const r=reservas.find(x=>x.id===id);if(!r)return;
+  const r=reservas.find(x=>sameId(x.id,id));if(!r)return;
+  if(!isReservationVisibleInCaja(r)){showToast('Esta reserva ya no está disponible.');renderReservasSection();return;}
   mesaActivaId='reserva_'+id;carrito={};
   setCajaNavEvent('open_reservation');
   (r.items||[]).forEach((item,i)=>{carrito[`res_${i}`]={...item};});
@@ -2626,6 +2662,9 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
   const esReserva=mesaActivaId&&mesaActivaId.startsWith('reserva_');
   const items=Object.values(carrito);
   const btn=$('btn-confirm');btn.disabled=true;btn.textContent='Cerrando…';
+  const reservasBeforeCobro=esReserva?cloneReservasState():null;
+  let reservaOptimisticHidden=null;
+  let ventaLocalCreada=false;
   window.__cajaCobroEnCurso=true;
   window.__cajaCobroEnCursoHasta=Date.now()+30000;
   try{
@@ -2662,11 +2701,15 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
         clienteReserva=clientes.find(c=>String(c.id||'')===String(r.clienteId||''))||null;
         if(findExistingReservationSaleRows(r).length||await reservationHasRemoteSale(r)){
           r.estado='pagada';r.pago=paymentState.pago;r.payment_mode=paymentState.payment_mode;r.pagos=paymentState.pagos;
+          markReservationHidden(r,'already_paid');
           save();syncReservasSheets();window.saveReservationToSupabase?.(r).catch(err=>window.canShowClientTechnicalUi?.()&&console.warn('[Caja] reserva ya cobrada, update failed',err));
           showToast('Esta reserva ya estaba cobrada.');
           renderVentas();
           return;
         }
+        markReservationHidden(r,'payment');
+        reservaOptimisticHidden=r;
+        renderReservasSection();
       }else{
         const m=findMesaByAnyId(mesaActivaId);if(m){tipoVenta=m.tipo||'salon';nombreMesa=m.nombre;}
       }
@@ -2693,6 +2736,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           _open_order_sb_id:_openOrderSbId};
       });
       ventas.push(...nuevas);
+      ventaLocalCreada=true;
       if(turnoActivo)turnoActivo.ventasIds=[...(turnoActivo.ventasIds||[]),...ventaIds];
       if(esReserva&&reservaActiva){
         reservaActiva.estado='pagada';reservaActiva.pago=paymentState.pago;reservaActiva.payment_mode=paymentState.payment_mode;reservaActiva.pagos=paymentState.pagos;
@@ -2714,6 +2758,8 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
       if(esReserva&&reservaActiva&&window.saveReservationToSupabase){
         try{
           await cajaWithTimeout(window.saveReservationToSupabase(reservaActiva),'close_reservation_supabase',10000);
+          showToast('Reserva cobrada.');
+          window.reloadCustomersReservationsFromSupabase?.(true).then(()=>renderReservasSection()).catch(()=>{});
         }catch(err){
           if(window.canShowClientTechnicalUi?.())console.warn('[Caja] venta creada pero reserva no se actualizó en Supabase',err);
         }
@@ -2722,6 +2768,11 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
     })(),'ejecutar_cobro',15000);
   }catch(err){
     if(window.canShowClientTechnicalUi?.())console.error('[Caja] ejecutarCobro failed',err);
+    if(esReserva&&reservaOptimisticHidden&&!ventaLocalCreada&&reservasBeforeCobro){
+      reservas=reservasBeforeCobro;
+      clearReservationHidden(reservaOptimisticHidden);
+      save();renderReservasSection();
+    }
     showToast(esReserva?'No pudimos cobrar la reserva. Reintentá.':'No pudimos cobrar la mesa. Reintentá.');
   }finally{
     btn.disabled=false;btn.textContent=esReserva?'Cobrar reserva':'Cerrar y cobrar';
@@ -2894,7 +2945,7 @@ function openReservaModal(id){
   ['salon','delivery','takeaway'].forEach(t=>{$(`rtipo-btn-${t}`).className='tipo-btn';});
   $('rtipo-btn-salon').className='tipo-btn sel-salon';
   if(id){
-    const r=reservas.find(x=>x.id===id);if(!r)return;
+    const r=reservas.find(x=>sameId(x.id,id));if(!r)return;
     tipoNuevaMesaReserva=r.tipo||'salon';
     ['salon','delivery','takeaway'].forEach(t=>{$(`rtipo-btn-${t}`).className=`tipo-btn${t===tipoNuevaMesaReserva?' sel-'+t:''}`;});
     $('res-nombre').value=r.nombre||'';popularClienteSelectReserva(r.clienteId);
@@ -2942,9 +2993,27 @@ function openClienteDesdeReserva(){
 }
 
 function pedirEliminarReserva(id){
-  const r=reservas.find(x=>x.id===id);
+  const r=reservas.find(x=>sameId(x.id,id));if(!r)return;
   cerrarModalReserva();
-  pedirConfirm(`¿Eliminar la reserva "${r?.nombre||''}"?`,()=>{reservas=reservas.filter(x=>x.id!==id);save();syncReservasSheets();renderVentas();showToast('✓ Reserva eliminada');});
+  pedirConfirm(`¿Eliminar la reserva "${r?.nombre||''}"?`,async()=>{
+    const before=cloneReservasState();
+    markReservationHidden(r,'delete');
+    reservas=reservas.filter(x=>!sameId(x.id,id));
+    save();renderReservasSection();
+    try{
+      if(!window.deleteReservationFromSupabase)throw new Error('No se pudo eliminar la reserva');
+      await cajaWithTimeout(window.deleteReservationFromSupabase(r),'delete_reservation_supabase',10000);
+      await syncReservasSheets().catch(()=>false);
+      showToast('Reserva eliminada.');
+      window.reloadCustomersReservationsFromSupabase?.(true).then(()=>renderReservasSection()).catch(()=>{});
+    }catch(err){
+      reservas=before;
+      clearReservationHidden(r);
+      save();renderReservasSection();
+      if(window.canShowClientTechnicalUi?.())console.warn('[Reservas] delete failed, optimistic rollback',err);
+      showToast('No pudimos eliminar la reserva. Reintentá.');
+    }
+  });
 }
 function renderReservaProdChips(){
   const el=$('res-prod-chips');if(!el)return;
@@ -6911,6 +6980,10 @@ if(config.webappUrl){loadFromSheets();}
       if(!reservationRows.length){
         if(!silent) showToast('No hay reservas registradas todavía.');
         setCrState('local');
+        reservas=[];
+        save();
+        if(activeTab==='carga') renderReservasSection();
+        else renderVentas();
         renderCrSupabaseUi();
         return false;
       }
@@ -7107,7 +7180,8 @@ if(config.webappUrl){loadFromSheets();}
     }
   };
   window.deleteReservationFromSupabase=async function(reservation,opts={}){
-    if(!hasCrSupabaseReady()||!reservation) return null;
+    if(!reservation) return null;
+    if(!hasCrSupabaseReady()) throw new Error('No hay conexión activa para eliminar la reserva');
     const client=window.getSupabaseClient?.();
     const storeId=getCrStoreId();
     const existingRow=await findExistingReservationRow(client,storeId,reservation,opts.reservationRows);
