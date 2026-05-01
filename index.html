@@ -3350,15 +3350,25 @@ function renderHistVentas(){
   const canTech=window.canShowClientTechnicalUi?.()||false;
   if(activeTab==='historial' && window.ensureVisibleHistorySource) setTimeout(()=>window.ensureVisibleHistorySource(),0);
   if(loading){
-    $('hist-list').innerHTML=`<div class="empty">${canTech?'Cargando historial desde Supabase…':'Cargando historial…'}</div>`;
+    $('hist-list').innerHTML=`<div class="empty">Actualizando…</div>`;
     return;
   }
   if(useSupabase && !tickets.length){
-    $('hist-list').innerHTML=`<div class="empty">${canTech?'No hay ventas en Supabase para esta tienda.':'No hay ventas para esta tienda.'}</div>`;
+    $('hist-list').innerHTML=`<div class="hist-item" style="margin-bottom:10px">
+      <div class="hist-hdr" style="cursor:default">
+        <div><div class="hist-fecha">Historial de ventas</div><div class="hist-meta">No hay ventas para esta tienda.</div></div>
+        <button class="btn ghost" type="button" onclick="reloadVisibleHistoryFromSupabase({silent:false,forceRefresh:true})">Actualizar</button>
+      </div>
+    </div>`;
     return;
   }
   if(!tickets.length){
-    $('hist-list').innerHTML='<div class="empty">No hay ventas registradas</div>';
+    $('hist-list').innerHTML=`<div class="hist-item" style="margin-bottom:10px">
+      <div class="hist-hdr" style="cursor:default">
+        <div><div class="hist-fecha">Historial de ventas</div><div class="hist-meta">No hay ventas registradas</div></div>
+        <button class="btn ghost" type="button" onclick="reloadVisibleHistoryFromSupabase({silent:false,forceRefresh:true})">Actualizar</button>
+      </div>
+    </div>`;
     return;
   }
   $('hist-list').innerHTML=`
@@ -3368,6 +3378,7 @@ function renderHistVentas(){
           <div class="hist-fecha">${canTech?`Fuente: ${sourceLabel}`:'Historial de ventas'}</div>
           <div class="hist-meta">${tickets.length} tickets · total ${fmt(tickets.reduce((sum,t)=>sum+money2(t.total),0))}${canTech&&error?` · ${error}`:''}${!canTech&&isFallback?' · Mostrando datos disponibles.':''}</div>
         </div>
+        <button class="btn ghost" type="button" onclick="reloadVisibleHistoryFromSupabase({silent:false,forceRefresh:true})">Actualizar</button>
       </div>
     </div>
     ${tickets.map((t,i)=>{
@@ -8000,10 +8011,15 @@ if(config.webappUrl){loadFromSheets();}
       }
       const rows=expenseRowsOverride || diag.rows;
       if(!Array.isArray(rows) || !rows.length){
-        if(!silent) showToast('No hay gastos registrados todavía.');
-        setExpensesState('local');
+        gastos=[];
+        save();
+        refreshExpensesUi();
+        if(!silent) showToast('No hay gastos para este período.');
+        expensesLastReadAt=stampExpensesMoment();
+        expensesSupabaseCount=0;
+        setExpensesState('supabase');
         renderExpensesSupabaseUi();
-        return false;
+        return true;
       }
       gastos=[...rows].map(mapExpenseFromSupabase).sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')) || String(b.hora||'').localeCompare(String(a.hora||'')));
       save();
@@ -8303,6 +8319,7 @@ if(config.webappUrl){loadFromSheets();}
       if(expense && hasExpensesSupabaseReady()){
         try{
           await saveExpenseToSupabase(expense);
+          setTimeout(()=>window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}),0);
           showToast('✓ Gasto registrado');
         }catch(err){
           const msg=getExpenseSupabaseErrorMessage(err);
@@ -9233,6 +9250,7 @@ if(config.webappUrl){loadFromSheets();}
   let historyVisibleLastReadAt='';
   let historyVisibleLastError='';
   let historyVisibleLoading=false;
+  let historyVisibleLastReadMs=0;
   let dashboardVisibleSource='pending';
   let dashboardVisibleRows=[];
   let dashboardVisibleTickets=[];
@@ -9243,9 +9261,12 @@ if(config.webappUrl){loadFromSheets();}
   let dashboardVisibleLastError='';
   let dashboardVisibleLoading=false;
   let dashboardVisibleRange={desde:'',hasta:''};
+  let dashboardVisibleLastReadMs=0;
   let salesAutoSyncRunning=false;
   let salesAutoSyncLastRunAt=0;
   const SALES_AUTO_SYNC_COOLDOWN_MS=30000;
+  const HISTORY_REFRESH_STALE_MS=45000;
+  const DASHBOARD_REFRESH_STALE_MS=45000;
 
   window.isValidUuid=window.isValidUuid||function isValidUuid(value){
     return typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -9323,6 +9344,7 @@ if(config.webappUrl){loadFromSheets();}
     historyVisibleLastReadAt=lastReadAt||historyVisibleLastReadAt||'';
     historyVisibleLastError=error||'';
     historyVisibleLoading=!!loading;
+    if(source==='supabase' && !loading) historyVisibleLastReadMs=Date.now();
   }
   window.getVisibleHistoryState=function(){
     return{
@@ -9364,9 +9386,24 @@ if(config.webappUrl){loadFromSheets();}
     dashboardVisibleLastError=error||'';
     dashboardVisibleLoading=!!loading;
     dashboardVisibleRange=range?{desde:range.desde||'',hasta:range.hasta||''}:dashboardVisibleRange;
+    if(source==='supabase' && !loading) dashboardVisibleLastReadMs=Date.now();
     if(prevPeriodTotal!==undefined) dashboardVisiblePrevPeriodTotal=typeof prevPeriodTotal==='number'?prevPeriodTotal:null;
     if(prevPeriodLabel!==undefined) dashboardVisiblePrevPeriodLabel=prevPeriodLabel||'';
   }
+  function isStaleRead(lastReadMs,ttlMs){
+    return !lastReadMs || Date.now()-lastReadMs>ttlMs;
+  }
+  function refreshHistoryAndDashboard({reason='',history=true,dashboard=true,force=false}={}){
+    if(history && typeof window.reloadVisibleHistoryFromSupabase==='function'){
+      window.reloadVisibleHistoryFromSupabase({silent:true,forceRefresh:force})
+        .catch(err=>console.warn('[History refresh failed]',{reason,message:err?.message||String(err)}));
+    }
+    if(dashboard && typeof window.reloadDashboardFromSupabase==='function'){
+      window.reloadDashboardFromSupabase({silent:true,forceRefresh:force})
+        .catch(err=>console.warn('[Dashboard refresh failed]',{reason,message:err?.message||String(err)}));
+    }
+  }
+  window.refreshHistoryAndDashboard=refreshHistoryAndDashboard;
   window.getDashboardState=function(){
     return{
       source:dashboardVisibleSource,
@@ -9770,8 +9807,21 @@ if(config.webappUrl){loadFromSheets();}
       if(salesErr) throw salesErr;
       const filteredSales=(salesRows||[]).filter(s=>!shouldExcludePreviewSale(s,opts));
       const saleIds=filteredSales.map(s=>s.id);
-      const itemRows=await loadSaleItemsFromSupabasePreview(saleIds);
-      const paymentRows=await loadSalePaymentsFromSupabasePreview(saleIds);
+      const partialWarnings=[];
+      let itemRows=[];
+      let paymentRows=[];
+      try{
+        itemRows=await loadSaleItemsFromSupabasePreview(saleIds);
+      }catch(err){
+        partialWarnings.push({table:'sale_items',message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''});
+        if(window.canShowClientTechnicalUi?.()) console.warn('[Sales preview partial read failed]',partialWarnings[partialWarnings.length-1]);
+      }
+      try{
+        paymentRows=await loadSalePaymentsFromSupabasePreview(saleIds);
+      }catch(err){
+        partialWarnings.push({table:'sale_payments',message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''});
+        if(window.canShowClientTechnicalUi?.()) console.warn('[Sales preview partial read failed]',partialWarnings[partialWarnings.length-1]);
+      }
       const itemMap={};
       const paymentMap={};
       itemRows.forEach(item=>{(itemMap[item.sale_id]||(itemMap[item.sale_id]=[])).push(item);});
@@ -9780,16 +9830,19 @@ if(config.webappUrl){loadFromSheets();}
       const salesTotal=money2(filteredSales.reduce((sum,s)=>sum+(Number(s.total_amount)||0),0));
       salesPreviewCounts={sales:filteredSales.length,items:itemRows.length,payments:paymentRows.length,total:salesTotal};
       salesPreviewLastReadAt=stampSalesMoment();
+      salesPreviewLastError=partialWarnings.length?'No pudimos actualizar el detalle completo. Reintentá.':'';
       salesPreviewResult={
         opts:{...opts,range},
         sales:filteredSales,
         items:itemRows,
         payments:paymentRows,
         comparableRows,
+        partialWarnings,
         comparison:null
       };
       renderSalesSupabaseUi();
       // toast silenciado — carga automática de ventas en segundo plano
+      if(partialWarnings.length && !opts.silent) showToast('No pudimos actualizar el detalle completo. Reintentá.');
       return salesPreviewResult;
     }catch(err){
       salesPreviewLastError=err?.message||String(err);
@@ -9834,6 +9887,34 @@ if(config.webappUrl){loadFromSheets();}
     const comparablePayments=(payments&&payments.length)
       ? (payments||[]).map(p=>({metodo:normalizePaymentMethod(p.method),monto:money2(p.amount)}))
       : [{metodo:normalizePaymentMethod(legacyPago||'efectivo'),monto:money2(sale?.total_amount)}];
+    if(!items||!items.length){
+      return [{
+        id:`${sale.legacy_id||sale.id}:summary`,
+        _preview_only:true,
+        _summary_only:true,
+        ticket_id:sale.legacy_id||sale.id,
+        fecha:normalizeBusinessDate(sale.business_date,sale.sold_at),
+        hora:normalizeBusinessTime('',sale.sold_at),
+        timestamp:sale.sold_at||'',
+        operador:sale.operator_name||'',
+        mesa:sale.table_label||'',
+        tipo:sale.service_type||'salon',
+        payment_mode:paymentMode,
+        pagos:comparablePayments,
+        pago:legacyPago,
+        producto:'Venta sin detalle',
+        variantes:'',
+        nota:'',
+        categoria:'',
+        seccion:'',
+        cantidad:0,
+        precioBase:0,
+        precioVars:0,
+        total:money2(sale.total_amount),
+        cat:null,
+        _sb_sale_id:sale.id
+      }];
+    }
     return (items||[]).map(item=>({
       id:item.legacy_id||item.id,
       _preview_only:true,
@@ -9959,6 +10040,7 @@ if(config.webappUrl){loadFromSheets();}
         },
         totals:{supabase:totalSupabase,local:money2(getLocalHistoryTickets().reduce((sum,t)=>sum+money2(t.total),0))},
         comparison:null,
+        warnings:preview.partialWarnings||[],
         opts:preview.opts||previewOpts
       };
       renderSalesSupabaseUi();
@@ -9994,7 +10076,18 @@ if(config.webappUrl){loadFromSheets();}
       renderSalesSupabaseUi();
       return null;
     }
+    setVisibleHistoryState({
+      source:historyVisibleSource||'local_fallback',
+      tickets:historyVisibleTickets||[],
+      itemsCount:historyVisibleItemsCount,
+      paymentsCount:historyVisiblePaymentsCount,
+      total:historyVisibleTotal,
+      lastReadAt:historyVisibleLastReadAt||'',
+      error:'',
+      loading:true
+    });
     historyVisibleLoading=true;
+    if(activeTab==='historial') renderHistVentas();
     renderSalesSupabaseUi();
     try{
       const preview=await buildHistoryPreviewFromSupabase({allDates:true,limit:false,forceRefresh,...(forceRefresh?{}:{})});
@@ -10008,12 +10101,12 @@ if(config.webappUrl){loadFromSheets();}
         paymentsCount:preview.sourceCounts?.payments||0,
         total:preview.totals?.supabase||0,
         lastReadAt:historyPreviewLastReadAt||stampSalesMoment(),
-        error:'',
+        error:(preview.warnings&&preview.warnings.length)?'No pudimos actualizar el detalle completo. Reintentá.':'',
         loading:false
       });
       if(activeTab==='historial') renderHistVentas();
       renderSalesSupabaseUi();
-      if(!silent) showToast('✓ Historial actualizado');
+      if(!silent) showToast((preview.warnings&&preview.warnings.length)?'No pudimos actualizar el detalle completo. Reintentá.':'Actualizado.');
       return preview;
     }catch(err){
       const localTickets=getLocalHistoryTickets();
@@ -10029,17 +10122,17 @@ if(config.webappUrl){loadFromSheets();}
       });
       if(activeTab==='historial') renderHistVentas();
       renderSalesSupabaseUi();
-      if(!silent) showToast('Trabajando sin conexión. Mostrando datos disponibles.');
+      if(!silent) showToast('No pudimos actualizar. Reintentá.');
       return null;
     }finally{
       historyVisibleLoading=false;
       renderSalesSupabaseUi();
     }
   };
-  window.ensureVisibleHistorySource=async function(){
+  window.ensureVisibleHistorySource=async function({force=false}={}){
     if(historyVisibleLoading) return;
     if(hasSalesSupabaseReady()){
-      if(historyVisibleSource!=='supabase' || !historyVisibleTickets.length){
+      if(force || historyVisibleSource!=='supabase' || !historyVisibleTickets.length || isStaleRead(historyVisibleLastReadMs,HISTORY_REFRESH_STALE_MS)){
         await reloadVisibleHistoryFromSupabase({silent:true,forceRefresh:true});
       }
       return;
@@ -10068,8 +10161,21 @@ if(config.webappUrl){loadFromSheets();}
     }
     // Safety net: flag dentro del try → finally SIEMPRE lo libera, pase lo que pase
     try{
-    dashboardVisibleLoading=true;
-    renderSalesSupabaseUi();
+      setDashboardState({
+        source:dashboardVisibleSource||'pending',
+        rows:dashboardVisibleRows||[],
+        tickets:dashboardVisibleTickets||[],
+        itemsCount:dashboardVisibleItemsCount,
+        paymentsCount:dashboardVisiblePaymentsCount,
+        total:dashboardVisibleTotal,
+        lastReadAt:dashboardVisibleLastReadAt||'',
+        error:'',
+        loading:true,
+        range:appliedRange
+      });
+      dashboardVisibleLoading=true;
+      if(activeTab==='dashboard') renderDashboard();
+      renderSalesSupabaseUi();
       // Gastos: timeout de 8s, nunca bloquea el dashboard
       try{
         if(typeof window.reloadExpensesFromSupabase==='function'){
@@ -10125,7 +10231,7 @@ if(config.webappUrl){loadFromSheets();}
         paymentsCount:preview.payments?.length||0,
         total,
         lastReadAt:stampSalesMoment(),
-        error:'',
+        error:(preview.partialWarnings&&preview.partialWarnings.length)?'No pudimos actualizar el detalle completo. Reintentá.':'',
         loading:false,
         range:appliedRange,
         prevPeriodTotal,
@@ -10133,14 +10239,14 @@ if(config.webappUrl){loadFromSheets();}
       });
       if(activeTab==='dashboard') renderDashboard();
       renderSalesSupabaseUi();
-      if(!silent) showToast(`Dashboard cargado: ${tickets.length} tickets`);
+      if(!silent) showToast((preview.partialWarnings&&preview.partialWarnings.length)?'No pudimos actualizar el detalle completo. Reintentá.':'Actualizado.');
       return window.getDashboardState();
     }catch(err){
       const local=buildLocalDashboardDataset(appliedRange);
       setDashboardState({...local,lastReadAt:stampSalesMoment(),error:err?.message||String(err)||'Sin conexión',loading:false});
       if(activeTab==='dashboard') renderDashboard();
       renderSalesSupabaseUi();
-      if(!silent) showToast('Mostrando datos locales — sin conexión al servidor.');
+      if(!silent) showToast('No pudimos actualizar. Reintentá.');
       return null;
     }finally{
       // Siempre liberar el flag, pase lo que pase
@@ -10152,7 +10258,7 @@ if(config.webappUrl){loadFromSheets();}
     const appliedRange=range||((typeof dashRango==='function')?dashRango():{desde:today(),hasta:today()});
     if(dashboardVisibleLoading) return;
     if(hasSalesSupabaseReady()){
-      if(forceRefresh || dashboardVisibleSource!=='supabase' || dashboardVisibleRange.desde!==appliedRange.desde || dashboardVisibleRange.hasta!==appliedRange.hasta){
+      if(forceRefresh || dashboardVisibleSource!=='supabase' || dashboardVisibleRange.desde!==appliedRange.desde || dashboardVisibleRange.hasta!==appliedRange.hasta || isStaleRead(dashboardVisibleLastReadMs,DASHBOARD_REFRESH_STALE_MS)){
         await reloadDashboardFromSupabase({silent:true,forceRefresh:true,range:appliedRange});
       }
       return;
@@ -11094,7 +11200,7 @@ commit;`;
       renderSalesSupabaseUi();
       refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics init failed]',err));
       window.autoRetryPendingSalesSync?.({reason:'init'}).catch(err=>console.warn('[Sales auto retry init failed]',err));
-      window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}).catch(err=>console.warn('[Dashboard reload init failed]',err));
+      refreshHistoryAndDashboard({reason:'init',force:true});
       return result;
     };
   }
@@ -11104,7 +11210,7 @@ commit;`;
       const result=await _guardarSupabaseConfigAdjSales.apply(this,args);
       refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics config failed]',err));
       window.autoRetryPendingSalesSync?.({reason:'config'}).catch(err=>console.warn('[Sales auto retry config failed]',err));
-      window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}).catch(err=>console.warn('[Dashboard reload config failed]',err));
+      refreshHistoryAndDashboard({reason:'config',force:true});
       return result;
     };
   }
@@ -11114,7 +11220,7 @@ commit;`;
       const result=await _reconectarSupabaseSales.apply(this,args);
       refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics reconnect failed]',err));
       window.autoRetryPendingSalesSync?.({reason:'reconnect'}).catch(err=>console.warn('[Sales auto retry reconnect failed]',err));
-      window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}).catch(err=>console.warn('[Dashboard reload reconnect failed]',err));
+      refreshHistoryAndDashboard({reason:'reconnect',force:true});
       return result;
     };
   }
@@ -11124,7 +11230,7 @@ commit;`;
       const result=await _supabaseSignInSales.apply(this,args);
       refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics sign-in failed]',err));
       window.autoRetryPendingSalesSync?.({reason:'sign_in'}).catch(err=>console.warn('[Sales auto retry sign-in failed]',err));
-      window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}).catch(err=>console.warn('[Dashboard reload sign-in failed]',err));
+      refreshHistoryAndDashboard({reason:'sign_in',force:true});
       return result;
     };
   }
@@ -11144,14 +11250,14 @@ commit;`;
       const result=await _onSupabaseStoreChangeSales.apply(this,args);
       refreshSalesDiagnostics({silent:true}).catch(err=>console.warn('[Sales diagnostics store change failed]',err));
       window.autoRetryPendingSalesSync?.({reason:'store_change',force:true}).catch(err=>console.warn('[Sales auto retry store change failed]',err));
-      window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}).catch(err=>console.warn('[Dashboard reload store change failed]',err));
+      refreshHistoryAndDashboard({reason:'store_change',force:true});
       return result;
     };
   }
 
   window.addEventListener('online',()=>{
     window.autoRetryPendingSalesSync?.({reason:'online'}).catch(err=>console.warn('[Sales auto retry online failed]',err));
-    window.reloadDashboardFromSupabase?.({silent:true,forceRefresh:true}).catch(err=>console.warn('[Dashboard reload online failed]',err));
+    refreshHistoryAndDashboard({reason:'online',force:true});
   });
 
   renderSalesSupabaseUi();
