@@ -722,7 +722,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
       <!-- Sección Mesas -->
       <div class="ventas-section-title">Mesas abiertas</div>
       <div id="mesas-container"></div>
-      <div id="mesas-empty" style="display:none;font-size:12px;color:var(--ink3);padding:8px 0 4px">Sin mesas abiertas</div>
+      <div id="mesas-empty" style="display:none;font-size:12px;color:var(--ink3);padding:8px 0 4px">No hay mesas abiertas.</div>
       <!-- Sección Reservas -->
       <div class="ventas-section-title" style="margin-top:20px">Reservas</div>
       <div id="reservas-container"></div>
@@ -2349,21 +2349,29 @@ function setVentasFiltro(t){ventasFiltroTipo=t;renderVentasFiltroChips();renderM
 function renderMesasSection(){
   const c=$('mesas-container'),e=$('mesas-empty');if(!c)return;
   const ooSync=window.getOpenOrdersSyncState?.();
-  if(ooSync?.state==='syncing' && !ooSync?.hasSupabaseRead){
+  if(ooSync?.state==='syncing' && !ooSync?.hasSupabaseRead && !(mesas||[]).length){
     c.innerHTML='<div class="empty">Cargando mesas…</div>';
     if(e)e.style.display='none';
     return;
   }
   const f=ventasFiltroTipo==='todos'?mesas:mesas.filter(m=>m.tipo===ventasFiltroTipo);
-  if(!f.length){c.innerHTML='';e.style.display='block';return;}
+  if(!f.length){
+    c.innerHTML='';
+    if(e){
+      e.textContent=ooSync?.state==='error'?'No pudimos cargar las mesas. Reintentá en unos segundos.':'No hay mesas abiertas.';
+      e.style.display='block';
+    }
+    return;
+  }
   e.style.display='none';
   c.innerHTML=`<div class="mesas-grid">${f.map(m=>{
     const items=Object.values(m.items||{}).reduce((s,v)=>s+(v.qty||0),0);
     const total=Object.values(m.items||{}).reduce((s,v)=>s+carritoItemTotal(v),0);
+    const syncing=m._syncing||(!m._sb_id&&ooSync?.ready);
     return `<div class="mesa-card ${items>0?'con-items':'sin-items'}" onclick="abrirMesa('${m.id}')">
       <span class="mesa-tipo-badge ${tipoBadgeClass(m.tipo||'salon')}">${tipoLabel(m.tipo||'salon')}</span>
       <div class="mesa-nombre">${m.nombre}</div>
-      <div class="mesa-items">${items} ítem${items!==1?'s':''}</div>
+      <div class="mesa-items">${items} ítem${items!==1?'s':''}${syncing?' · guardando…':''}</div>
       <div class="mesa-total">${items>0?fmt(total):'—'}</div>
       <div class="mesa-close" onclick="event.stopPropagation();pedirEliminarMesa('${m.id}')">×</div>
     </div>`;
@@ -2407,14 +2415,18 @@ function cerrarModalNuevaMesa(){$('modal-nueva-mesa').classList.remove('open');}
 function closeModalNuevaMesa(e){if(e.target===$('modal-nueva-mesa'))cerrarModalNuevaMesa();}
 async function confirmarNuevaMesa(){
   const nombre=$('nueva-mesa-input').value.trim();if(!nombre){showToast('Ingresá un nombre');return;}
-  const m={id:'m_'+Date.now(),nombre,tipo:tipoNuevaMesa,items:{},pago:'ef',payment_mode:'single',pagos:[],apertura:nowISO(),_sb_id:null};
+  const m={id:'m_'+Date.now(),nombre,tipo:tipoNuevaMesa,items:{},pago:'ef',payment_mode:'single',pagos:[],apertura:nowISO(),_sb_id:null,_syncing:true};
+  window.markOpenOrderLocalCreate?.(m.id);
   mesas.push(m);save();syncMesasSheets();cerrarModalNuevaMesa();
+  renderMesasSection();
   const synced=await window.syncMesaToSupabase?.(m).catch(()=>false);
+  m._syncing=!synced;
+  save();
   if(synced===false && window.getOpenOrdersSyncState?.()?.ready){
-    showToast('Trabajando sin conexión. Las mesas se actualizarán cuando vuelva la conexión.');
+    showToast('No pudimos cargar las mesas. Reintentá en unos segundos.');
   }
   // Post-creación: forzar refresh rápido para sincronizar con otros dispositivos
-  setTimeout(()=>window.triggerOORefresh?.('post_action'),600);
+  setTimeout(()=>window.triggerOORefresh?.('post_action'),700);
   abrirMesa(m.id);
 }
 document.addEventListener('DOMContentLoaded',()=>{
@@ -2449,13 +2461,19 @@ function abrirReservaComoVenta(id){
   $('view-mesas').style.display='none';$('view-pedido').style.display='block';
   loadPaymentState(r);renderCargaCats();renderProdGrid();renderCart();
 }
-function volverAMesas(){
+async function volverAMesas(){
   if(mesaActivaId&&!mesaActivaId.startsWith('reserva_')){
-    const m=mesas.find(x=>x.id===mesaActivaId);if(m){m.items={...carrito};m.pago=pago;m.payment_mode=paymentMode;m.pagos=paymentMode==='mixed'?getDraftMixedPayments():[];save();syncMesasSheets();window.syncMesaToSupabase?.(m).catch(()=>{});}
+    const m=mesas.find(x=>x.id===mesaActivaId);if(m){
+      m.items={...carrito};m.pago=pago;m.payment_mode=paymentMode;m.pagos=paymentMode==='mixed'?getDraftMixedPayments():[];
+      m._syncing=!!window.getOpenOrdersSyncState?.()?.ready;
+      save();syncMesasSheets();
+      window.syncMesaToSupabase?.(m).then(ok=>{m._syncing=!ok;save();renderMesasSection();}).catch(()=>{m._syncing=true;save();renderMesasSection();});
+    }
   }else if(mesaActivaId&&mesaActivaId.startsWith('reserva_')){
     const r=reservas.find(x=>x.id===mesaActivaId.replace('reserva_',''));if(r){r.pago=pago;r.payment_mode=paymentMode;r.pagos=paymentMode==='mixed'?getDraftMixedPayments():[];save();syncReservasSheets();}
   }
   renderVentas();
+  setTimeout(()=>window.triggerOORefresh?.('post_action'),700);
 }
 function saveMesaCarrito(){
   if(!mesaActivaId||mesaActivaId.startsWith('reserva_'))return;
@@ -4398,6 +4416,8 @@ if(config.webappUrl){loadFromSheets();}
   let ooRealtimeStoreId='';
   let ooRealtimeActive=false;
   let ooRealtimeDebounce=null;
+  let ooRecentLocalCreateUntil=0;
+  let ooLastUserErrorToast=0;
 
   // ── Debounce / cooldown ────────────────────────────
   let ooFetching=false;
@@ -4424,8 +4444,19 @@ if(config.webappUrl){loadFromSheets();}
     catch{return new Date().toLocaleString();}
   }
   function ooSetState(s,err){ooState=s;ooError=err||'';ooUpdateDiag();}
+  function ooLocalMesaCount(){return Array.isArray(mesas)?mesas.length:0;}
+  function ooToastLoadError(silent,msg){
+    if(silent||typeof window.showToast!=='function')return;
+    const now=Date.now();
+    if(now-ooLastUserErrorToast<3500)return;
+    ooLastUserErrorToast=now;
+    showToast(msg||'No pudimos cargar las mesas. Reintentá en unos segundos.');
+  }
+  function markOpenOrderLocalCreate(){
+    ooRecentLocalCreateUntil=Date.now()+5000;
+  }
   function prepareOpenOrdersLoading(){
-    if(ooReady()&&!ooHasSupabaseRead&&ooState!=='syncing') ooSetState('syncing','');
+    if(ooReady()&&!ooHasSupabaseRead&&!ooLocalMesaCount()&&ooState!=='syncing') ooSetState('syncing','');
   }
   function ooActiveTab(){return window.activeTab||activeTab||'carga';}
   function ooRenderVisible(){
@@ -4468,21 +4499,34 @@ if(config.webappUrl){loadFromSheets();}
     const now=Date.now();
     const minCooldown=force?OO_FORCE_COOLDOWN:OO_COOLDOWN;
     // Cooldown: evitar spam
-    if(ooFetching)return{ok:false,reason:'already_fetching'};
-    if(!force && now-ooLastFetch<minCooldown)return{ok:false,reason:'cooldown'};
+    if(ooFetching){
+      ooRenderVisible();
+      return{ok:false,reason:'already_fetching'};
+    }
+    if(!force && now-ooLastFetch<minCooldown){
+      ooRenderVisible();
+      return{ok:false,reason:'cooldown'};
+    }
 
     // Si no hay cliente aún, esperar hasta 3s (Supabase puede estar inicializando)
     if(!ooReady()){
       const ready=await waitForOOReady(3000);
       if(!ready){
-        // No disponible — mantener mesas locales, sin error para usuario
+        ooSetState(ooLocalMesaCount()?'local':'error','No se pudo cargar la sesión o tienda activa');
+        ooToastLoadError(silent);
+        ooRenderVisible();
         return{ok:false,reason:'not_ready'};
       }
     }
 
     const client=ooClient();
     const storeId=ooStoreId();
-    if(!client||!storeId)return{ok:false,reason:'no_client'};
+    if(!client||!storeId){
+      ooSetState(ooLocalMesaCount()?'local':'error','No se pudo cargar la sesión o tienda activa');
+      ooToastLoadError(silent);
+      ooRenderVisible();
+      return{ok:false,reason:'no_client'};
+    }
 
     ooFetching=true;
     ooLastFetch=Date.now();
@@ -4498,8 +4542,26 @@ if(config.webappUrl){loadFromSheets();}
         .eq('status','open'));
       if(ordersErr)throw ordersErr;
 
+      if((!orders||!orders.length)&&Date.now()<ooRecentLocalCreateUntil&&ooLocalMesaCount()){
+        await new Promise(r=>setTimeout(r,800));
+        ({data:orders,error:ordersErr}=await client
+          .from('open_orders')
+          .select(extendedCols)
+          .eq('store_id',storeId)
+          .eq('status','open'));
+        if(ordersErr)throw ordersErr;
+      }
+
       if(!orders||!orders.length){
-        // Supabase dice 0 mesas abiertas → limpiar local
+        if(Date.now()<ooRecentLocalCreateUntil&&ooLocalMesaCount()){
+          const msg='La mesa creada todavía no apareció en la lectura remota';
+          ooSetState('error',msg);
+          ooToastLoadError(silent);
+          ooRenderVisible();
+          console.warn('[open_orders] recent local mesa not found after retry',{storeId,localCount:ooLocalMesaCount()});
+          return{ok:false,reason:'empty_after_create',message:msg};
+        }
+        // Supabase dice 0 mesas abiertas sin creación reciente → limpiar local
         mesas=[];
         if(typeof window.save==='function')window.save();
         ooHasSupabaseRead=true;ooState='supabase';ooError='';ooLastRead=ooStamp();ooCount=0;ooItemCount=0;ooUpdateDiag();
@@ -4560,14 +4622,19 @@ if(config.webappUrl){loadFromSheets();}
       if(!silent && typeof window.showToast==='function'){
         const isPermission=msg.toLowerCase().includes('permission')||msg.toLowerCase().includes('rls')||msg.toLowerCase().includes('policy');
         if(isPermission){
-          showToast('No pudimos cargar las mesas. Pedile al administrador que verifique los permisos.');
+          ooToastLoadError(false,'No pudimos cargar las mesas. Pedile al administrador que verifique los permisos.');
         } else {
-          showToast('Trabajando sin conexión. Los cambios se sincronizarán cuando vuelva la conexión.');
+          ooToastLoadError(false,'No pudimos cargar las mesas. Reintentá en unos segundos.');
         }
       }
+      ooRenderVisible();
       return{ok:false,error:err,message:msg};
     }finally{
       ooFetching=false;
+      if(ooState==='syncing'&&!ooHasSupabaseRead){
+        ooSetState(ooLocalMesaCount()?'local':'error',ooError||'No pudimos cargar las mesas');
+      }
+      ooRenderVisible();
     }
   }
 
@@ -4669,15 +4736,20 @@ if(config.webappUrl){loadFromSheets();}
       const sbId=await createOpenOrderInSupabase(mesa);
       if(sbId){
         mesa._sb_id=sbId;
+        mesa._syncing=false;
         // Persistir _sb_id en el array global
         const arr=mesas||[];
         const idx=arr.findIndex(m=>m.id===mesa.id);
-        if(idx>=0)arr[idx]._sb_id=sbId;
+        if(idx>=0){arr[idx]._sb_id=sbId;arr[idx]._syncing=false;}
         if(typeof window.save==='function')window.save();
       }
     }
     if(!mesa._sb_id)return false;
     const ok=await syncOpenOrderItems(mesa._sb_id,mesa.items||{},storeId);
+    mesa._syncing=!ok;
+    const idx=(mesas||[]).findIndex(m=>m.id===mesa.id);
+    if(idx>=0)mesas[idx]._syncing=!ok;
+    if(typeof window.save==='function')window.save();
     return ok;
   }
 
@@ -4743,10 +4815,9 @@ if(config.webappUrl){loadFromSheets();}
   async function triggerOORefresh(ctx){
     startOORealtime();
     const force=['post_action','realtime','focus','tab','online'].includes(ctx);
-    const r=await loadOpenOrdersFromSupabase({force,silent:true});
-    if(r?.ok){
-      ooRenderVisible();
-    }
+    const silent=!['post_action','manual'].includes(ctx);
+    const r=await loadOpenOrdersFromSupabase({force,silent});
+    ooRenderVisible();
     if(ooActiveTab()==='carga'&&typeof window.reloadCustomersReservationsFromSupabase==='function'){
       window.reloadCustomersReservationsFromSupabase(true).then(()=>renderReservasSection()).catch(()=>{});
     }
@@ -4816,6 +4887,7 @@ if(config.webappUrl){loadFromSheets();}
   window.updateOODiag=ooUpdateDiag;
   window.triggerOORefresh=triggerOORefresh;
   window.prepareOpenOrdersLoading=prepareOpenOrdersLoading;
+  window.markOpenOrderLocalCreate=markOpenOrderLocalCreate;
   window.startOpenOrdersRealtime=startOORealtime;
   window.stopOpenOrdersRealtime=stopOORealtime;
   window.getOpenOrdersSyncState=function(){
