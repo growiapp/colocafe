@@ -4340,9 +4340,10 @@ if(config.webappUrl){loadFromSheets();}
       supportCard('Recuperación de datos','Usá esta sección si se cargaron ventas, reservas o gastos y no aparecen en Historial o Dashboard.',
         `<div style="font-size:12px;color:var(--red);line-height:1.45;background:rgba(176,48,48,.08);border:1px solid rgba(176,48,48,.18);border-radius:10px;padding:9px">Antes de reintentar sincronización, exportá un respaldo local. No borres datos ni cierres sesión si estás intentando recuperar información.</div>`,
         `<div style="display:grid;gap:8px">
-          <div><strong>Paso 1</strong><br><span style="font-size:12px;color:var(--ink2)">Descarga una copia de seguridad de los datos guardados en este dispositivo.</span><div style="margin-top:6px">${supportButton('Exportar respaldo local','exportLocalRecoveryBackup()','alt')}</div></div>
+          <div><strong>Paso 1 — Generar respaldo</strong><br><span style="font-size:12px;color:var(--ink2)">Guardá una copia de seguridad de los datos de este dispositivo. Si la descarga no aparece, usá copiar o mostrar.</span><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px">${supportButton('Descargar respaldo','exportLocalRecoveryBackup()','alt')}${supportButton('Descargar TXT','downloadLocalRecoveryBackupTxt()')}${supportButton('Copiar respaldo','copyLocalRecoveryBackup()')}${supportButton('Mostrar respaldo','showLocalRecoveryBackup()')}</div></div>
           <div><strong>Paso 2</strong><br><span style="font-size:12px;color:var(--ink2)">Busca ventas, reservas o gastos que estén en este dispositivo pero no en la base.</span><div style="margin-top:6px">${supportButton('Diagnosticar datos locales','diagnoseLocalRecoveryData()')}</div></div>
           <div><strong>Paso 3</strong><br><span style="font-size:12px;color:var(--ink2)">Sube datos faltantes evitando duplicados. Usar después del respaldo.</span><div style="margin-top:6px">${supportButton('Reintentar sincronización local','resyncMissingLocalSales()','danger')}</div></div>
+          <div id="local-recovery-output" style="display:grid;gap:8px"></div>
         </div>`),
       supportCard('Catálogo','Revisá productos y categorías cuando el menú no se ve actualizado.',
         supportMetric('Categorías en este dispositivo', (cats||[]).length)+
@@ -4383,6 +4384,7 @@ if(config.webappUrl){loadFromSheets();}
         </details>
       </div>
     </div>`;
+    setTimeout(()=>renderRecoveryOutput(),0);
   };
 
   function renderSupabaseStatus(){
@@ -10797,22 +10799,79 @@ if(config.webappUrl){loadFromSheets();}
     const d=new Date();
     return `colocafe-local-backup-${getLocalDateString(d)}-${pad2(d.getHours())}-${pad2(d.getMinutes())}.json`;
   }
-  function downloadJsonFile(filename,payload){
-    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url;
-    a.download=filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  function recoveryJsonSizeLabel(json){
+    const bytes=new Blob([json]).size;
+    if(bytes>1024*1024) return `${(bytes/1024/1024).toFixed(2)} MB`;
+    if(bytes>1024) return `${Math.round(bytes/1024)} KB`;
+    return `${bytes} bytes`;
   }
-  window.exportLocalRecoveryBackup=async function(){
-    if(!ensureRecoveryToolsAllowed()) return null;
+  function setRecoveryUiState(patch={}){
+    window.__localRecoveryUi={...(window.__localRecoveryUi||{}),...patch,updatedAt:supportStamp?.()||stampSalesMoment()};
+    window.renderTechnicalSupportPanel?.();
+  }
+  function getRecoveryTextarea(){
+    return document.getElementById('local-recovery-backup-text');
+  }
+  function renderRecoveryOutput(){
+    const host=document.getElementById('local-recovery-output');
+    if(!host) return;
+    const state=window.__localRecoveryUi||{};
+    const backup=window.__localRecoveryLastBackup||null;
+    const diag=state.diagnosticSummary||null;
+    const resync=state.resyncSummary||null;
+    const error=state.error||'';
+    host.innerHTML=`
+      ${backup?`<div style="background:var(--surf2);border:1px solid var(--border);border-radius:10px;padding:10px;line-height:1.5">
+        <strong>Último respaldo generado</strong><br>
+        Tamaño aproximado: ${backup.sizeLabel} · claves guardadas: ${backup.localStorageKeys} · claves relevantes: ${backup.relevantKeys}<br>
+        Si no se descargó el archivo, usá <strong>Copiar respaldo</strong> o <strong>Mostrar respaldo</strong>.
+      </div>`:''}
+      ${diag?`<div style="background:var(--surf2);border:1px solid var(--border);border-radius:10px;padding:10px;line-height:1.55">
+        <strong>Último diagnóstico</strong><br>
+        Ventas locales: ${diag.localTickets} · ventas remotas: ${diag.remoteTickets} · ventas faltantes: ${diag.localNotSynced}<br>
+        Posibles duplicados: ${diag.possibleDuplicates} · requiere revisión: ${diag.requiresReview}<br>
+        Reservas locales: ${diag.localReservations} · gastos locales: ${diag.localExpenses}<br>
+        Claves relevantes: ${diag.relevantKeys} ${diag.lastError?`<br><span style="color:var(--red)">Último error: ${escapeHtml(diag.lastError)}</span>`:''}
+      </div>`:''}
+      ${resync?`<div style="background:var(--surf2);border:1px solid var(--border);border-radius:10px;padding:10px;line-height:1.55">
+        <strong>Último reintento</strong><br>
+        Insertadas: ${resync.inserted} · omitidas: ${resync.existing} · posibles duplicados: ${resync.possibleDuplicates}<br>
+        Requiere revisión: ${resync.requiresReview} · errores: ${resync.errors}<br>
+        Items insertados: ${resync.itemsInserted} · pagos insertados: ${resync.paymentsInserted}
+      </div>`:''}
+      ${error?`<div style="color:var(--red);background:rgba(176,48,48,.08);border:1px solid rgba(176,48,48,.18);border-radius:10px;padding:10px">${escapeHtml(error)}</div>`:''}
+      ${state.showBackupText&&backup?`<div style="display:grid;gap:8px">
+        <textarea id="local-recovery-backup-text" readonly style="width:100%;min-height:260px;font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surf2);color:var(--ink)">${escapeHtml(backup.json)}</textarea>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <button class="btn ghost" type="button" onclick="selectLocalRecoveryBackupText()">Seleccionar todo</button>
+          <button class="btn alt" type="button" onclick="copyLocalRecoveryBackup()">Copiar</button>
+        </div>
+      </div>`:''}
+    `;
+  }
+  function downloadRecoveryText(filename,text,type='application/json'){
+    const blob=new Blob([text],{type});
+    const url=URL.createObjectURL(blob);
+    try{
+      const a=document.createElement('a');
+      a.href=url;
+      a.download=filename;
+      a.rel='noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return true;
+    }catch(err){
+      setRecoveryUiState({showBackupText:true,error:`No se pudo iniciar la descarga: ${err?.message||String(err)}`});
+      return false;
+    }finally{
+      setTimeout(()=>URL.revokeObjectURL(url),1200);
+    }
+  }
+  window.getLocalRecoveryBackupPayload=async function(){
     const localStorageDump=readStorageObject(localStorage);
     const sessionStorageDump=readStorageObject(sessionStorage);
-    const payload={
+    return {
       exported_at:new Date().toISOString(),
       exported_at_local:getLocalTimestamp(),
       appVersion:window.APP_VERSION||APP_VERSION,
@@ -10824,10 +10883,70 @@ if(config.webappUrl){loadFromSheets();}
       relevantSessionStorage:collectRelevantStorageEntries(sessionStorageDump),
       memory:getRecoveryMemoryState()
     };
+  };
+  async function ensureLocalRecoveryBackup(){
+    if(!ensureRecoveryToolsAllowed()) return null;
+    if(window.__localRecoveryLastBackup?.json) return window.__localRecoveryLastBackup;
+    const payload=await window.getLocalRecoveryBackupPayload();
+    const json=JSON.stringify(payload,null,2);
+    const filename=makeRecoveryFilename();
+    const localStorageKeys=Object.keys(payload.localStorage||{}).length;
+    const relevantKeys=Object.keys(payload.relevantLocalStorage||{}).length+Object.keys(payload.relevantSessionStorage||{}).length;
+    window.__localRecoveryLastBackup={payload,json,filename,sizeLabel:recoveryJsonSizeLabel(json),localStorageKeys,relevantKeys,createdAt:supportStamp()};
+    setRecoveryUiState({backupSummary:window.__localRecoveryLastBackup,error:'',showBackupText:false});
+    return window.__localRecoveryLastBackup;
+  }
+  window.exportLocalRecoveryBackup=async function(){
+    if(!ensureRecoveryToolsAllowed()) return null;
+    const payload=await window.getLocalRecoveryBackupPayload();
+    const json=JSON.stringify(payload,null,2);
+    const filename=makeRecoveryFilename();
+    const localStorageKeys=Object.keys(payload.localStorage||{}).length;
+    const relevantKeys=Object.keys(payload.relevantLocalStorage||{}).length+Object.keys(payload.relevantSessionStorage||{}).length;
+    window.__localRecoveryLastBackup={payload,json,filename,sizeLabel:recoveryJsonSizeLabel(json),localStorageKeys,relevantKeys,createdAt:supportStamp()};
+    setRecoveryUiState({backupSummary:window.__localRecoveryLastBackup,error:'',showBackupText:false});
     console.log('[Recovery local backup]',payload);
-    downloadJsonFile(makeRecoveryFilename(),payload);
-    showToast('Respaldo local exportado.');
+    const ok=downloadRecoveryText(filename,json,'application/json');
+    showToast(ok?'Respaldo generado. Si no se descargó, usá Copiar respaldo.':'Respaldo generado. Usá Copiar respaldo.');
     return payload;
+  };
+  window.downloadLocalRecoveryBackupJson=async function(){
+    const backup=await ensureLocalRecoveryBackup();
+    if(!backup) return;
+    const ok=downloadRecoveryText(backup.filename,backup.json,'application/json');
+    showToast(ok?'Descarga iniciada.':'No se pudo descargar. Usá Copiar respaldo.');
+  };
+  window.downloadLocalRecoveryBackupTxt=async function(){
+    const backup=await ensureLocalRecoveryBackup();
+    if(!backup) return;
+    const txtName=backup.filename.replace(/\.json$/i,'.txt');
+    const ok=downloadRecoveryText(txtName,backup.json,'text/plain');
+    showToast(ok?'Descarga TXT iniciada.':'No se pudo descargar. Usá Copiar respaldo.');
+  };
+  window.copyLocalRecoveryBackup=async function(){
+    const backup=await ensureLocalRecoveryBackup();
+    if(!backup) return;
+    try{
+      await navigator.clipboard.writeText(backup.json);
+      setRecoveryUiState({showBackupText:false,error:''});
+      showToast('Respaldo copiado.');
+    }catch(err){
+      setRecoveryUiState({showBackupText:true,error:'No pudimos copiar automáticamente. Seleccioná el texto y copialo manualmente.'});
+      setTimeout(()=>window.selectLocalRecoveryBackupText?.(),80);
+      showToast('Seleccioná y copiá el respaldo.');
+    }
+  };
+  window.showLocalRecoveryBackup=async function(){
+    const backup=await ensureLocalRecoveryBackup();
+    if(!backup) return;
+    setRecoveryUiState({showBackupText:true,error:''});
+    setTimeout(()=>document.getElementById('local-recovery-output')?.scrollIntoView({behavior:'smooth',block:'nearest'}),60);
+  };
+  window.selectLocalRecoveryBackupText=function(){
+    const textarea=getRecoveryTextarea();
+    if(!textarea) return;
+    textarea.focus();
+    textarea.select();
   };
   function getSaleGroupTimestamp(group){
     const ts=group?.ref?.timestamp||'';
@@ -11028,10 +11147,22 @@ if(config.webappUrl){loadFromSheets();}
         relevantSessionStorage:collectRelevantStorageEntries(sessionStorageDump)
       };
       console.log('[Recovery diagnose local data]',report);
+      setRecoveryUiState({
+        diagnosticSummary:{
+          ...summary,
+          relevantKeys:(summary.localKeys||[]).length+(summary.sessionKeys||[]).length,
+          lastError:''
+        },
+        error:''
+      });
       showToast(`Diagnóstico local: ${summary.localNotSynced} venta(s) faltante(s), ${summary.possibleDuplicates} posible(s) duplicado(s).`);
       return report;
     }catch(err){
       console.error('[Recovery diagnose failed]',{message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''});
+      setRecoveryUiState({
+        diagnosticSummary:{lastError:err?.message||String(err),localTickets:0,remoteTickets:0,localNotSynced:0,possibleDuplicates:0,requiresReview:0,localReservations:(reservas||[]).length,localExpenses:(gastos||[]).length,relevantKeys:0},
+        error:err?.message||String(err)
+      });
       showToast('No pudimos diagnosticar datos locales. Reintentá.');
       return null;
     }
@@ -11076,10 +11207,12 @@ if(config.webappUrl){loadFromSheets();}
       refreshSalesDiagnostics({silent:true}).catch(()=>{});
       refreshHistoryAndDashboard({reason:'recovery_resync',force:true});
       console.log('[Recovery resync summary]',summary);
+      setRecoveryUiState({resyncSummary:summary,error:''});
       showToast(`Recuperación: ${summary.inserted} venta(s) insertada(s), ${summary.possibleDuplicates} posible(s) duplicado(s), ${summary.errors} error(es).`,4200);
       return summary;
     }catch(err){
       console.error('[Recovery resync failed]',{message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''});
+      setRecoveryUiState({resyncSummary:{inserted:0,existing:0,possibleDuplicates:0,requiresReview:0,errors:1,itemsInserted:0,paymentsInserted:0},error:err?.message||String(err)});
       showToast('No pudimos reintentar la sincronización local.');
       return null;
     }
