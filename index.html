@@ -1527,6 +1527,7 @@ function pad2(n){return String(n).padStart(2,'0');}
 function sameId(a,b){return String(a)===String(b);}
 const RESERVA_INACTIVE_STATUSES=new Set(['paid','pagada','pagado','cobrada','cobrado','closed','cerrada','cerrado','cancelled','canceled','cancelada','cancelado','deleted','eliminada','eliminado']);
 const reservaHiddenUntil=new Map();
+const reservaPendingUntil=new Map();
 function normalizeReservaStatus(status){
   return String(status||'pendiente').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 }
@@ -1550,6 +1551,34 @@ function isReservationOptimisticallyHidden(reservation){
   }
   return false;
 }
+function markReservationPending(reservation,reason='save',ttlMs=90000){
+  const until=Date.now()+ttlMs;
+  getReservationIdentityValues(reservation).forEach(id=>reservaPendingUntil.set(id,{until,reason}));
+}
+function clearReservationPending(reservation){
+  getReservationIdentityValues(reservation).forEach(id=>reservaPendingUntil.delete(id));
+}
+function isReservationPending(reservation){
+  const now=Date.now();
+  for(const id of getReservationIdentityValues(reservation)){
+    const entry=reservaPendingUntil.get(id);
+    if(!entry)continue;
+    if(entry.until>now)return true;
+    reservaPendingUntil.delete(id);
+  }
+  return false;
+}
+function reservationsReferToSame(a,b){
+  const aIds=getReservationIdentityValues(a),bIds=getReservationIdentityValues(b);
+  return aIds.some(id=>bIds.includes(id));
+}
+function mergeRemoteReservationsWithOptimistic(remoteList){
+  const merged=[...(remoteList||[])];
+  (reservas||[]).filter(r=>isReservationPending(r)&&isReservationVisibleInCaja(r)).forEach(local=>{
+    if(!merged.some(remote=>reservationsReferToSame(remote,local)))merged.push(local);
+  });
+  return merged;
+}
 function isReservationVisibleInCaja(reservation){
   if(!reservation||isReservationOptimisticallyHidden(reservation))return false;
   if(typeof findExistingReservationSaleRows==='function'&&findExistingReservationSaleRows(reservation).length)return false;
@@ -1558,6 +1587,10 @@ function isReservationVisibleInCaja(reservation){
 function cloneReservasState(){
   try{return JSON.parse(JSON.stringify(reservas||[]));}
   catch(_){return [...(reservas||[])];}
+}
+function cloneMesasState(){
+  try{return JSON.parse(JSON.stringify(mesas||[]));}
+  catch(_){return [...(mesas||[])];}
 }
 function getMesaOpenOrderId(m){return m?._sb_id||m?.open_order_id||m?.id||'';}
 function findMesaByAnyId(id){
@@ -2500,11 +2533,25 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 function pedirEliminarMesa(id){
   const m=findMesaByAnyId(id);if(!m)return;
-  pedirConfirm(`¿Eliminar "${m.nombre}"? Se perderán los ítems.`,()=>{
+  pedirConfirm(`¿Eliminar "${m.nombre}"? Se perderán los ítems.`,async()=>{
+    const before=cloneMesasState();
     const sbId=m._sb_id||null;
     removeMesaByAnyId(id);save();syncMesasSheets();
-    if(sbId)window.deleteOpenOrderFromSupabase?.(sbId).catch(()=>{});
-    renderVentas();showToast('Mesa eliminada');
+    renderMesasSection();
+    try{
+      if(sbId){
+        if(!window.deleteOpenOrderFromSupabase)throw new Error('No se pudo eliminar la mesa');
+        const ok=await cajaWithTimeout(window.deleteOpenOrderFromSupabase?.(sbId),'delete_open_order_supabase',10000);
+        if(ok===false)throw new Error('No se pudo eliminar la mesa');
+      }
+      showToast('Mesa eliminada.');
+      setTimeout(()=>window.triggerOORefresh?.('post_action'),500);
+    }catch(err){
+      mesas=before;
+      save();renderMesasSection();
+      if(window.canShowClientTechnicalUi?.())console.warn('[Caja] delete mesa rollback',err);
+      showToast('No pudimos eliminar la mesa. Reintentá.');
+    }
   });
 }
 async function abrirMesa(id){
@@ -3101,8 +3148,9 @@ function guardarReserva(){
     items,pago:reservaPago};
   if(editReservaId){Object.assign(reservas.find(x=>x.id===editReservaId),data);}
   else{reservas.push({id:'res_'+Date.now(),...data});}
-  save();cerrarModalReserva();syncReservasSheets();renderVentas();
-  showToast(editReservaId?'✓ Reserva actualizada':'✓ Reserva creada');
+  const saved=editReservaId?reservas.find(x=>sameId(x.id,editReservaId)):reservas[reservas.length-1];
+  save();cerrarModalReserva();renderReservasSection();
+  return saved;
 }
 
 // ══════════════════════════════════════════════════
@@ -6980,7 +7028,7 @@ if(config.webappUrl){loadFromSheets();}
       if(!reservationRows.length){
         if(!silent) showToast('No hay reservas registradas todavía.');
         setCrState('local');
-        reservas=[];
+        reservas=mergeRemoteReservationsWithOptimistic([]);
         save();
         if(activeTab==='carga') renderReservasSection();
         else renderVentas();
@@ -6989,7 +7037,8 @@ if(config.webappUrl){loadFromSheets();}
       }
       const customerRows=customerRowsForMap || clientes;
       crWarnings=[];
-      reservas=[...reservationRows].map(r=>mapReservationFromSupabase(r,customerRows)).sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')));
+      const remoteReservations=[...reservationRows].map(r=>mapReservationFromSupabase(r,customerRows));
+      reservas=mergeRemoteReservationsWithOptimistic(remoteReservations).sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')));
       save();
       if(activeTab==='carga') renderReservasSection();
       else renderVentas();
@@ -7621,16 +7670,28 @@ if(config.webappUrl){loadFromSheets();}
   const _guardarReservaCr=window.guardarReserva;
   if(typeof _guardarReservaCr==='function'){
     window.guardarReserva=async function(...args){
+      const before=cloneReservasState();
       const wasEdit=!!editReservaId;
       const beforeIds=new Set(reservas.map(r=>String(r.id)));
       const targetId=editReservaId;
       const res=_guardarReservaCr.apply(this,args);
       const reservation=wasEdit ? reservas.find(r=>sameId(r.id,targetId)) : reservas.find(r=>!beforeIds.has(String(r.id)));
-      if(reservation && hasCrSupabaseReady()){
+      if(reservation){
+        markReservationPending(reservation,wasEdit?'edit':'create');
+        renderReservasSection();
+      }
+      if(reservation){
         try{
+          if(!hasCrSupabaseReady())throw new Error('No hay conexión activa para guardar la reserva');
           await saveReservationToSupabase(reservation);
-          showToast('✓ Reserva guardada');
+          clearReservationPending(reservation);
+          await syncReservasSheets().catch(()=>false);
+          showToast('Reserva guardada.');
+          window.reloadCustomersReservationsFromSupabase?.(true).then(()=>renderReservasSection()).catch(()=>{});
         }catch(err){
+          if(reservation)clearReservationPending(reservation);
+          reservas=before;
+          save();renderReservasSection();
           const msg=getSupabaseErrorMessage(err);
           setCrState('error',msg);
           console.error('[guardarReserva -> saveReservationToSupabase failed]',{
@@ -7640,7 +7701,7 @@ if(config.webappUrl){loadFromSheets();}
             details:err?.details||'',
             hint:err?.hint||''
           });
-          showToast('Reserva guardada. Se actualizará cuando vuelva la conexión.');
+          showToast('No pudimos guardar la reserva. Reintentá.');
         }
       }
       return res;
@@ -7649,14 +7710,7 @@ if(config.webappUrl){loadFromSheets();}
   const _pedirEliminarReservaCr=window.pedirEliminarReserva;
   if(typeof _pedirEliminarReservaCr==='function'){
     window.pedirEliminarReserva=function(id,...args){
-      const reservation=reservas.find(r=>sameId(r.id,id));
-      const res=_pedirEliminarReservaCr.call(this,id,...args);
-      if(reservation){
-        setTimeout(()=>{
-          if(!reservas.some(r=>sameId(r.id,id))) deleteReservationFromSupabase(reservation).catch(err=>warnCrSupabaseFailure('reserva',err));
-        },0);
-      }
-      return res;
+      return _pedirEliminarReservaCr.call(this,id,...args);
     };
   }
 
