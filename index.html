@@ -1498,7 +1498,7 @@ let mesaActivaId=null,tipoNuevaMesa='salon',dashFiltro='hoy';
 let dashboardRangeWasManuallySelected=false;
 let dashboardInitialRangeResolved=false;
 let dashboardSmartRangeMessage='';
-let prodParaVariantes=null,variantesSeleccionadas={};
+let prodParaVariantes=null,variantesSeleccionadas={},variantesTarget='pedido';
 let clienteModalRetorno=null,tipoNuevaMesaReserva='salon';
 let reservaPago='ef',reservaCarrito={},catReserva='todos';
 let confirmCallback=null,activeMenuTab='cats',ventasFiltroTipo='todos';
@@ -1759,6 +1759,7 @@ function showToast(msg,ms=2200){const t=$('toast');t.textContent=msg;t.classList
 function tipoLabel(t){return t==='salon'?'Salón':t==='delivery'?'Delivery':'Take away';}
 function tipoBadgeClass(t){return t==='salon'?'mesa-tipo-salon':t==='delivery'?'mesa-tipo-delivery':'mesa-tipo-takeaway';}
 function carritoItemTotal(item){return(item.precio+(item.vars||[]).reduce((s,v)=>s+v.precio,0))*item.qty;}
+function getCartItemVariantsText(item){return(item.vars||[]).map(v=>v.nombre+(v.precio?` +${fmt(v.precio)}`:'')).join(' · ');}
 function carritoTotalFn(c){return Object.values(c).reduce((s,i)=>s+carritoItemTotal(i),0);}
 function stockStatus(p){if(p.ilimitado)return'ok';return p.stock<=0?'out':p.stock<=5?'low':'ok';}
 function productRefs(product){
@@ -2957,9 +2958,8 @@ function renderCart(){
   ce.style.display='none';cr.style.display='flex';
   cr.innerHTML=items.map(([key,item])=>{
     const p=findProductById(item.prodId);if(!p){logProductDiag('carrito con producto no resoluble',item);return'';}
-    const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
-    const sub=(item.precio+varsExtra)*item.qty;
-    const varsStr=(item.vars||[]).map(v=>v.nombre+(v.precio?` +${fmt(v.precio)}`:'')).join(' · ');
+    const sub=carritoItemTotal(item);
+    const varsStr=getCartItemVariantsText(item);
     const safeKey=key.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     return `<div class="cart-row">
       <div class="c-name-wrap"><div class="c-name">${escapeHtml(p.name)}</div>
@@ -2987,8 +2987,8 @@ function setPago(t){
   persistCurrentPaymentSelection();
   renderCart();
 }
-function abrirModalVariantes(p){
-  prodParaVariantes=p;variantesSeleccionadas={};
+function abrirModalVariantes(p,target='pedido'){
+  prodParaVariantes=p;variantesSeleccionadas={};variantesTarget=target||'pedido';
   $('modal-variantes-titulo').textContent=p.name;$('modal-variantes-nota').value='';
   $('modal-variantes-grupos').innerHTML=(p.variantes||[]).map((grupo,gi)=>`
     <div class="mod-sel-grupo">
@@ -3002,7 +3002,7 @@ function abrirModalVariantes(p){
     </div>`).join('');
   actualizarTotalVariantes();$('modal-variantes').classList.add('open');
 }
-function cerrarModalVariantes(){$('modal-variantes').classList.remove('open');prodParaVariantes=null;}
+function cerrarModalVariantes(){$('modal-variantes').classList.remove('open');prodParaVariantes=null;variantesTarget='pedido';}
 function closeModalVariantes(e){if(e.target===$('modal-variantes'))cerrarModalVariantes();}
 function toggleVariante(gi,oi,tipo){
   const grupo=(prodParaVariantes.variantes||[])[gi];if(!grupo)return;
@@ -3031,8 +3031,14 @@ function confirmarVariantes(){
   const nota=$('modal-variantes-nota').value.trim();
   const productId=getProductFrontId(prodParaVariantes);
   const key=`${productId}_${vars.map(v=>v.nombre).sort().join(',')}_${Date.now()}`;
-  carrito[key]={prodId:productId,qty:1,vars,nota,precio:safeProductPrice(prodParaVariantes)};
-  cerrarModalVariantes();saveMesaCarrito();renderProdGrid();renderCart();
+  const item={prodId:productId,qty:1,vars,nota,precio:safeProductPrice(prodParaVariantes)};
+  if(variantesTarget==='reserva'){
+    reservaCarrito[key]=item;
+    cerrarModalVariantes();renderReservaProductoGrid();renderReservaCarrito();
+  }else{
+    carrito[key]=item;
+    cerrarModalVariantes();saveMesaCarrito();renderProdGrid();renderCart();
+  }
 }
 
 // ══════════════════════════════════════════════════
@@ -3167,11 +3173,12 @@ function renderReservaProductoGrid(){
   if(!list.length){el.innerHTML='<div class="empty" style="grid-column:1/-1">Sin productos</div>';$('res-total').textContent=fmt(carritoTotalFn(reservaCarrito));return;}
   el.innerHTML=list.map(p=>{
     const productId=getProductFrontId(p);
-    const qty=getCartQtyForProduct(reservaCarrito,p),cat=getCat(p.cat);
+    const qty=getCartQtyForProduct(reservaCarrito,p),cat=getCat(p.cat),hasVars=(p.variantes||[]).length>0;
     return `<div class="prod-card${qty>0?' in-cart':''}" data-product-id="${escapeAttr(productId)}" style="cursor:pointer">
       <div class="cat-dot" style="background:${cat.color}"></div>
       <div class="prod-name">${escapeHtml(p.name)}</div>
       <div class="prod-price">${fmt(safeProductPrice(p))}</div>
+      ${hasVars?`<div class="prod-mods-hint">🔧 Variantes</div>`:''}
       ${qty>0?`<div class="prod-badge">${qty}</div>`:''}
     </div>`;
   }).join('');
@@ -3180,6 +3187,7 @@ function renderReservaProductoGrid(){
 }
 function addItemReserva(id){
   const p=findProductById(id);if(!p){logProductDiag('handler reserva no encontró producto',{id});showToast('Producto no encontrado');return;}
+  if((p.variantes||[]).length>0){abrirModalVariantes(p,'reserva');return;}
   const productId=getProductFrontId(p);
   const key=`${productId}_plain`;
   reservaCarrito[key]?reservaCarrito[key].qty++:(reservaCarrito[key]={prodId:productId,qty:1,vars:[],nota:'',precio:safeProductPrice(p)});
@@ -3212,17 +3220,22 @@ function renderReservaCarrito(){
   rowsEl.innerHTML=items.map(([key,item])=>{
     const p=findProductById(item.prodId);
     const name=p?escapeHtml(p.name):escapeHtml(item.prodId);
-    const sub=item.precio*item.qty;
-    const safeKey=key.replace(/'/g,"\\'");
-    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
-      <div style="flex:1;font-size:13px;color:var(--ink)">${name}</div>
-      <div style="display:flex;align-items:center;gap:4px">
-        <button class="qty-btn" onclick="changeQtyReserva('${safeKey}',-1)" style="width:28px;height:28px;font-size:16px">−</button>
-        <span style="min-width:20px;text-align:center;font-size:13px;font-weight:500">${item.qty}</span>
-        <button class="qty-btn" onclick="changeQtyReserva('${safeKey}',1)" style="width:28px;height:28px;font-size:16px">+</button>
+    const sub=carritoItemTotal(item);
+    const varsStr=getCartItemVariantsText(item);
+    const safeKey=key.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return `<div class="cart-row">
+      <div class="c-name-wrap">
+        <div class="c-name">${name}</div>
+        ${varsStr?`<div class="c-mods">${varsStr}</div>`:''}
+        ${item.nota?`<div class="c-nota">${escapeHtml(item.nota)}</div>`:''}
       </div>
-      <span style="font-size:13px;color:var(--orange);min-width:52px;text-align:right">${fmt(sub)}</span>
-      <button onclick="removeItemReserva('${safeKey}')" style="background:none;border:none;color:var(--ink3);cursor:pointer;font-size:16px;padding:2px 4px;line-height:1" title="Eliminar">×</button>
+      <div class="qty-wrap">
+        <button class="qty-btn" onclick="changeQtyReserva('${safeKey}',-1)">−</button>
+        <span class="qty-n">${item.qty}</span>
+        <button class="qty-btn" onclick="changeQtyReserva('${safeKey}',1)">+</button>
+        <button class="qty-btn" onclick="removeItemReserva('${safeKey}')" style="color:var(--red);margin-left:2px" title="Eliminar">×</button>
+      </div>
+      <span class="c-sub">${fmt(sub)}</span>
     </div>`;
   }).join('');
   $('res-total').textContent=fmt(carritoTotalFn(reservaCarrito));
