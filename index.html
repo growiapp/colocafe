@@ -830,7 +830,40 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
     <button class="subtab-btn" id="stab-gastos-hist" onclick="switchHistSubtab('gastos')">Gastos</button>
   </div>
   <div id="hist-subtab-ventas">
-    <div class="hist-layout"><div id="hist-list"></div></div>
+    <div class="hist-layout">
+      <div class="hist-item" style="margin-bottom:10px">
+        <div style="padding:12px 14px;display:grid;gap:10px">
+          <div class="dash-filtros" style="margin-bottom:0">
+            <div class="dash-filtro-chip active" id="hfiltro-todos" onclick="setHistFiltro('todos')">Histórico</div>
+            <div class="dash-filtro-chip" id="hfiltro-hoy" onclick="setHistFiltro('hoy')">Hoy</div>
+            <div class="dash-filtro-chip" id="hfiltro-semana" onclick="setHistFiltro('semana')">Semana</div>
+            <div class="dash-filtro-chip" id="hfiltro-mes" onclick="setHistFiltro('mes')">Mes</div>
+            <div class="dash-filtro-chip" id="hfiltro-custom" onclick="setHistFiltro('custom')">Personalizado</div>
+            <div class="dash-fecha-range" id="hist-custom-range" style="display:none">
+              <input type="date" class="dash-fecha-input" id="hist-desde" onchange="renderHistVentas()">
+              <span style="font-size:12px;color:var(--ink3)">→</span>
+              <input type="date" class="dash-fecha-input" id="hist-hasta" onchange="renderHistVentas()">
+            </div>
+          </div>
+          <div class="inv-toolbar" style="margin-bottom:0">
+            <input class="inv-search" id="hist-search" type="search" placeholder="Buscar producto, cliente, mesa, operador o ticket…" oninput="renderHistVentas()" style="flex:1;min-width:220px">
+            <select class="dash-fecha-input" id="hist-pago-filter" onchange="renderHistVentas()">
+              <option value="todos">Todos los medios</option>
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="mixed">Pago mixto</option>
+            </select>
+            <select class="dash-fecha-input" id="hist-origen-filter" onchange="renderHistVentas()">
+              <option value="todos">Todos los orígenes</option>
+              <option value="venta">Venta directa</option>
+              <option value="mesa">Mesa</option>
+              <option value="reserva">Reserva</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div id="hist-list"></div>
+    </div>
   </div>
   <div id="hist-subtab-gastos" style="display:none">
     <div class="hist-layout">
@@ -1494,7 +1527,7 @@ function emptyMixedPayments(){return{efectivo:'',mercado_pago:'',transferencia:'
 let carrito={},pago='ef',paymentMode='single',mixedPayments=emptyMixedPayments(),catCarga='todos',editId=null;
 let editClienteId=null,editReservaId=null,activeTab='carga';
 window.activeTab=activeTab;
-let mesaActivaId=null,tipoNuevaMesa='salon',dashFiltro='hoy';
+let mesaActivaId=null,tipoNuevaMesa='salon',dashFiltro='hoy',histFiltro='todos';
 let dashboardRangeWasManuallySelected=false;
 let dashboardInitialRangeResolved=false;
 let dashboardSmartRangeMessage='';
@@ -1655,6 +1688,10 @@ function normalizeNewPaymentMethod(method){
   const normalized=normalizePaymentMethod(method);
   return normalized==='mercado_pago'?'transferencia':normalized;
 }
+function normalizeVisualPaymentMethod(method){
+  const normalized=normalizePaymentMethod(method);
+  return normalized==='mercado_pago'?'transferencia':normalized;
+}
 function getActivePaymentMethods(){
   return PAYMENT_METHODS.filter(m=>ACTIVE_PAYMENT_METHOD_KEYS.includes(m.key));
 }
@@ -1676,13 +1713,23 @@ function getTicketPayments(group){
   if(pagos.length)return pagos;
   return[{metodo:normalizePaymentMethod(group.ref?.pago||'ef'),monto:money2(group.total)}];
 }
+function getVisualTicketPayments(groupOrPayments){
+  const raw=Array.isArray(groupOrPayments)?groupOrPayments:getTicketPayments(groupOrPayments);
+  const totals={};
+  (raw||[]).forEach(p=>{
+    const metodo=normalizeVisualPaymentMethod(p?.metodo||p?.method);
+    if(!metodo||metodo==='mixed')return;
+    totals[metodo]=money2((totals[metodo]||0)+(Number(p?.monto??p?.amount)||0));
+  });
+  return getActivePaymentMethods().map(m=>({metodo:m.key,monto:money2(totals[m.key]||0)})).filter(p=>p.monto>0);
+}
 function getVentasPaymentTotals(rows){
   const totals={efectivo:0,mercado_pago:0,transferencia:0,otro:0};
-  getVentasByTicket(rows).forEach(group=>getTicketPayments(group).forEach(p=>{if(totals[p.metodo]!==undefined)totals[p.metodo]=money2(totals[p.metodo]+p.monto);}));
+  getVentasByTicket(rows).forEach(group=>getVisualTicketPayments(group).forEach(p=>{if(totals[p.metodo]!==undefined)totals[p.metodo]=money2(totals[p.metodo]+p.monto);}));
   return totals;
 }
 function getPaymentSummaryText(totals,{short=true,includeZero=false}={}){
-  const parts=PAYMENT_METHODS.filter(m=>includeZero||totals[m.key]>0).map(m=>`${short?m.short:m.label} ${fmt(totals[m.key]||0)}`);
+  const parts=getActivePaymentMethods().filter(m=>includeZero||totals[m.key]>0).map(m=>`${short?m.short:m.label} ${fmt(totals[m.key]||0)}`);
   return parts.join(' · ')||(short?'Sin pagos':'Sin pagos registrados');
 }
 function parsePaymentAmount(value){
@@ -2239,7 +2286,6 @@ function mostrarResumenTurno(){
       <div class="turno-stat"><div class="turno-stat-lbl">Fondo inicial</div><div class="turno-stat-val">${fmt(turno.fondoCaja)}</div></div>
       <div class="turno-stat"><div class="turno-stat-lbl">Total vendido</div><div class="turno-stat-val" style="color:var(--orange)">${fmt(tot)}</div></div>
       <div class="turno-stat"><div class="turno-stat-lbl">Efectivo</div><div class="turno-stat-val">${fmt(ef)}</div></div>
-      <div class="turno-stat"><div class="turno-stat-lbl">Mercado Pago</div><div class="turno-stat-val">${fmt(mp)}</div></div>
       <div class="turno-stat"><div class="turno-stat-lbl">Transferencia</div><div class="turno-stat-val">${fmt(tr)}</div></div>
       <div class="turno-stat"><div class="turno-stat-lbl">Otro</div><div class="turno-stat-val">${fmt(otro)}</div></div>
       <div class="turno-stat"><div class="turno-stat-lbl">☕ Cafetería</div><div class="turno-stat-val">${fmt(cafe)}</div></div>
@@ -3331,10 +3377,13 @@ function renderDashboard(){
     <div class="kpi"><div class="kpi-lbl">Ganancia neta</div><div class="kpi-val" style="color:${ganancia>=0?'var(--green)':'var(--red)'}">${fmt(ganancia)}</div><div class="kpi-sub">ventas − gastos</div></div>
     <div class="kpi"><div class="kpi-lbl">Ticket promedio</div><div class="kpi-val">${fmt(promP)}</div><div class="kpi-sub">${txP} transacciones</div></div>`;
 
-  // Resultado financiero
+  const productosVendidos=vh.reduce((sum,v)=>sum+(Number(v.cantidad)||0),0);
+  const prodRevenue={};vh.forEach(v=>{const key=v.producto||'Sin producto';prodRevenue[key]=(prodRevenue[key]||0)+money2(v.total);});
+  const topRevenue=Object.entries(prodRevenue).sort((a,b)=>b[1]-a[1])[0];
+  // Resumen operativo sin secciones Cafetería/Cocina
   $('seccion-split').innerHTML=`
-    <div class="seccion-card"><div class="seccion-lbl">☕ Cafetería</div><div class="seccion-val">${fmt(vh.filter(v=>(v.seccion||getCat(v.cat).seccion)==='cafeteria').reduce((s,v)=>s+v.total,0))}</div><div class="seccion-sub">${vh.filter(v=>(v.seccion||getCat(v.cat).seccion)==='cafeteria').length} ítems</div></div>
-    <div class="seccion-card"><div class="seccion-lbl">🍳 Cocina</div><div class="seccion-val">${fmt(vh.filter(v=>(v.seccion||getCat(v.cat).seccion)==='cocina').reduce((s,v)=>s+v.total,0))}</div><div class="seccion-sub">${vh.filter(v=>(v.seccion||getCat(v.cat).seccion)==='cocina').length} ítems</div></div>`;
+    <div class="seccion-card"><div class="seccion-lbl">Productos vendidos</div><div class="seccion-val">${productosVendidos}</div><div class="seccion-sub">${vh.length} líneas vendidas</div></div>
+    <div class="seccion-card"><div class="seccion-lbl">Producto principal</div><div class="seccion-val" style="font-size:16px;line-height:1.2">${escapeHtml(topRevenue?.[0]||'Sin datos')}</div><div class="seccion-sub">${topRevenue?fmt(topRevenue[1]):'—'}</div></div>`;
 
   // Bar chart 7 días
   const dias7=[],lbls7=[];
@@ -3349,18 +3398,18 @@ function renderDashboard(){
     <span class="bar-lbl">${lbls7[i]}</span></div>`).join('');
 
   // Top productos
-  const conteo={};vh.forEach(v=>{conteo[v.producto]=(conteo[v.producto]||0)+v.cantidad;});
-  const top=Object.entries(conteo).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([n,c])=>({n,c}));
+  const conteo={};vh.forEach(v=>{if(!conteo[v.producto])conteo[v.producto]={qty:0,rev:0};conteo[v.producto].qty+=Number(v.cantidad)||0;conteo[v.producto].rev=money2(conteo[v.producto].rev+money2(v.total));});
+  const top=Object.entries(conteo).sort((a,b)=>b[1].qty-a[1].qty).slice(0,5).map(([n,c])=>({n,c:c.qty,rev:c.rev}));
   const maxC=top[0]?.c||1;
   $('top-list').innerHTML=top.length?top.map((t,i)=>`<div class="top-row"><span class="top-rank">${i+1}</span><span class="top-name">${t.n}</span>
     <div class="top-bar-bg"><div class="top-bar-fill" style="width:${Math.round(t.c/maxC*100)}%"></div></div>
-    <span class="top-cnt">${t.c} ud.</span></div>`).join(''):'<div style="font-size:12px;color:var(--ink3);padding:12px;text-align:center">Sin datos</div>';
+    <span class="top-cnt">${t.c} ud. · ${fmt(t.rev)}</span></div>`).join(''):'<div style="font-size:12px;color:var(--ink3);padding:12px;text-align:center">Sin datos</div>';
 
   // Cobros por medio
   const paymentTotals=getVentasPaymentTotals(vh);
   const totalCobrado=money2(Object.values(paymentTotals).reduce((s,v)=>s+v,0))||1;
-  $('split-track').innerHTML=PAYMENT_METHODS.filter(m=>paymentTotals[m.key]>0).map(m=>`<div style="width:${Math.round(paymentTotals[m.key]/totalCobrado*100)}%;background:${m.color}"></div>`).join('');
-  $('split-stats').innerHTML=PAYMENT_METHODS.map(m=>`<div class="split-stat"><div class="split-lbl"><span class="sdot" style="background:${m.color}"></span>${m.label}</div><div class="split-pct">${Math.round((paymentTotals[m.key]||0)/totalCobrado*100)}%</div><div class="split-monto">${fmt(paymentTotals[m.key]||0)}</div></div>`).join('');
+  $('split-track').innerHTML=getActivePaymentMethods().filter(m=>paymentTotals[m.key]>0).map(m=>`<div style="width:${Math.round(paymentTotals[m.key]/totalCobrado*100)}%;background:${m.color}"></div>`).join('');
+  $('split-stats').innerHTML=getActivePaymentMethods().map(m=>`<div class="split-stat"><div class="split-lbl"><span class="sdot" style="background:${m.color}"></span>${m.label}</div><div class="split-pct">${Math.round((paymentTotals[m.key]||0)/totalCobrado*100)}%</div><div class="split-monto">${fmt(paymentTotals[m.key]||0)}</div></div>`).join('');
 
   // Ventas por categoría eliminada del dashboard
 
@@ -3399,10 +3448,55 @@ function renderDashboard(){
 //  HISTORIAL
 // ══════════════════════════════════════════════════
 function renderHistorial(){renderHistVentas();}
+function setHistFiltro(f){
+  histFiltro=f;
+  ['todos','hoy','semana','mes','custom'].forEach(x=>{$(`hfiltro-${x}`)?.classList.toggle('active',x===f);});
+  const custom=$('hist-custom-range');if(custom)custom.style.display=f==='custom'?'flex':'none';
+  renderHistVentas();
+}
+function getHistRango(){
+  const todayStr=today();
+  if(histFiltro==='hoy')return{desde:todayStr,hasta:todayStr};
+  if(histFiltro==='semana')return{desde:getLocalDateString(addLocalDays(new Date(),-6)),hasta:todayStr};
+  if(histFiltro==='mes')return{desde:getLocalDateString(new Date(new Date().getFullYear(),new Date().getMonth(),1)),hasta:todayStr};
+  if(histFiltro==='custom')return{desde:$('hist-desde')?.value||'',hasta:$('hist-hasta')?.value||''};
+  return{desde:'',hasta:''};
+}
+function getTicketOrigin(t){
+  const raw=String(t?.sourceKind||t?.source_kind||t?.metadata?.source_kind||'').toLowerCase();
+  if(raw.includes('reserva')||t?.reservationId)return'reserva';
+  if(raw.includes('mesa')||t?.openOrderId||t?.mesa)return'mesa';
+  return'venta';
+}
+function ticketMatchesHistoryFilters(t){
+  const {desde,hasta}=getHistRango();
+  const fecha=normalizeBusinessDate(t.fecha,t.timestamp);
+  if(desde&&fecha<desde)return false;
+  if(hasta&&fecha>hasta)return false;
+  const pagoFilter=$('hist-pago-filter')?.value||'todos';
+  const pagos=getVisualTicketPayments(t.payments||[]);
+  if(pagoFilter==='mixed'){
+    if(pagos.length<2)return false;
+  }else if(pagoFilter!=='todos'&&!pagos.some(p=>p.metodo===pagoFilter)){
+    return false;
+  }
+  const originFilter=$('hist-origen-filter')?.value||'todos';
+  if(originFilter!=='todos'&&getTicketOrigin(t)!==originFilter)return false;
+  const q=($('hist-search')?.value||'').trim().toLowerCase();
+  if(q){
+    const haystack=[
+      t.ticketId,t.operador,t.mesa,t.source,t.sourceKind,getTicketOrigin(t),
+      ...(t.items||[]).flatMap(item=>[item.producto,item.variantes,item.nota])
+    ].join(' ').toLowerCase();
+    if(!haystack.includes(q))return false;
+  }
+  return true;
+}
 function getLocalHistoryTicketsForUi(){
   return getVentasByTicket(ventas||[]).map(group=>{
-    const pagos=getTicketPayments(group);
+    const pagos=getVisualTicketPayments(group);
     const totalPagos=money2(pagos.reduce((sum,p)=>sum+(Number(p.monto)||0),0));
+    const sourceKind=group.ref?._source_kind||((group.rows||[]).some(r=>r?._reservation_sb_id||r?._reservation_local_id)?'reserva':((group.rows||[]).some(r=>r?._open_order_sb_id)||group.ref?.mesa?'mesa':'venta'));
     return{
       ticketId:group.ref?.ticket_id||group.ref?.id||'',
       fecha:normalizeBusinessDate(group.ref?.fecha,group.ref?.timestamp),
@@ -3415,9 +3509,11 @@ function getLocalHistoryTicketsForUi(){
       itemCount:(group.rows||[]).length,
       paymentCount:pagos.length,
       paymentTotal:totalPagos,
-      paymentMethods:pagos.map(p=>normalizePaymentMethod(p?.metodo)).filter(Boolean),
+      paymentMethods:pagos.map(p=>normalizeVisualPaymentMethod(p?.metodo)).filter(Boolean),
       shiftId:(group.rows||[]).map(r=>r?._shift_sb_id||'').find(Boolean)||null,
       reservationId:(group.rows||[]).map(r=>r?._reservation_sb_id||'').find(Boolean)||null,
+      openOrderId:(group.rows||[]).map(r=>r?._open_order_sb_id||'').find(Boolean)||null,
+      sourceKind,
       source:'local',
       items:(group.rows||[]).map(r=>({
         producto:r.producto||'',
@@ -3437,9 +3533,10 @@ function renderHistVentas(){
   const loading=!!histState?.loading;
   const error=histState?.error||'';
   const fallbackTickets=getLocalHistoryTicketsForUi();
-  const tickets=useSupabase
+  const allTickets=useSupabase
     ? (histState?.tickets||[])
     : ((histState?.tickets&&histState.tickets.length)?histState.tickets:fallbackTickets);
+  const tickets=(allTickets||[]).filter(ticketMatchesHistoryFilters);
   const sourceLabel=useSupabase?'Supabase':(isFallback?'Modo sin conexión (historial local)':'Local');
   const canTech=window.canShowClientTechnicalUi?.()||false;
   if(activeTab==='historial' && window.ensureVisibleHistorySource) setTimeout(()=>window.ensureVisibleHistorySource(),0);
@@ -3447,7 +3544,7 @@ function renderHistVentas(){
     $('hist-list').innerHTML=`<div class="empty">Actualizando…</div>`;
     return;
   }
-  if(useSupabase && !tickets.length){
+  if(useSupabase && !(allTickets||[]).length){
     $('hist-list').innerHTML=`<div class="hist-item" style="margin-bottom:10px">
       <div class="hist-hdr" style="cursor:default">
         <div><div class="hist-fecha">Historial de ventas</div><div class="hist-meta">No hay ventas para esta tienda.</div></div>
@@ -3456,36 +3553,46 @@ function renderHistVentas(){
     </div>`;
     return;
   }
-  if(!tickets.length){
+  if(!(allTickets||[]).length){
     $('hist-list').innerHTML=`<div class="hist-item" style="margin-bottom:10px">
       <div class="hist-hdr" style="cursor:default">
         <div><div class="hist-fecha">Historial de ventas</div><div class="hist-meta">No hay ventas registradas</div></div>
-        <button class="btn ghost" type="button" onclick="reloadVisibleHistoryFromSupabase({silent:false,forceRefresh:true})">Actualizar</button>
-      </div>
-    </div>`;
+            <button class="btn ghost" type="button" onclick="reloadVisibleHistoryFromSupabase({silent:false,forceRefresh:true})">Actualizar</button>
+          </div>
+        </div>`;
     return;
   }
+  const totalFiltrado=tickets.reduce((sum,t)=>sum+money2(t.total),0);
+  const paymentTotals={efectivo:0,transferencia:0};
+  tickets.forEach(t=>getVisualTicketPayments(t.payments||[]).forEach(p=>{paymentTotals[p.metodo]=money2((paymentTotals[p.metodo]||0)+p.monto);}));
+  const itemCount=tickets.reduce((sum,t)=>sum+(Number(t.itemCount)||((t.items||[]).length)),0);
   $('hist-list').innerHTML=`
     <div class="hist-item" style="margin-bottom:10px">
       <div class="hist-hdr" style="cursor:default">
         <div>
           <div class="hist-fecha">${canTech?`Fuente: ${sourceLabel}`:'Historial de ventas'}</div>
-          <div class="hist-meta">${tickets.length} tickets · total ${fmt(tickets.reduce((sum,t)=>sum+money2(t.total),0))}${canTech&&error?` · ${error}`:''}${!canTech&&isFallback?' · Mostrando datos disponibles.':''}</div>
+          <div class="hist-meta">${tickets.length} de ${(allTickets||[]).length} tickets · total ${fmt(totalFiltrado)} · ${itemCount} ítems · ${getPaymentSummaryText(paymentTotals,{short:false})}${canTech&&error?` · ${error}`:''}${!canTech&&isFallback?' · Mostrando datos disponibles.':''}</div>
         </div>
-        <button class="btn ghost" type="button" onclick="reloadVisibleHistoryFromSupabase({silent:false,forceRefresh:true})">Actualizar</button>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <button class="btn ghost" type="button" onclick="copyHistorySummary()">Copiar resumen</button>
+          <button class="btn ghost" type="button" onclick="reloadVisibleHistoryFromSupabase({silent:false,forceRefresh:true})">Actualizar</button>
+        </div>
       </div>
     </div>
+    ${tickets.length?'':`<div class="empty">No hay ventas para estos filtros.</div>`}
     ${tickets.map((t,i)=>{
-      const pagosTxt=(Array.isArray(t.payments)&&t.payments.length)
-        ? t.payments.map(p=>`${getPaymentMethodMeta(p.metodo||p.method).short} ${fmt(p.monto||0)}`).join(' · ')
+      const pagosVisual=getVisualTicketPayments(t.payments||[]);
+      const pagosTxt=pagosVisual.length
+        ? pagosVisual.map(p=>`${getPaymentMethodMeta(p.metodo||p.method).short} ${fmt(p.monto||0)}`).join(' · ')
         : 'Sin pagos';
       const d=parseLocalDateSafe(t.fecha||t.timestamp||today());
       const showTechSource=canTech;
+      const originLabel={venta:'Venta directa',mesa:'Mesa',reserva:'Reserva'}[getTicketOrigin(t)]||'Venta';
       return `<div class="hist-item">
         <div class="hist-hdr" onclick="toggleHist(${i})">
           <div>
             <div class="hist-fecha">${fmtShort(d)}${t.hora?` · ${t.hora}`:''}</div>
-            <div class="hist-meta">${tipoLabel(t.tipo||'salon')}${t.mesa?` · ${t.mesa}`:''}${t.operador?` · ${t.operador}`:''}${t.source&&showTechSource?` · ${t.source}`:''}</div>
+            <div class="hist-meta">${originLabel} · ${tipoLabel(t.tipo||'salon')}${t.mesa?` · ${t.mesa}`:''}${t.operador?` · ${t.operador}`:''}${t.source&&showTechSource?` · ${t.source}`:''}</div>
             <div class="hist-meta">${pagosTxt} · ${t.itemCount||((t.items||[]).length)} ítems</div>
           </div>
           <div class="hist-right"><span class="hist-total">${fmt(t.total||0)}</span><span class="hist-arr" id="ha-${i}">▾</span></div>
@@ -3507,6 +3614,23 @@ function renderHistVentas(){
   `;
 }
 function toggleHist(i){const d=$('hd-'+i),a=$('ha-'+i);const open=d.classList.toggle('open');a.classList.toggle('open',open);}
+function copyHistorySummary(){
+  const histState=window.getVisibleHistoryState?.()||null;
+  const base=histState?.source==='supabase'?(histState?.tickets||[]):(((histState?.tickets&&histState.tickets.length)?histState.tickets:getLocalHistoryTicketsForUi()));
+  const tickets=(base||[]).filter(ticketMatchesHistoryFilters);
+  const total=tickets.reduce((sum,t)=>sum+money2(t.total),0);
+  const paymentTotals={efectivo:0,transferencia:0};
+  tickets.forEach(t=>getVisualTicketPayments(t.payments||[]).forEach(p=>{paymentTotals[p.metodo]=money2((paymentTotals[p.metodo]||0)+p.monto);}));
+  const lines=[
+    `Resumen de ventas`,
+    `Tickets: ${tickets.length}`,
+    `Total: ${fmt(total)}`,
+    `Medios: ${getPaymentSummaryText(paymentTotals,{short:false})}`,
+    ...tickets.slice(0,80).map(t=>`${t.fecha||''} ${t.hora||''} · ${getTicketOrigin(t)} · ${t.mesa||t.operador||''} · ${fmt(t.total||0)}`.trim())
+  ];
+  const text=lines.join('\n');
+  navigator.clipboard?.writeText(text).then(()=>showToast('Resumen copiado.')).catch(()=>{console.log('[Historial resumen]',text);showToast('Resumen impreso en consola.');});
+}
 
 // ══════════════════════════════════════════════════
 //  CLIENTES
@@ -10288,14 +10412,15 @@ if(config.webappUrl){loadFromSheets();}
   };
   function getComparablePaymentMethods(pagos){
     return (Array.isArray(pagos)?pagos:[])
-      .map(p=>normalizePaymentMethod(p?.metodo||p?.method||''))
+      .map(p=>normalizeVisualPaymentMethod(p?.metodo||p?.method||''))
       .filter(Boolean)
       .sort();
   }
   function getLocalHistoryTickets(){
     return groupLocalSaleRowsByTicket(ventas||[]).map(group=>{
-      const pagos=getTicketPayments(group);
+      const pagos=getVisualTicketPayments(group);
       const totalPagos=money2(pagos.reduce((sum,p)=>sum+(Number(p.monto)||0),0));
+      const sourceKind=group.ref?._source_kind||((group.rows||[]).some(r=>r?._reservation_sb_id||r?._reservation_local_id)?'reserva':((group.rows||[]).some(r=>r?._open_order_sb_id)||group.ref?.mesa?'mesa':'venta'));
       return{
         ticketId:getStableSaleLegacyId(group),
         fecha:normalizeBusinessDate(group?.ref?.fecha,group?.ref?.timestamp),
@@ -10311,6 +10436,8 @@ if(config.webappUrl){loadFromSheets();}
         paymentMethods:getComparablePaymentMethods(pagos),
         shiftId:(group.rows||[]).map(r=>r?._shift_sb_id||'').find(Boolean)||null,
         reservationId:(group.rows||[]).map(r=>r?._reservation_sb_id||'').find(Boolean)||null,
+        openOrderId:(group.rows||[]).map(r=>r?._open_order_sb_id||'').find(Boolean)||null,
+        sourceKind,
         source:'local',
         items:(group.rows||[]).map(r=>({
           producto:r.producto||'',
@@ -10327,9 +10454,10 @@ if(config.webappUrl){loadFromSheets();}
   window.getLocalHistoryTickets=getLocalHistoryTickets;
   window.mapSupabaseSaleToHistoryTicket=function(sale,items,payments){
     const legacyPago=(sale?.metadata?.legacy_pago)||getLegacyPagoValue(normalizePaymentMethod(payments?.[0]?.method||'efectivo'));
-    const comparablePayments=(payments&&payments.length)
+    const rawPayments=(payments&&payments.length)
       ? (payments||[]).map(p=>({metodo:normalizePaymentMethod(p.method),monto:money2(p.amount)}))
       : [{metodo:normalizePaymentMethod(legacyPago||'efectivo'),monto:money2(sale?.total_amount)}];
+    const comparablePayments=getVisualTicketPayments(rawPayments);
     return{
       ticketId:sale.legacy_id||sale.id,
       fecha:normalizeBusinessDate(sale.business_date,sale.sold_at),
@@ -10345,6 +10473,8 @@ if(config.webappUrl){loadFromSheets();}
       paymentMethods:getComparablePaymentMethods(comparablePayments),
       shiftId:sale.shift_id||null,
       reservationId:sale.reservation_id||null,
+      openOrderId:sale.open_order_id||null,
+      sourceKind:sale.metadata?.source_kind||(sale.reservation_id?'reserva':sale.open_order_id?'mesa':'venta'),
       source:sale.legacy_source||sale.metadata?.source||'supabase',
       items:(items||[]).map(item=>({
         producto:item.product_name||'',
