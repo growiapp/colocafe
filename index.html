@@ -4349,6 +4349,10 @@ function findExistingReservationSaleRows(reservation){
     (sbId&&String(v._reservation_sb_id||'')===sbId)
   ));
 }
+function findMesaSaleRows(openOrderSbId){
+  const sbId=String(openOrderSbId||'');
+  return sbId?(ventas||[]).filter(v=>v?._source_kind!=='reserva'&&String(v._open_order_sb_id||'')===sbId):[];
+}
 async function reservationHasRemoteSale(reservation){
   if(!reservation)return null;
   const storeId=window.getActiveStoreId?.()||config?.activeStoreId||'';
@@ -4397,7 +4401,7 @@ async function cerrarMesaOReserva(){
   }catch(err){
     showToast('No pudimos iniciar el cobro. Reintentá.');
   }finally{
-    if(btn){btn.disabled=false;btn.textContent=mesaActivaId?.startsWith('reserva_')?'Cobrar reserva':'Cerrar y cobrar';}
+    renderCart(); // el cajero pudo cambiar a una mesa con cobro en curso mientras se cargaban los operadores
   }
 }
 function onCobroOperadorChange(){
@@ -4406,7 +4410,14 @@ function onCobroOperadorChange(){
 }
 function cerrarModalOperadorCobro(){$('modal-operador-cobro').classList.remove('open');pendingCobroCallback=null;}
 function closeModalOperadorCobro(e){if(e.target===$('modal-operador-cobro'))cerrarModalOperadorCobro();}
+let confirmandoOperadorCobro=false;
 async function confirmarOperadorCobro(){
+  // El alta de un operador nuevo espera a Supabase con el modal abierto: un segundo clic no debe repetir el alta ni el cobro.
+  if(confirmandoOperadorCobro)return;
+  confirmandoOperadorCobro=true;
+  try{await confirmarOperadorCobroUnaVez();}finally{confirmandoOperadorCobro=false;}
+}
+async function confirmarOperadorCobroUnaVez(){
   const sel=$('cobro-operador-sel');
   let op='';
   let operatorId=sel?.selectedOptions?.[0]?.dataset?.operatorId||'';
@@ -4429,8 +4440,20 @@ async function confirmarOperadorCobro(){
   $('modal-operador-cobro').classList.remove('open');
   ejecutarCobro(op,operatorId);
 }
+const cobrosEnCurso=new Set();
 async function ejecutarCobro(operadorCobro,operatorIdCobro){
   const esReserva=mesaActivaId&&mesaActivaId.startsWith('reserva_');
+  // mesaActivaId cambia si el cajero abre otra mesa mientras este cobro espera la red: el cobro usa su propia copia.
+  let mesaId=mesaActivaId;
+  // Un cobro por mesa/reserva a la vez; mesas distintas no se bloquean entre sí.
+  // El candado cubre TODAS las identidades de la mesa: la sync cambia el id local por el remoto en medio del cobro
+  // (y el refresh puede reemplazar el objeto), así que una reapertura llega con otro id que debe seguir bloqueado.
+  const idsDeMesa=m=>esReserva?[String(mesaId||'')]:[mesaId,m?.id,m?._sb_id,m?.open_order_id,m?.legacy_local_id].map(v=>String(v||'')).filter(Boolean);
+  const cobroKeys=new Set(idsDeMesa(esReserva?null:findMesaByAnyId(mesaId)));
+  if(!cobroKeys.size)return;
+  if([...cobroKeys].some(k=>cobrosEnCurso.has(k))){showToast('Este cobro ya se está procesando. Esperá la confirmación.');return;}
+  const bloquear=ids=>ids.forEach(k=>{cobroKeys.add(k);cobrosEnCurso.add(k);});
+  bloquear([...cobroKeys]);
   const items=Object.values(carrito);
   const btn=$('btn-confirm');btn.disabled=true;btn.textContent='Cerrando…';
   const reservasBeforeCobro=esReserva?cloneReservasState():null;
@@ -4438,30 +4461,42 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
   let ventaLocalCreada=false;
   let mesaClosePending=false;
   window.__cajaCobroEnCurso=true;
-  window.__cajaCobroEnCursoHasta=Date.now()+30000;
-  try{
-    await cajaWithTimeout((async()=>{
+  // Red de seguridad de la pausa del refresh: mayor que la suma de esperas internas (~66 s); el finally la libera antes.
+  window.__cajaCobroEnCursoHasta=Date.now()+90000;
+  let cobroTerminado=false;
+  const sigueEnEsteCobro=()=>!mesaActivaId||String(mesaActivaId)===String(mesaId);
+  const volverALista=()=>{
+    if(sigueEnEsteCobro())renderVentas();
+    else{renderMesasSection();renderReservasSection();renderCajaPendingBanner();}
+  };
+  const cobro=(async()=>{try{
       const totalVenta=money2(carritoTotalFn(carrito));
       const paymentState=getCurrentPaymentState(totalVenta);
       if(!paymentState.valido){showToast(paymentState.mensaje||'Revisá los pagos');return;}
       // ── Anti-double-cobro: verificar que la mesa siga abierta en Supabase ──
+      // El cobro conserva la mesa que verificó: un refresh puede sacarla de `mesas` en medio y la venta no debe quedar sin su open_order.
+      let mesaCobro=null;
       if(!esReserva){
-        const mesaChk=findMesaByAnyId(mesaActivaId);
+        const mesaChk=mesaCobro=findMesaByAnyId(mesaId);
         if(!mesaChk){showToast('No pudimos cargar esta mesa. Reintentá.');return;}
         if(!mesaChk?._sb_id){
           mesaChk.items={...carrito};
           mesaChk.pago=paymentState.pago;
           mesaChk.payment_mode=paymentState.payment_mode;
           mesaChk.pagos=paymentState.pagos;
-          const synced=await cajaWithTimeout(window.syncMesaToSupabase?.(mesaChk),'sync_open_order_before_payment',12000).catch(err=>{
+          const synced=await cajaWithTimeout(window.syncMesaToSupabase?.(mesaChk,{cobroVivo:()=>!cobroTerminado}),'sync_open_order_before_payment',12000).catch(err=>{
             if(window.canShowClientTechnicalUi?.())console.warn('[Caja] no se pudo preparar la mesa remota antes de cobrar',err);
             return false;
           });
+          // La sync ya asignó el id remoto: se suma al candado antes del próximo await.
+          bloquear(idsDeMesa(mesaChk));
           if(synced&&mesaChk._sb_id){
-            mesaActivaId=getMesaOpenOrderId(mesaChk);
+            const openOrderId=getMesaOpenOrderId(mesaChk);
+            if(sigueEnEsteCobro())mesaActivaId=openOrderId;
+            mesaId=openOrderId;
           }else{
             if(window.canShowClientTechnicalUi?.()){
-              console.warn('[Caja] cobro bloqueado: no se pudo preparar open_order remoto',{mesaId:mesaActivaId,nombre:mesaChk.nombre});
+              console.warn('[Caja] cobro bloqueado: no se pudo preparar open_order remoto',{mesaId,nombre:mesaChk.nombre});
             }
             showToast('No pudimos verificar esta mesa. Reintentá antes de cobrar.');
             return;
@@ -4476,8 +4511,8 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
             stillOpen=null;
           }
           if(stillOpen===false){
-            showToast('Esta mesa ya fue cerrada desde otro dispositivo.');
-            removeMesaByAnyId(mesaActivaId);save();renderVentas();return;
+            showToast(findMesaSaleRows(mesaChk._sb_id).length?'Este cobro ya quedó registrado.':'Esta mesa ya fue cerrada desde otro dispositivo.');
+            removeMesaByAnyId(mesaId);save();volverALista();return;
           }
           if(stillOpen!==true){
             if(window.canShowClientTechnicalUi?.()){
@@ -4498,7 +4533,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
       let tipoVenta='salon',nombreMesa='';
       let reservaActiva=null,clienteReserva=null;
       if(esReserva){
-        const reservaId=mesaActivaId.replace('reserva_','');
+        const reservaId=mesaId.replace('reserva_','');
         const r=reservas.find(x=>String(x.id||'')===String(reservaId));
         if(!r){showToast('No pudimos cobrar la reserva. Reintentá.');return;}
         reservaActiva=r;tipoVenta=r.tipo||'salon';nombreMesa=r.nombre;
@@ -4520,17 +4555,35 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           markReservationHidden(r,'already_paid');
           save();syncReservasSheets();window.saveReservationToSupabase?.(r).catch(err=>window.canShowClientTechnicalUi?.()&&console.warn('[Caja] reserva ya cobrada, update failed',err));
           showToast('Esta reserva ya estaba cobrada.');
-          renderVentas();
+          volverALista();
           return;
         }
         markReservationHidden(r,'payment');
         reservaOptimisticHidden=r;
         renderReservasSection();
       }else{
-        const m=findMesaByAnyId(mesaActivaId);if(m){tipoVenta=m.tipo||'salon';nombreMesa=m.nombre;}
+        const m=findMesaByAnyId(mesaId)||mesaCobro;if(m){tipoVenta=m.tipo||'salon';nombreMesa=m.nombre;}
       }
-      const _openOrderSbId=!esReserva?(findMesaByAnyId(mesaActivaId)?._sb_id||null):null;
-      const nuevas=items.map(item=>{
+      const _openOrderSbId=!esReserva?((findMesaByAnyId(mesaId)||mesaCobro)?._sb_id||null):null;
+      if(!esReserva&&!_openOrderSbId){showToast('No pudimos verificar esta mesa. Reintentá antes de cobrar.');return;}
+      // Si la mesa ya tiene una venta local sin confirmar, se reenvía ese mismo ticket: un reintento nunca crea otra venta.
+      const ventaPendiente=findMesaSaleRows(_openOrderSbId).filter(v=>v._sb_sync_status!=='synced');
+      // Solo se reenvía si es exactamente el mismo cobro; si no, se frena para no registrar algo distinto a lo cobrado.
+      // Identidad de cada línea, normalizada igual en la venta guardada y en el carrito (el orden de líneas y de variantes no importa):
+      // producto, cantidad, variantes, nota, precio base, precio de variantes y total; y los pagos (medio e importe).
+      const variantesNorm=nombres=>String(nombres||'').split(', ').filter(Boolean).sort().join(', ');
+      const firma=lineas=>lineas.map(l=>JSON.stringify(l)).sort().join(';');
+      const lineasPendientes=ventaPendiente.map(v=>[String(v.prodId),Number(v.cantidad),variantesNorm(v.variantes),String(v.nota||'').trim(),money2(v.precioBase),money2(v.precioVars),money2(v.total)]);
+      const lineasCarrito=items.map(i=>[String(i.prodId),Number(i.qty),variantesNorm((i.vars||[]).map(x=>x.nombre).join(', ')),String(i.nota||'').trim(),money2(i.precio),money2((i.vars||[]).reduce((s,x)=>s+(Number(x.precio)||0),0)),money2(carritoItemTotal(i))]);
+      const pagosNorm=pagos=>(pagos||[]).map(p=>[String(p.metodo),money2(p.monto)]);
+      const mismoCobro=new Set(ventaPendiente.map(v=>v.ticket_id)).size===1
+        &&firma(lineasPendientes)===firma(lineasCarrito)
+        &&firma(pagosNorm(ventaPendiente[0]?.pagos))===firma(pagosNorm(paymentState.pagos));
+      if(ventaPendiente.length&&!mismoCobro){
+        showToast('Esta mesa tiene un cobro anterior pendiente con otros productos o forma de pago. Revisalo en Operaciones pendientes antes de cobrar.');
+        return;
+      }
+      const nuevas=ventaPendiente.length?ventaPendiente:items.map(item=>{
         const p=findProductById(item.prodId);
         const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
         const ventaId='v_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
@@ -4551,9 +4604,11 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           _sb_sync_status:'pending',_sb_sync_error:'',_sb_synced_at:'',_sb_retry_count:0,
           _open_order_sb_id:_openOrderSbId};
       });
-      ventas.push(...nuevas);
+      if(!ventaPendiente.length){
+        ventas.push(...nuevas);
+        if(turnoActivo)turnoActivo.ventasIds=[...(turnoActivo.ventasIds||[]),...ventaIds];
+      }
       ventaLocalCreada=true;
-      if(turnoActivo)turnoActivo.ventasIds=[...(turnoActivo.ventasIds||[]),...ventaIds];
       save();
       let salesSync=null;
       try{
@@ -4566,7 +4621,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           message:err?.message||String(err)||'',
           details:err?.details||'',
           hint:err?.hint||'',
-          ticket_id:ticketId,
+          ticket_id:nuevas[0]?.ticket_id||ticketId,
           open_order_id:_openOrderSbId,
           reservation_id:reservaActiva?._sb_id||reservaActiva?.id||null
         });
@@ -4575,8 +4630,14 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           clearReservationHidden(reservaOptimisticHidden);
           save();renderReservasSection();
         }
-        showToast('No pudimos guardar la venta. No cierres la app y avisá al administrador.');
-        renderVentas();
+        // La venta ya está guardada en el dispositivo: nunca pedir que se vuelva a cobrar.
+        // Con código de PostgREST el servidor la rechazó; sin código (red, timeout, read-back) no sabemos si llegó.
+        // 23505 (unique) significa que la venta ya existe en el servidor: no es un rechazo.
+        const rechazada=!!err?.code&&!String(err.code).startsWith('READ_BACK')&&String(err.code)!=='23505';
+        showToast(rechazada
+          ?'El servidor no aceptó la venta. Quedó guardada en este dispositivo como pendiente: avisá al administrador y no la cobres de nuevo.'
+          :'No pudimos confirmar la venta con el servidor. Quedó guardada en este dispositivo y se va a reintentar sola. No la cobres de nuevo.');
+        volverALista();
         return;
       }
       if(esReserva&&reservaActiva){
@@ -4584,7 +4645,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
         reservaActiva._sync_status='pending';reservaActiva._sync_error='';
         markReservationHidden(reservaActiva,'payment');
       }else{
-        const mesaCobrada=findMesaByAnyId(mesaActivaId);
+        const mesaCobrada=findMesaByAnyId(mesaId)||mesaCobro;
         if(mesaCobrada?._sb_id){
           const closeOk=await cajaWithTimeout(window.closeOpenOrderInSupabase?.(mesaCobrada._sb_id,{
             saleId:salesSync?.last?.saleId||null,
@@ -4622,11 +4683,11 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
             });
             showToast('Venta cobrada. Cierre de mesa pendiente.');
           }else{
-            removeMesaByAnyId(mesaActivaId);
+            removeMesaByAnyId(mesaId);
           }
         }
         else{
-          removeMesaByAnyId(mesaActivaId);
+          removeMesaByAnyId(mesaId);
         }
       }
       save();if(esReserva)syncReservasSheets();else syncMesasSheets();if(turnoActivo&&turno===turnoActivo)syncTurnoSheets();
@@ -4647,20 +4708,33 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
       }else{
         if(!mesaClosePending)showToast('✓ Venta guardada');
       }
-      renderVentas();
-    })(),'ejecutar_cobro',30000);
+      volverALista();
+  }finally{
+    // El candado se libera cuando el cobro termina de verdad, no cuando vence la espera de la UI.
+    // Todas las esperas internas tienen timeout, así que este punto siempre llega.
+    cobroTerminado=true;
+    cobroKeys.forEach(k=>cobrosEnCurso.delete(k));
+    window.__cajaCobroEnCurso=cobrosEnCurso.size>0;
+    if(!cobrosEnCurso.size)window.__cajaCobroEnCursoHasta=0;
+    // El botón se recalcula para la operación visible (sea esta mesa u otra): nunca se habilita a ciegas.
+    renderCart();
+  }})();
+  try{
+    await cajaWithTimeout(cobro,'ejecutar_cobro',30000);
   }catch(err){
     if(window.canShowClientTechnicalUi?.())console.error('[Caja] ejecutarCobro failed',err);
+    if(!cobroTerminado){
+      showToast('El cobro sigue procesándose. No lo cobres de nuevo: te avisamos cuando se confirme.');
+      return;
+    }
     if(esReserva&&reservaOptimisticHidden&&!ventaLocalCreada&&reservasBeforeCobro){
       reservas=reservasBeforeCobro;
       clearReservationHidden(reservaOptimisticHidden);
       save();renderReservasSection();
     }
-    showToast(esReserva?'No pudimos cobrar la reserva. Reintentá.':'No pudimos cobrar la mesa. Reintentá.');
-  }finally{
-    btn.disabled=false;btn.textContent=esReserva?'Cobrar reserva':'Cerrar y cobrar';
-    window.__cajaCobroEnCurso=false;
-    window.__cajaCobroEnCursoHasta=0;
+    showToast(ventaLocalCreada
+      ?'La venta ya quedó registrada en este dispositivo. No la cobres de nuevo; si figura pendiente, se sincroniza sola.'
+      :(esReserva?'No pudimos cobrar la reserva. Reintentá.':'No pudimos cobrar la mesa. Reintentá.'));
   }
 }
 
@@ -4736,7 +4810,7 @@ function renderCart(){
   const items=Object.entries(carrito);
   const ct=$('cart-total'),ce=$('cart-empty'),cr=$('cart-rows'),bc=$('btn-confirm');
   if(!ct)return;
-  if(!items.length){ce.style.display='block';cr.style.display='none';ct.textContent='$0';updatePaymentUI(0,{valido:false,mensaje:''});if(bc)bc.disabled=true;return;}
+  if(!items.length){ce.style.display='block';cr.style.display='none';ct.textContent='$0';updatePaymentUI(0,{valido:false,mensaje:''});if(bc){bc.disabled=true;bc.textContent=etiquetaBotonCobro();}return;}
   ce.style.display='none';cr.style.display='flex';
   cr.innerHTML=items.map(([key,item])=>{
     const p=findProductById(item.prodId);if(!p){logProductDiag('carrito con producto no resoluble',item);return'';}
@@ -4761,7 +4835,17 @@ function renderCart(){
   const paymentState=getCurrentPaymentState(total);
   ct.textContent=fmt(total);
   updatePaymentUI(total,paymentState);
-  if(bc)bc.disabled=!paymentState.valido;
+  if(bc){
+    // El botón es uno solo para todas las mesas: estado y texto salen de la operación visible.
+    bc.disabled=!paymentState.valido||cobroVisibleEnCurso();
+    bc.textContent=etiquetaBotonCobro();
+  }
+}
+function etiquetaBotonCobro(){return cobroVisibleEnCurso()?'Cerrando…':String(mesaActivaId||'').startsWith('reserva_')?'Cobrar reserva':'Cerrar y cobrar';}
+function cobroVisibleEnCurso(){
+  if(!cobrosEnCurso.size)return false;
+  const m=mesaActivaId&&!String(mesaActivaId).startsWith('reserva_')?findMesaByAnyId(mesaActivaId):null;
+  return [mesaActivaId,m?.id,m?._sb_id,m?.open_order_id,m?.legacy_local_id].some(v=>v&&cobrosEnCurso.has(String(v)));
 }
 function setPago(t){
   if(t==='mixed')paymentMode='mixed';
@@ -6387,7 +6471,7 @@ if(config.webappUrl){loadFromSheets();}
   function buildPendingOperationsOutbox(){
     const ops=[];
     (window.findPendingSalesSyncGroups?.(ventas||[])||[]).forEach(group=>{
-      ops.push({type:'venta',operation:'save_sale',status:getGroupSyncMeta?.(group)?.status||'pending',label:getStableSaleLegacyId?.(group)||'Venta pendiente',idempotency_key:getStableSaleLegacyId?.(group)||'',attempts:Math.max(...(group.rows||[]).map(r=>Number(r._sb_retry_count)||0),0),last_error:(group.rows||[]).map(r=>r._sb_sync_error).filter(Boolean).join(' | '),payload:{rows:(group.rows||[]).length,total:money2(group.total)}});
+      ops.push({type:'venta',operation:'save_sale',status:window.getGroupSyncMeta?.(group)?.status||'pending',label:getStableSaleLegacyId?.(group)||'Venta pendiente',idempotency_key:getStableSaleLegacyId?.(group)||'',attempts:Math.max(...(group.rows||[]).map(r=>Number(r._sb_retry_count)||0),0),last_error:(group.rows||[]).map(r=>r._sb_sync_error).filter(Boolean).join(' | '),payload:{rows:(group.rows||[]).length,total:money2(group.total)}});
     });
     const pendingMesaKeys=new Set();
     (mesas||[]).filter(m=>m&&((!m._sb_id)||m._syncing||m._sync_status==='partial_error')).forEach(m=>{
@@ -7058,8 +7142,10 @@ if(config.webappUrl){loadFromSheets();}
   function ooShouldPreserveLocal(mesa){
     return isLocalPersistencePending(mesa)||!!getPendingOpenOrderClosureForMesa(mesa);
   }
-  function ooMergeRemoteWithPending(remoteOrders){
-    return mergeRemoteRecordsWithLocalPending(remoteOrders,mesas,ooShouldPreserveLocal);
+  // snapshotAt: cuándo se pidió la foto remota. Una mesa que recibió su id remoto después no puede estar en esa foto:
+  // se conserva aunque ya no esté "pendiente" (si no, el refresh viejo la borra y el cobro pierde el open_order_id).
+  function ooMergeRemoteWithPending(remoteOrders,snapshotAt=Infinity){
+    return mergeRemoteRecordsWithLocalPending(remoteOrders,mesas,m=>ooShouldPreserveLocal(m)||(m._sb_linked_at||0)>=snapshotAt);
   }
   function ooStamp(){
     try{return(typeof window.getLocalDateString==='function')?`${window.getLocalDateString()} ${window.getLocalTimeString?.()??''}`:new Date().toLocaleString();}
@@ -7240,6 +7326,7 @@ if(config.webappUrl){loadFromSheets();}
 
     ooFetching=true;
     ooLastFetch=Date.now();
+    const snapshotAt=ooLastFetch;
     ooSetState('syncing','');
     try{
       // SELECT con columnas que existen en cualquier schema estándar de open_orders
@@ -7274,7 +7361,7 @@ if(config.webappUrl){loadFromSheets();}
           return{ok:false,reason:'empty_after_create',message:msg};
         }
         // Una lectura remota vacía no puede borrar mesas locales todavía pendientes.
-        mesas=ooMergeRemoteWithPending([]);
+        mesas=ooMergeRemoteWithPending([],snapshotAt);
         if(typeof window.save==='function')window.save();
         ooHasSupabaseRead=true;ooSetState('supabase','');ooLastRead=ooStamp();ooCount=0;ooItemCount=0;ooUpdateDiag();
         ooRenderVisible();
@@ -7289,9 +7376,8 @@ if(config.webappUrl){loadFromSheets();}
         });
         orders=orders.filter(o=>!soldOrderIds.has(String(o.id||'')));
       }
-
       if(!orders.length){
-        mesas=ooMergeRemoteWithPending([]);
+        mesas=ooMergeRemoteWithPending([],snapshotAt);
         if(typeof window.save==='function')window.save();
         ooHasSupabaseRead=true;ooSetState('supabase','');ooLastRead=ooStamp();ooCount=0;ooItemCount=0;ooUpdateDiag();
         ooRenderVisible();
@@ -7325,6 +7411,9 @@ if(config.webappUrl){loadFromSheets();}
         };
       });
 
+      // La foto puede ser previa a un cobro hecho en este dispositivo mientras se esperaban las lecturas:
+      // una mesa con venta local ya confirmada no vuelve a la lista (va después del último await).
+      orders=orders.filter(o=>!findMesaSaleRows(o.id).some(v=>v._sb_sync_status==='synced'));
       const activeBefore=(typeof findMesaByAnyId==='function'&&mesaActivaId)?findMesaByAnyId(mesaActivaId):null;
       const keepActiveDraft=!!(activeBefore?._syncing&&typeof isMesaDetalleVisible==='function'&&isMesaDetalleVisible());
       let newMesas=orders.map(o=>{
@@ -7358,7 +7447,7 @@ if(config.webappUrl){loadFromSheets();}
         }
       }
 
-      mesas=ooMergeRemoteWithPending(newMesas);
+      mesas=ooMergeRemoteWithPending(newMesas,snapshotAt);
       if(typeof window.save==='function')window.save();
       ooHasSupabaseRead=true;ooSetState('supabase','');ooLastRead=ooStamp();ooCount=orders.length;ooItemCount=(items||[]).length;ooUpdateDiag();
       ooRenderVisible();
@@ -7639,7 +7728,27 @@ if(config.webappUrl){loadFromSheets();}
   }
 
   // ── Full sync de una mesa (create if needed + items) ─
-  async function syncMesaToSupabase(mesa){
+  // Las syncs de una misma mesa (alta, cobro, volver, edición, reintento) corren de a una: en paralelo, cada una creaba
+  // su open_order (mesa remota extra, cobrable de nuevo) o duplicaba los ítems con su borrado+inserción.
+  // ponytail: una sync colgada demora las siguientes de esa mesa hasta que falle o se recargue la página.
+  const ooSyncsEnCola=new Map();
+  function syncMesaToSupabase(mesa,opts={}){
+    const key=String(mesa?.legacy_local_id||mesa?.id||'');
+    const run=(ooSyncsEnCola.get(key)||Promise.resolve()).then(()=>syncMesaToSupabaseAhora(mesa,opts));
+    const tail=run.catch(()=>{});
+    ooSyncsEnCola.set(key,tail);
+    tail.then(()=>{if(ooSyncsEnCola.get(key)===tail)ooSyncsEnCola.delete(key);});
+    return run;
+  }
+  async function syncMesaToSupabaseAhora(mesa,{cobroVivo=null}={}){
+    // Un cobro en curso (o ya confirmado) es dueño de su mesa: una sync tardía (volver a la lista, edición, reintento)
+    // reescribiría ítems y metadata de una mesa ya cerrada. Si el cobro falla, la mesa queda pendiente y se reintenta.
+    // La preparación del propio cobro sí corre aunque haya esperado en la cola a la creación inicial (reusa el
+    // open_order ya creado y deja el pedido remoto igual al carrito cobrado), pero solo si ESE cobro sigue vivo:
+    // si venció y el cajero reintentó, el candado es de otro cobro y esta sync vieja no escribe.
+    const deEsteCobro=typeof cobroVivo==='function'&&cobroVivo();
+    if(mesa._sb_id&&((!deEsteCobro&&[mesa.id,mesa._sb_id,mesa.open_order_id,mesa.legacy_local_id].some(v=>v&&cobrosEnCurso.has(String(v))))
+      ||findMesaSaleRows(mesa._sb_id).some(v=>v._sb_sync_status==='synced')))return false;
     if(!mesa._sync_started_at)mesa._sync_started_at=new Date().toISOString();
     if(!ooReady()){
       const ready=await waitForOOReady(4000);
@@ -7657,10 +7766,11 @@ if(config.webappUrl){loadFromSheets();}
         mesa.open_order_id=sbId;
         mesa.status='open';
         mesa._syncing=false;
+        mesa._sb_linked_at=Date.now();
         // Persistir _sb_id en el array global
         const arr=mesas||[];
         const idx=arr.findIndex(m=>[m.id,m._sb_id,m.open_order_id,m.legacy_local_id].some(v=>String(v||'')===String(previousId)||String(v||'')===String(sbId)));
-        if(idx>=0){arr[idx]={...arr[idx],id:sbId,_sb_id:sbId,open_order_id:sbId,legacy_local_id:previousId,status:'open',_syncing:false};}
+        if(idx>=0){arr[idx]={...arr[idx],id:sbId,_sb_id:sbId,open_order_id:sbId,legacy_local_id:previousId,status:'open',_syncing:false,_sb_linked_at:mesa._sb_linked_at};}
         if(typeof window.save==='function')window.save();
       }
     }
@@ -12553,6 +12663,7 @@ if(config.webappUrl){loadFromSheets();}
       error
     };
   }
+  window.getGroupSyncMeta=getGroupSyncMeta;
   function getSalesSyncStats(rows){
     const stats={total:0,synced:0,pending:0,error:0,partial_error:0};
     groupLocalSaleRowsByTicket(rows).forEach(group=>{
@@ -13619,6 +13730,18 @@ if(config.webappUrl){loadFromSheets();}
       throw err;
     }
   };
+  // Un ticket nunca se envía dos veces en paralelo desde esta pestaña: cobro, auto-retry y reintentos manuales pasan por acá
+  // y se suman al envío en curso. El timeout de quien espera no libera la entrada; solo la respuesta real.
+  // ponytail: por pestaña; entre dispositivos o tras recargar la página, la unicidad la tiene que dar la base (UNIQUE legacy_id).
+  const saleGroupsInFlight=new Map();
+  const saveSaleGroupToSupabaseOnce=window.saveSaleGroupToSupabase;
+  window.saveSaleGroupToSupabase=function(group){
+    const key=getStableSaleLegacyId(group);
+    if(saleGroupsInFlight.has(key)) return saleGroupsInFlight.get(key);
+    const sending=saveSaleGroupToSupabaseOnce(group).finally(()=>saleGroupsInFlight.delete(key));
+    saleGroupsInFlight.set(key,sending);
+    return sending;
+  };
 
   window.saveSaleRowsToSupabase=async function(localRows){
     if(!Array.isArray(localRows)||!localRows.length) return{ok:false};
@@ -14025,6 +14148,7 @@ if(config.webappUrl){loadFromSheets();}
     };
   }
   async function saveMissingSaleGroupToSupabaseStrict(group,entryLocal){
+    if(saleGroupsInFlight.has(getStableSaleLegacyId(group))) throw new Error('La venta se está enviando. Reintentá en unos segundos.');
     if(!hasSalesSupabaseReady()) throw new Error('Supabase no configurado para ventas');
     const storeId=getSalesStoreId();
     const client=getSalesSupabaseClient();
