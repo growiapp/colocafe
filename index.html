@@ -4703,7 +4703,7 @@ function renderProdGrid(){
       <div class="cat-dot" style="background:${cat.color}"></div>
       <div class="prod-name">${escapeHtml(p.name)}</div>
       <div class="prod-price">${fmt(safeProductPrice(p))}</div>
-      ${!p.ilimitado&&st==='low'?`<div class="prod-low-txt">⚠ ${p.stock} restantes`:''}
+      ${!p.ilimitado&&st==='low'?`<div class="prod-low-txt">⚠ ${p.stock} restantes</div>`:''}
       ${!p.ilimitado&&st==='out'?'<div class="out-lbl">Stock 0</div>':''}
       ${hasVars?`<div class="prod-mods-hint">🔧 Variantes</div>`:''}
       ${qty>0?`<div class="prod-badge">${qty}</div>`:''}
