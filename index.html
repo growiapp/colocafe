@@ -228,6 +228,15 @@ input.qty-n:focus{border-color:var(--border2);background:var(--surf2);outline:no
 .frecuentes-pos{min-width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;font-size:12px;font-weight:600}
 .frecuentes-fila.on .frecuentes-pos{background:var(--orange);color:#fff}
 @media(max-width:767px){.frecuentes .chip{min-height:44px;padding:10px 14px;font-size:14px}}
+.comanda-aviso{font-size:13px;color:var(--ink2);min-height:0;margin-bottom:8px}
+.comanda-aviso:empty{display:none}
+.comanda-sector{margin-bottom:12px}
+.comanda-sector-titulo{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--ink3);margin-bottom:6px}
+.comanda-linea{font-size:14px;padding:6px 0;border-bottom:1px solid var(--border)}
+.comanda-linea.anular{color:var(--red)}
+.comanda-vacia{font-size:14px;color:var(--ink2);padding:8px 0}
+.comanda-envio{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.comanda-envio-lineas{color:var(--ink2);font-size:12px;margin-top:2px}
 #print-area{display:none}
 @media print{
   /* El alto lo pone el rollo: sin "size" manda el papel de 80 mm elegido en la impresora (80mm auto no es válido). */
@@ -1740,7 +1749,7 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
           <button class="btn-sm" onclick="volverAMesas()">← Volver</button>
           <div style="font-family:var(--ff-serif);font-size:16px;color:var(--ink);flex:1" id="mesa-titulo"></div>
           <div id="mesa-tipo-badge" class="mesa-tipo-badge"></div>
-          <button class="btn-sm" onclick="imprimirComandaMesa()" style="font-size:11px;padding:5px 10px">Imprimir comanda</button>
+          <button class="btn-sm" onclick="abrirComandaMesa()" style="font-size:11px;padding:5px 10px">Comanda</button>
           <button class="btn-sm primary" onclick="openProdRapidoModal()" style="font-size:11px;padding:5px 10px">+ Producto</button>
         </div>
         <div class="frecuentes" id="carga-frecuentes"></div>
@@ -2048,6 +2057,24 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
 
 <!-- MODAL: CONFLICTO DE ÍTEMS DE UNA MESA -->
 <div id="print-area" aria-hidden="true"></div>
+<div class="modal-ov" id="modal-comanda" onclick="if(event.target===this)cerrarComanda()">
+  <div class="modal-box" style="max-width:460px">
+    <div class="modal-title" id="comanda-titulo">Comanda</div>
+    <div class="comanda-aviso" id="comanda-aviso" role="status"></div>
+    <div id="comanda-pendientes"></div>
+    <div class="modal-actions" style="flex-wrap:wrap">
+      <button class="btn-cancel" type="button" id="comanda-imprimir" onclick="imprimirComandaPendiente()">Imprimir pendientes</button>
+      <button class="btn-save" type="button" id="comanda-enviar" onclick="marcarComandaEnviada()">Marcar como enviada</button>
+    </div>
+    <div style="font-size:12px;color:var(--ink3);margin:8px 0 4px">Imprimir no marca nada: marcá la comanda cuando la cocina o la barra la recibió.</div>
+    <div class="comanda-sector-titulo" id="comanda-historial-titulo" style="margin-top:14px">Enviadas · se pueden reimprimir mientras la mesa esté abierta</div>
+    <div id="comanda-historial"></div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn-cancel" type="button" onclick="imprimirPedidoCompleto()">Imprimir pedido completo</button>
+      <button class="btn-cancel" type="button" onclick="cerrarComanda()">Cerrar</button>
+    </div>
+  </div>
+</div>
 <div class="modal-ov" id="modal-frecuentes" onclick="if(event.target===this)cerrarFrecuentes()">
   <div class="modal-box" style="max-width:420px">
     <div class="modal-title">Productos frecuentes</div>
@@ -5812,33 +5839,135 @@ function imprimirDocumentos(html){
 }
 // getActiveStoreName devuelve el id del local cuando no conoce el nombre: eso no va en un ticket.
 function nombreComercio(){const n=window.getActiveStoreName?.();return n&&n!=='—'&&!window.isValidUuid?.(n)?n:'Colo Café';}
-function htmlComanda(target,items,momento=new Date()){
-  const porSector={};
-  Object.values(items||{}).filter(i=>i.qty>0).forEach(i=>{
-    const p=findProductById(i.prodId),sec=getCat(p?.cat).seccion||'cafeteria';
-    (porSector[sec]||(porSector[sec]=[])).push({i,p});
+// Comanda: una línea es producto + variantes + nota. Lo pendiente de cada sector es lo pedido menos lo ya enviado
+// (open_order_dispatches, compartido entre dispositivos): positivo = agregar, negativo = anular.
+function firmaComanda(i){return [i.prodId,(i.vars||[]).map(v=>v.nombre).sort().join('+'),String(i.nota||'').trim()].join('|');}
+function lineasPorSector(items){
+  const out={};
+  Object.values(items||{}).filter(i=>Number(i.qty)>0).forEach(i=>{
+    const p=findProductById(i.prodId),sec=getCat(p?.cat).seccion||'cafeteria',f=firmaComanda(i),s=out[sec]||(out[sec]={});
+    s[f]=s[f]||{firma:f,prodId:i.prodId,producto:p?.name||i.prodId,variantes:(i.vars||[]).map(v=>v.nombre),nota:String(i.nota||'').trim(),cantidad:0};
+    s[f].cantidad+=Number(i.qty);
   });
-  const operador=target?.operator_name||(turno&&turno.abierto?turno.operador:'')||'';
+  return out;
+}
+function pendientesComanda(items,envios){
+  const actual=lineasPorSector(items),enviado={},out={};
+  (envios||[]).forEach(e=>(e.lines||[]).forEach(l=>{
+    const s=enviado[e.sector]||(enviado[e.sector]={});
+    s[l.firma]=s[l.firma]||{...l,cantidad:0};s[l.firma].cantidad+=Number(l.cantidad)||0;
+  }));
+  new Set([...Object.keys(actual),...Object.keys(enviado)]).forEach(sec=>{
+    const a=actual[sec]||{},e=enviado[sec]||{};
+    const lineas=[...new Set([...Object.keys(a),...Object.keys(e)])]
+      .map(f=>({...(a[f]||e[f]),cantidad:(a[f]?.cantidad||0)-(e[f]?.cantidad||0)})).filter(l=>l.cantidad);
+    if(lineas.length)out[sec]=lineas;
+  });
+  return out;
+}
+const ordenSectores=secs=>secs.sort((a,b)=>(a==='cafeteria'?0:1)-(b==='cafeteria'?0:1));
+// porSector: {sector:[{cantidad,producto,variantes,nota}]}; titulos: encabezado de cada sector.
+function htmlComanda(target,porSector,{titulos={},momento=new Date(),operador}={}){
+  const quien=operador??(target?.operator_name||(turno&&turno.abierto?turno.operador:'')||'');
   const cuando=`${getLocalDateString(momento)} ${getLocalTimeString(momento)}`;
-  return Object.keys(porSector).sort((a,b)=>(a==='cafeteria'?0:1)-(b==='cafeteria'?0:1)).map(sec=>`<div class="pr-doc">
-    <div class="pr-center pr-strong">COMANDA · ${escapeHtml((SECTORES_COMANDA[sec]||sec).toUpperCase())}</div>
+  const unidades=n=>`${n} ${n===1?'unidad':'unidades'}`;
+  return ordenSectores(Object.keys(porSector||{}).filter(s=>porSector[s]?.length)).map(sec=>{
+    const lineas=porSector[sec],altas=lineas.filter(l=>l.cantidad>0),bajas=lineas.filter(l=>l.cantidad<0);
+    const linea=l=>`<div class="pr-item">
+      <div class="pr-strong">${l.cantidad<0?'ANULAR ':''}${Math.abs(Number(l.cantidad))} × ${escapeHtml(l.producto)}</div>
+      ${(l.variantes||[]).map(v=>`<div class="pr-sub">+ ${escapeHtml(v)}</div>`).join('')}
+      ${l.nota?`<div class="pr-sub">* ${escapeHtml(l.nota)}</div>`:''}
+    </div>`;
+    return `<div class="pr-doc">
+    <div class="pr-center pr-strong">${escapeHtml(titulos[sec]||'COMANDA')} · ${escapeHtml((SECTORES_COMANDA[sec]||sec).toUpperCase())}</div>
     <div class="pr-center pr-big">${escapeHtml(target?.nombre||target?.cliente||'Mesa')}</div>
     <div class="pr-center">${escapeHtml(tipoLabel(target?.tipo||'salon'))} · ${escapeHtml(cuando)}</div>
-    ${operador?`<div class="pr-center">Operador: ${escapeHtml(operador)}</div>`:''}
+    ${quien?`<div class="pr-center">Operador: ${escapeHtml(quien)}</div>`:''}
     <div class="pr-sep"></div>
-    ${porSector[sec].map(({i,p})=>`<div class="pr-item">
-      <div class="pr-strong">${Number(i.qty)} × ${escapeHtml(p?.name||i.prodId)}</div>
-      ${(i.vars||[]).map(v=>`<div class="pr-sub">+ ${escapeHtml(v.nombre)}</div>`).join('')}
-      ${i.nota?`<div class="pr-sub">* ${escapeHtml(i.nota)}</div>`:''}
-    </div>`).join('')}
+    ${altas.map(linea).join('')}
+    ${bajas.length?`<div class="pr-sep"></div>${bajas.map(linea).join('')}`:''}
     <div class="pr-sep"></div>
-    <div class="pr-center">${(n=>`${n} ${n===1?'unidad':'unidades'}`)(porSector[sec].reduce((s,{i})=>s+Number(i.qty),0))}</div>
-  </div>`).join('');
+    <div class="pr-center">${[altas.length?unidades(altas.reduce((s,l)=>s+l.cantidad,0)):'',bajas.length?`anular ${unidades(-bajas.reduce((s,l)=>s+l.cantidad,0))}`:''].filter(Boolean).join(' · ')}</div>
+  </div>`;}).join('');
 }
-function imprimirComandaMesa(){
-  const html=htmlComanda(getCurrentVentaTarget(),carrito);
+const pedidoCompleto=items=>Object.fromEntries(Object.entries(lineasPorSector(items)).map(([s,l])=>[s,Object.values(l)]));
+// Imprimir no marca nada: "Marcar como enviada" registra lo que se mostró. Así una impresión cancelada no se pierde.
+let comandaEstado=null;
+async function abrirComandaMesa(){
+  const target=getCurrentVentaTarget();
+  const orderId=String(mesaActivaId||'').startsWith('reserva_')?'':getMesaOpenOrderId(target);
+  comandaEstado={target,orderId:window.isValidUuid?.(orderId)?orderId:'',envios:null,mostrado:{},aviso:'Cargando comandas enviadas…'};
+  renderComanda();$('modal-comanda').classList.add('open');
+  await recargarComandas();
+}
+async function recargarComandas(){
+  const est=comandaEstado;if(!est)return;
+  const client=window.__coloSupabaseClient||window.getSupabaseClient?.();
+  if(!est.orderId||!client){est.envios=null;est.aviso='Esta mesa todavía no está guardada en el servidor: solo se puede imprimir el pedido completo.';renderComanda();return;}
+  const {data,error}=await client.from('open_order_dispatches').select('id,sector,seq,lines,operator_name,created_at')
+    .eq('open_order_id',est.orderId).order('created_at',{ascending:true});
+  if(comandaEstado!==est)return;
+  if(error){
+    est.envios=null;
+    est.aviso=/open_order_dispatches|PGRST205|42P01/.test(`${error.code} ${error.message}`)
+      ?'El registro de comandas enviadas no está disponible: solo se puede imprimir el pedido completo.'
+      :'No pudimos leer las comandas enviadas. Revisá la conexión y reintentá.';
+  }else{est.envios=data||[];est.aviso='';}
+  renderComanda();
+}
+function cerrarComanda(){$('modal-comanda').classList.remove('open');comandaEstado=null;}
+function renderComanda(){
+  const est=comandaEstado;if(!est)return;
+  const pend=est.envios?pendientesComanda(carrito,est.envios):{};
+  est.mostrado=pend;
+  const siguiente=sec=>Math.max(0,...(est.envios||[]).filter(e=>e.sector===sec).map(e=>Number(e.seq)||0))+1;
+  const textoLinea=l=>`${l.cantidad<0?'<strong>Anular</strong> ':''}${Math.abs(l.cantidad)} × ${escapeHtml(l.producto)}${(l.variantes||[]).length?` · ${escapeHtml(l.variantes.join(', '))}`:''}${l.nota?` · <em>${escapeHtml(l.nota)}</em>`:''}`;
+  const secs=ordenSectores(Object.keys(pend));
+  $('comanda-titulo').textContent=`Comanda · ${est.target?.nombre||'Mesa'}`;
+  $('comanda-aviso').textContent=est.aviso;
+  $('comanda-pendientes').innerHTML=est.envios
+    ?(secs.length?secs.map(sec=>`<div class="comanda-sector"><div class="comanda-sector-titulo">${escapeHtml(SECTORES_COMANDA[sec]||sec)} · comanda N° ${siguiente(sec)}</div>
+        ${pend[sec].map(l=>`<div class="comanda-linea${l.cantidad<0?' anular':''}">${textoLinea(l)}</div>`).join('')}</div>`).join('')
+      :'<div class="comanda-vacia">No hay nada pendiente de enviar.</div>')
+    :'';
+  $('comanda-enviar').disabled=$('comanda-imprimir').disabled=!secs.length;
+  $('comanda-historial').innerHTML=(est.envios||[]).slice().reverse().map(e=>`<div class="comanda-envio">
+      <div><strong>${escapeHtml(SECTORES_COMANDA[e.sector]||e.sector)} · N° ${e.seq}</strong> · ${escapeHtml(getLocalTimeString(new Date(e.created_at)))}${e.operator_name?` · ${escapeHtml(e.operator_name)}`:''}
+        <div class="comanda-envio-lineas">${(e.lines||[]).map(textoLinea).join('<br>')}</div></div>
+      <button class="btn-sm" type="button" onclick="reimprimirComanda('${escapeAttr(e.id)}')">Reimprimir</button>
+    </div>`).join('');
+  $('comanda-historial-titulo').style.display=(est.envios||[]).length?'':'none';
+}
+function imprimirComandaPendiente(){
+  const est=comandaEstado;if(!est)return;
+  const titulos=Object.fromEntries(Object.keys(est.mostrado).map(sec=>[sec,`COMANDA N° ${Math.max(0,...(est.envios||[]).filter(e=>e.sector===sec).map(e=>Number(e.seq)||0))+1}`]));
+  imprimirDocumentos(htmlComanda(est.target,est.mostrado,{titulos}));
+}
+function imprimirPedidoCompleto(){
+  const html=htmlComanda(comandaEstado?.target||getCurrentVentaTarget(),pedidoCompleto(carrito),{titulos:Object.fromEntries(Object.keys(SECTORES_COMANDA).map(s=>[s,'PEDIDO COMPLETO']))});
   if(!html){showToast('No hay productos para la comanda.');return;}
   imprimirDocumentos(html);
+}
+function reimprimirComanda(id){
+  const e=(comandaEstado?.envios||[]).find(x=>x.id===id);if(!e)return;
+  imprimirDocumentos(htmlComanda(comandaEstado.target,{[e.sector]:e.lines},{titulos:{[e.sector]:`REIMPRESIÓN · N° ${e.seq}`},momento:new Date(e.created_at),operador:e.operator_name||''}));
+}
+// Registra como enviado exactamente lo que se mostró. Si otro dispositivo registró antes, el número choca (23505) y se recarga.
+async function marcarComandaEnviada(){
+  const est=comandaEstado;if(!est?.envios)return;
+  const client=window.__coloSupabaseClient||window.getSupabaseClient?.(),storeId=window.getActiveStoreId?.();
+  const secs=ordenSectores(Object.keys(est.mostrado));if(!secs.length||!client||!storeId)return;
+  const boton=$('comanda-enviar');boton.disabled=true;
+  const operador=est.target?.operator_name||(turno&&turno.abierto?turno.operador:'')||null;
+  let problema='';
+  for(const sec of secs){
+    const seq=Math.max(0,...est.envios.filter(e=>e.sector===sec).map(e=>Number(e.seq)||0))+1;
+    const lines=est.mostrado[sec].map(({firma,prodId,producto,variantes,nota,cantidad})=>({firma,prodId,producto,variantes,nota,cantidad}));
+    const {error}=await client.from('open_order_dispatches').insert({store_id:storeId,open_order_id:est.orderId,sector:sec,seq,lines,operator_name:operador});
+    if(error){problema=error.code==='23505'?'Otro dispositivo marcó una comanda de esta mesa recién. Revisá lo pendiente.':'No pudimos registrar la comanda. Reintentá.';break;}
+  }
+  await recargarComandas();
+  showToast(problema||'Comanda marcada como enviada.');
 }
 function htmlTicket(t){
   const fila=(a,b,cls='')=>`<div class="pr-row${cls}"><span>${a}</span><span>${b}</span></div>`;
