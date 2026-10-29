@@ -6,58 +6,81 @@
 // ── Una sola pestaña operativa ─────────────────────
 // Todas las pestañas de este origen comparten localStorage: dos cajas abiertas se pisaban mesas, ventas y pendientes.
 // La pestaña operativa tiene el bloqueo "colocafe-caja" (Web Locks: el navegador lo suelta al cerrar, recargar o colgarse).
-// Hasta saber si esta pestaña lo tiene, sus escrituras quedan en una cola; si no lo tiene, se descartan y pasa a
-// otra-pestana.html, donde no corre la app. La sesión de Supabase se escribe igual: es la misma para todas las pestañas.
+// Hasta tenerlo, la app no opera: la página está oculta (no se puede tocar nada), los pedidos de red esperan sin salir
+// y las escrituras locales quedan en una cola. Sin el bloqueo, o si el navegador no lo soporta, nada de eso se aplica y
+// la pestaña pasa a otra-pestana.html, donde no corre la app.
 (function(){
-  const S=Storage.prototype,orig={set:S.setItem,get:S.getItem,rem:S.removeItem};
-  const libre=k=>/^sb-.*-auth-token/.test(k);
+  const html=document.documentElement;html.style.visibility='hidden';
+  const S=Storage.prototype,orig={set:S.setItem,get:S.getItem,rem:S.removeItem},fetchOrig=window.fetch;
   let modo='pendiente';const cola=new Map();
+  let liberarRed;const red=new Promise(r=>liberarRed=r); // se resuelve solo en la pestaña operativa
   S.setItem=function(k,v){
-    if(this!==window.localStorage||modo==='principal'||libre(String(k)))return orig.set.call(this,k,v);
+    if(this!==window.localStorage||modo==='principal'||modo==='cediendo')return orig.set.call(this,k,v);
     if(modo==='pendiente')cola.set(String(k),String(v));
   };
   S.removeItem=function(k){
-    if(this!==window.localStorage||modo==='principal'||libre(String(k)))return orig.rem.call(this,k);
+    if(this!==window.localStorage||modo==='principal'||modo==='cediendo')return orig.rem.call(this,k);
     if(modo==='pendiente')cola.set(String(k),null);
   };
   S.getItem=function(k){
     if(this===window.localStorage&&modo==='pendiente'&&cola.has(String(k)))return cola.get(String(k));
     return orig.get.call(this,k);
   };
+  // Escrituras remotas en curso: la caja no se cede con una a medio camino.
+  let escribiendo=0,ultimaEscritura=0;
+  window.fetch=function(input,init){
+    const metodo=String(init?.method||input?.method||'GET').toUpperCase();
+    return red.then(()=>{
+      if(modo!=='principal')return new Promise(()=>{}); // al ceder, nada nuevo sale a la red
+      if(metodo==='GET'||metodo==='HEAD')return fetchOrig.call(window,input,init);
+      escribiendo++;
+      return fetchOrig.call(window,input,init).finally(()=>{escribiendo--;ultimaEscritura=Date.now();});
+    });
+  };
   const principal=()=>{
     modo='principal';
     cola.forEach((v,k)=>v===null?orig.rem.call(localStorage,k):orig.set.call(localStorage,k,v));cola.clear();
     try{sessionStorage.setItem('colocafe_pestana_operativa','1');}catch(_){}
     if(/[?&]tomar=1/.test(location.search))history.replaceState(null,'',location.pathname);
-    window.__cajaPestana='principal';
+    window.__cajaPestana='principal';html.style.visibility='';liberarRed();
   };
-  const secundaria=()=>{
-    modo='secundaria';cola.clear();window.__cajaPestana='secundaria';
-    location.replace('otra-pestana.html');
-  };
-  if(!(navigator.locks&&window.BroadcastChannel)){principal();console.warn('[Caja] sin Web Locks: no se puede garantizar una sola pestaña');return;}
+  const fuera=destino=>{modo='secundaria';cola.clear();window.__cajaPestana='secundaria';location.replace(destino);};
+  const incompatible=err=>{console.warn('[Caja] sin bloqueo entre pestañas',err||'');fuera('otra-pestana.html?motivo=incompatible');};
+  if(!(navigator.locks?.request&&navigator.locks.query&&window.BroadcastChannel&&window.AbortController)){incompatible();return;}
   // Una recarga (o la pestaña que tomó la caja) espera a que la instancia anterior suelte el bloqueo.
   let opciones={ifAvailable:true};
   try{
-    if(sessionStorage.getItem('colocafe_pestana_operativa')==='1'||/[?&]tomar=1/.test(location.search))opciones={signal:AbortSignal.timeout(4000)};
+    if(sessionStorage.getItem('colocafe_pestana_operativa')==='1'||/[?&]tomar=1/.test(location.search)){
+      const espera=new AbortController();setTimeout(()=>espera.abort(),4000);opciones={signal:espera.signal};
+    }
   }catch(_){}
-  let pedido;
-  try{pedido=navigator.locks.request('colocafe-caja',opciones,lock=>{
-    if(!lock){secundaria();return;}
-    principal();
-    // Otra pestaña pide la caja: se cede salvo que haya un cobro en curso.
-    const canal=new BroadcastChannel('colocafe-caja');
-    canal.onmessage=e=>{
-      if(e.data?.tipo!=='ceder')return;
-      if(window.__cajaCobroEnCurso){canal.postMessage({tipo:'ocupada'});return;}
+  // Cede solo si no hay cobro, sincronización de mesa, ni escritura remota en curso, ni una recién terminada (su respuesta se está guardando),
+  // y si la otra pestaña sigue esperando. Mientras tanto avisa que está ocupada y vuelve a mirar.
+  let cediendo=false;
+  const ceder=canal=>{
+    if(modo!=='principal')return;
+    const ocupada=window.__cajaCobroEnCurso||window.__cajaSincronizandoMesas?.()||escribiendo>0||Date.now()-ultimaEscritura<1500;
+    if(ocupada){canal.postMessage({tipo:'ocupada'});setTimeout(()=>ceder(canal),500);return;}
+    navigator.locks.query().then(q=>{
+      if(modo!=='principal')return;
+      if(!(q.pending||[]).some(l=>l.name==='colocafe-caja')){cediendo=false;return;} // la otra pestaña ya no espera
+      if(window.__cajaCobroEnCurso||window.__cajaSincronizandoMesas?.()||escribiendo>0){setTimeout(()=>ceder(canal),500);return;}
+      modo='cediendo'; // sin cola ni red nueva; lo local ya guardado sigue guardado
       try{sessionStorage.removeItem('colocafe_pestana_operativa');}catch(_){}
       canal.postMessage({tipo:'cedida'});
       location.replace('otra-pestana.html?cedida=1');
-    };
+    },()=>{cediendo=false;});
+  };
+  let pedido;
+  try{pedido=navigator.locks.request('colocafe-caja',opciones,lock=>{
+    if(!lock){fuera('otra-pestana.html');return;}
+    principal();
+    const canal=new BroadcastChannel('colocafe-caja');
+    canal.onmessage=e=>{if(e.data?.tipo==='ceder'&&!cediendo){cediendo=true;ceder(canal);}};
     return new Promise(()=>{}); // se suelta al salir de la página
-  });}catch(err){principal();console.warn('[Caja] Web Locks no disponible',err);return;}
-  // Espera vencida: otra pestaña sigue con la caja. Cualquier otro error no puede dejar la caja sin guardar.
-  pedido.catch(err=>{if(err?.name==='AbortError')secundaria();else{principal();console.warn('[Caja] Web Locks falló',err);}});
+  });}catch(err){incompatible(err);return;}
+  // Espera vencida: otra pestaña sigue con la caja. Cualquier otro error: no se opera sin exclusividad.
+  pedido.catch(err=>err?.name==='AbortError'?fuera('otra-pestana.html'):incompatible(err));
 })();
 </script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -8911,6 +8934,7 @@ if(config.webappUrl){loadFromSheets();}
   window.loadSingleOpenOrderFromSupabase=loadSingleOpenOrderFromSupabase;
   window.diagnoseCajaSmoke=diagnoseCajaSmoke;
   window.syncMesaToSupabase=syncMesaToSupabase;
+  window.__cajaSincronizandoMesas=()=>ooSyncsEnCola.size>0; // el traspaso de pestaña espera a que terminen
   window.closeOpenOrderInSupabase=closeOpenOrderInSupabase;
   window.reconcileSoldOpenOrders=reconcileSoldOpenOrders;
   window.deleteOpenOrderFromSupabase=deleteOpenOrderFromSupabase;

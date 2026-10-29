@@ -26,32 +26,36 @@
 </main>
 <script>
 // Página sin la app: acá no se lee ni se escribe nada de la caja. Para operar en esta pestaña se pide el bloqueo
-// "colocafe-caja" (ver index.html): si la otra pestaña está cobrando, no lo cede.
+// "colocafe-caja" (ver index.html): la otra pestaña lo cede cuando no tiene cobros ni escrituras en curso.
 (function(){
   const estado=document.getElementById('estado'),boton=document.getElementById('usar');
   if(/[?&]cedida=1/.test(location.search)){
     document.getElementById('titulo').textContent='La caja pasó a otra pestaña';
     document.getElementById('texto').textContent='Todo lo de esta pestaña quedó guardado. Seguí en la otra o volvé a tomar la caja acá.';
   }
-  if(!(navigator.locks&&window.BroadcastChannel)){boton.disabled=true;estado.textContent='Este navegador no permite pasar la caja entre pestañas. Cerrá esta pestaña.';return;}
+  // Navegador sin bloqueo entre pestañas (o falló): la app no abre, para no operar sin exclusividad.
+  if(/[?&]motivo=incompatible/.test(location.search)||!(navigator.locks?.request&&navigator.locks.query&&window.BroadcastChannel)){
+    document.getElementById('titulo').textContent='Este navegador no puede abrir la caja con seguridad';
+    document.getElementById('texto').textContent='No permite asegurar que la caja esté abierta en una sola pestaña, así que no se abrió y no se modificó nada. Actualizá el navegador (Chrome, Edge, Safari o Firefox recientes) o usá otro dispositivo.';
+    boton.textContent='Reintentar';boton.onclick=()=>location.replace('./');
+    return;
+  }
   const canal=new BroadcastChannel('colocafe-caja');
-  let espera=null;
   canal.onmessage=e=>{
-    if(e.data?.tipo!=='ocupada')return;
-    espera?.abort();espera=null; // no tomar la caja más tarde sin que nadie lo pida
-    estado.textContent='La otra pestaña está cobrando. Probá de nuevo cuando termine.';boton.disabled=false;
+    if(e.data?.tipo==='ocupada')estado.textContent='La otra pestaña está terminando un cobro o una sincronización. La caja pasa a esta pestaña apenas termine.';
   };
   boton.onclick=()=>{
     boton.disabled=true;estado.textContent='Pasando la caja a esta pestaña…';
-    let tomada=false;
+    let tomada=false,aviso=null;
     navigator.locks.request('colocafe-caja',{ifAvailable:true},lock=>{
       if(lock){tomada=true;irALaCaja();return new Promise(()=>{});}
-      canal.postMessage({tipo:'ceder'});
       // Si la otra pestaña cede (o se cierra), el bloqueo queda libre y esta pasa a la caja.
-      espera=new AbortController();
-      return navigator.locks.request('colocafe-caja',{signal:espera.signal},()=>{tomada=true;irALaCaja();return new Promise(()=>{});}).catch(()=>{});
+      // El pedido se repite mientras se espera: la otra pestaña solo cede si esta sigue esperando.
+      navigator.locks.request('colocafe-caja',()=>{tomada=true;clearInterval(aviso);irALaCaja();return new Promise(()=>{});});
+      canal.postMessage({tipo:'ceder'});
+      aviso=setInterval(()=>canal.postMessage({tipo:'ceder'}),1000);
     });
-    setTimeout(()=>{if(!tomada&&boton.disabled&&estado.textContent.startsWith('Pasando'))estado.textContent='Esperando que la otra pestaña suelte la caja. Si está colgada, cerrala.';},3000);
+    setTimeout(()=>{if(!tomada&&estado.textContent.startsWith('Pasando'))estado.textContent='Esperando que la otra pestaña suelte la caja. Si está colgada, cerrala.';},3000);
   };
   function irALaCaja(){location.replace('./?tomar=1');}
 })();
