@@ -4996,8 +4996,11 @@ function setTipoDescuento(tipo){
 function setValorDescuento(v){$('descuento-valor').value=String(v);previewDescuento();}
 function leerDescuento(){
   const {key,tipo}=descuentoEdit;
-  const v=parseFloat(String($('descuento-valor').value).replace(',','.'));
-  if(!Number.isFinite(v)||v<=0)return{error:'Ingresá un valor mayor a 0.'};
+  // Solo un número completo (coma o punto decimal): "10abc" o "1,2,3" no se toman como 10 ni 1,2.
+  const texto=String($('descuento-valor').value).trim();
+  if(!/^\d+([.,]\d+)?$/.test(texto))return{error:'Ingresá solo números (para decimales, usá coma).'};
+  const v=Number(texto.replace(',','.'));
+  if(!(v>0))return{error:'Ingresá un valor mayor a 0.'};
   const base=baseDescuento(key);
   if(tipo==='pct'&&v>100)return{error:'El porcentaje no puede superar el 100%.'};
   if(tipo==='monto'&&v>base)return{error:`El descuento no puede superar ${fmt(base)}.`};
