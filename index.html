@@ -212,6 +212,12 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .qty-n{font-size:13px;font-weight:500;min-width:16px;text-align:center}
 input.qty-n{width:38px;height:26px;padding:0;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink);font-family:inherit}
 input.qty-n:focus{border-color:var(--border2);background:var(--surf2);outline:none}
+.c-desc{display:inline-block;white-space:nowrap;margin-top:4px;padding:3px 8px;border:1px dashed var(--border2);border-radius:999px;background:transparent;color:var(--ink3);font:inherit;font-size:11px;cursor:pointer;text-align:left}
+.c-desc.on{border-style:solid;border-color:var(--green);color:var(--green)}
+.cart-desglose{display:flex;flex-direction:column;gap:4px;margin-top:10px;font-size:13px;color:var(--ink2)}
+.cart-desglose-row{display:flex;justify-content:space-between;gap:8px}
+.cart-desglose-row.total{font-weight:600;color:var(--ink)}
+.cart-desglose-row.aviso{color:var(--red)}
 .c-sub{font-size:12px;color:var(--ink2);min-width:64px;text-align:right;flex-shrink:0}
 .divider{height:1px;background:var(--border);margin:10px 0}
 .pago-lbl{font-size:11px;color:var(--ink3);margin-bottom:7px}
@@ -840,6 +846,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
   .btn-sm,.btn,.btn-cancel,.btn-save{padding:11px 14px}
   .modal-input,.modal-select,.modal-textarea,.cfg-input,.inv-search,.dash-fecha-input,.auth-card label input,.auth-card label select{min-height:44px;font-size:16px}
   .qty-btn,.icon-btn,.cat-del,.modal-close{min-width:44px;min-height:44px}
+  .c-desc{min-height:36px;padding:6px 12px;font-size:13px}
   input.qty-n{width:48px;height:44px;font-size:16px}
   .modal-close{top:10px;right:10px}
 
@@ -1715,6 +1722,7 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
           </div>
           <div class="cart-empty" id="cart-empty">Todavía no agregaste productos.</div>
           <div class="cart-rows" id="cart-rows" style="display:none"></div>
+          <div class="cart-desglose" id="cart-desglose"></div>
           <div class="divider"></div>
           <div class="pago-lbl">Forma de pago</div>
           <div class="pago-grid">
@@ -2005,6 +2013,29 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
 </div>
 
 <!-- MODAL: CONFLICTO DE ÍTEMS DE UNA MESA -->
+<div class="modal-ov" id="modal-descuento" onclick="if(event.target===this)cerrarDescuento()">
+  <div class="modal-box" style="max-width:380px">
+    <div class="modal-title" id="descuento-titulo">Descuento</div>
+    <div style="font-size:13px;color:var(--ink2);margin-bottom:12px" id="descuento-base"></div>
+    <div class="pago-grid" style="margin-bottom:10px">
+      <div class="pago-opt" id="desc-tipo-pct" onclick="setTipoDescuento('pct')">Porcentaje (%)</div>
+      <div class="pago-opt" id="desc-tipo-monto" onclick="setTipoDescuento('monto')">Importe ($)</div>
+    </div>
+    <div class="pago-grid" id="desc-rapidos" style="grid-template-columns:repeat(4,1fr);margin-bottom:10px">
+      <div class="pago-opt" onclick="setValorDescuento(5)">5%</div>
+      <div class="pago-opt" onclick="setValorDescuento(10)">10%</div>
+      <div class="pago-opt" onclick="setValorDescuento(15)">15%</div>
+      <div class="pago-opt" onclick="setValorDescuento(20)">20%</div>
+    </div>
+    <input class="modal-input" id="descuento-valor" type="text" inputmode="decimal" placeholder="0" oninput="previewDescuento()" onkeydown="if(event.key==='Enter')aplicarDescuento()">
+    <div style="font-size:13px;margin:10px 0 16px;min-height:18px" id="descuento-preview"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" type="button" id="descuento-quitar" onclick="quitarDescuento()">Quitar descuento</button>
+      <button class="btn-cancel" type="button" onclick="cerrarDescuento()">Cancelar</button>
+      <button class="btn-save" type="button" id="descuento-aplicar" onclick="aplicarDescuento()">Aplicar</button>
+    </div>
+  </div>
+</div>
 <div class="modal-ov" id="modal-conflicto-mesa" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="modal-box" style="max-width:420px">
     <div class="modal-title">Esta mesa cambió en otro dispositivo</div>
@@ -2600,6 +2631,7 @@ const PAYMENT_METHODS=[
 const ACTIVE_PAYMENT_METHOD_KEYS=['efectivo','transferencia'];
 function emptyMixedPayments(){return{efectivo:'',mercado_pago:'',transferencia:'',otro:''};}
 let carrito={},pago='ef',paymentMode='single',mixedPayments=emptyMixedPayments(),catCarga='todos',editId=null;
+let descuentoTicket=null; // como el medio de pago: se elige al cobrar y queda en este dispositivo
 let editClienteId=null,editReservaId=null,activeTab='carga';
 window.activeTab=activeTab;
 let mesaActivaId=null,tipoNuevaMesa='salon',dashFiltro='hoy',histFiltro='todos';
@@ -2975,19 +3007,21 @@ function persistCurrentPaymentSelection(){
   target.pago=pago;
   target.payment_mode=paymentMode;
   target.pagos=paymentMode==='mixed'?getDraftMixedPayments():[];
+  target.descuento=descuentoTicket;
   save();
 }
 function loadPaymentState(source){
   pago=normalizeNewPaymentMethod(source?.pago||'ef');
   paymentMode=normalizePaymentMode(source?.payment_mode,source?.pagos);
   mixedPayments=emptyMixedPayments();
+  descuentoTicket=source?.descuento||null;
   normalizeStoredPayments(source?.pagos).forEach(p=>{
     const method=normalizeNewPaymentMethod(p.metodo);
     mixedPayments[method]=String(money2((parsePaymentAmount(mixedPayments[method])||0)+p.monto));
   });
   updatePaymentUI();
 }
-function getCurrentPaymentState(total=money2(carritoTotalFn(carrito))){
+function getCurrentPaymentState(total=totalCobroActual()){
   if(paymentMode!=='mixed'){
     const metodo=normalizeNewPaymentMethod(pago||'ef');
     return{payment_mode:'single',pago:getLegacyPagoValue(metodo),pagos:[{metodo,monto:money2(total)}],asignado:money2(total),diferencia:0,valido:total>0,mensaje:''};
@@ -3002,7 +3036,7 @@ function getCurrentPaymentState(total=money2(carritoTotalFn(carrito))){
   else mensaje=`Pago completo · ${detalleTotales}`;
   return{payment_mode:'mixed',pago:'mixed',pagos,asignado,diferencia,valido:total>0&&pagos.length>=2&&Math.abs(diferencia)<0.009,mensaje};
 }
-function updatePaymentUI(total=money2(carritoTotalFn(carrito)),state=getCurrentPaymentState(total)){
+function updatePaymentUI(total=totalCobroActual(),state=getCurrentPaymentState(total)){
   const ids={ef:'popt-ef',mp:'popt-mp',transferencia:'popt-tr',otro:'popt-otro',mixed:'popt-mixed'};
   const activePagoKey=normalizeNewPaymentMethod(pago)==='efectivo'?'ef':normalizeNewPaymentMethod(pago);
   Object.entries(ids).forEach(([key,id])=>{const el=$(id);if(el)el.className='pago-opt'+((paymentMode==='mixed'&&key==='mixed')||(paymentMode==='single'&&activePagoKey===key)?' active':'');});
@@ -3137,7 +3171,32 @@ function playReservationReminderSound(){
     setTimeout(()=>ctx.close?.(),500);
   }catch(_){}
 }
-function carritoItemTotal(item){return(item.precio+(item.vars||[]).reduce((s,v)=>s+v.precio,0))*item.qty;}
+// Descuentos: {tipo:'pct'|'monto', valor}. Nunca negativos ni mayores que el importe al que se aplican.
+// En pesos enteros, como muestra fmt: lo que se ve es lo que se cobra.
+function descuentoSobre(base,desc){
+  const v=Number(desc?.valor)||0;
+  if(!(base>0)||!(v>0))return 0;
+  return money2(Math.min(base,Math.round(desc.tipo==='pct'?base*Math.min(v,100)/100:v)));
+}
+function textoDescuento(desc){return desc?.tipo==='pct'?`${Number(desc.valor)}%`:fmt(Number(desc?.valor)||0);}
+function carritoItemBruto(item){return money2((item.precio+(item.vars||[]).reduce((s,v)=>s+v.precio,0))*item.qty);}
+function carritoItemTotal(item){const bruto=carritoItemBruto(item);return money2(bruto-descuentoSobre(bruto,item.desc));}
+// Lo que se cobra: el descuento al ticket se reparte entre las líneas (en centavos, el resto a la línea mayor),
+// así cada línea de la venta, el total, los pagos y el cierre de turno suman exactamente lo mismo.
+function resumenCobro(items,descTicket){
+  const lineas=(items||[]).map(item=>{const bruto=carritoItemBruto(item),neto=carritoItemTotal(item);return{item,bruto,descLinea:money2(bruto-neto),neto,cNeto:Math.round(neto*100)};});
+  const cSubtotal=lineas.reduce((s,l)=>s+l.cNeto,0);
+  const cDescTicket=Math.round(descuentoSobre(cSubtotal/100,descTicket)*100);
+  // Con importes en pesos enteros se reparte de a peso (cada línea se ve como se cobra); si no, de a centavo.
+  const u=cDescTicket%100===0&&lineas.every(l=>l.cNeto%100===0)?100:1;
+  let resto=cDescTicket;
+  lineas.forEach(l=>{l.cTicket=cSubtotal?Math.floor(cDescTicket*l.cNeto/cSubtotal/u)*u:0;resto-=l.cTicket;});
+  [...lineas].sort((a,b)=>(b.cNeto-b.cTicket)-(a.cNeto-a.cTicket)).forEach(l=>{const d=Math.min(resto,l.cNeto-l.cTicket);l.cTicket+=d;resto-=d;});
+  lineas.forEach(l=>{l.descTicket=l.cTicket/100;l.total=(l.cNeto-l.cTicket)/100;});
+  return{lineas,bruto:money2(lineas.reduce((s,l)=>s+l.bruto,0)),descLineas:money2(lineas.reduce((s,l)=>s+l.descLinea,0)),
+    subtotal:cSubtotal/100,descTicket:cDescTicket/100,total:(cSubtotal-cDescTicket)/100};
+}
+function totalCobroActual(){return resumenCobro(Object.values(carrito),descuentoTicket).total;}
 function getCartItemVariantsText(item){return(item.vars||[]).map(v=>v.nombre+(v.precio?` +${fmt(v.precio)}`:'')).join(' · ');}
 function carritoTotalFn(c){return Object.values(c).reduce((s,i)=>s+carritoItemTotal(i),0);}
 function stockStatus(p){if(p.ilimitado)return'ok';return p.stock<=0?'out':p.stock<=5?'low':'ok';}
@@ -3287,8 +3346,9 @@ function nombreItemConflicto(prodId,nombre){return nombre||window.findProductByI
 window.mostrarConflictoMesa=function(m){
   if(!m?._items_conflict)return;
   conflictoMesaId=getMesaOpenOrderId(m);
-  const local=Object.values(m.items||{}).map(i=>`${Number(i.qty)||1} × ${escapeHtml(nombreItemConflicto(i.prodId))}`);
-  const guardada=(m._items_conflict.items||[]).map(i=>`${Number(i.quantity)||1} × ${escapeHtml(nombreItemConflicto(i.metadata?.product_legacy_id,i.product_name))}`);
+  const conDesc=desc=>desc?` (desc. ${textoDescuento(desc)})`:'';
+  const local=Object.values(m.items||{}).map(i=>`${Number(i.qty)||1} × ${escapeHtml(nombreItemConflicto(i.prodId))}${conDesc(i.desc)}`);
+  const guardada=(m._items_conflict.items||[]).map(i=>`${Number(i.quantity)||1} × ${escapeHtml(nombreItemConflicto(i.metadata?.product_legacy_id,i.product_name))}${conDesc(i.metadata?.discount)}`);
   $('conflicto-mesa-texto').textContent=`${m.nombre||'Mesa'}: otro dispositivo guardó cambios mientras este tenía una versión anterior. Elegí cuál queda; todavía no se borró nada.`;
   $('conflicto-mesa-detalle').innerHTML=`<div><strong>Guardada en el sistema</strong><br>${guardada.join('<br>')||'Sin ítems'}</div>`
     +`<div style="margin-top:10px"><strong>En este dispositivo</strong><br>${local.join('<br>')||'Sin ítems'}</div>`;
@@ -4180,18 +4240,21 @@ function getSetupProductList({searchId,catId,reservableOnly=false}){
     return String(p.name||'').toLowerCase().includes(q)||String(cat?.name||'').toLowerCase().includes(q);
   });
 }
-function renderOrderItemRows(cart,{changeFn,removeFn}){
+function renderOrderItemRows(cart,{changeFn,removeFn,descFn}){
   return Object.entries(cart||{}).filter(([,v])=>v.qty>0).map(([key,item])=>{
     const p=findProductById(item.prodId);
     const name=p?escapeHtml(p.name):escapeHtml(item.prodId);
     const sub=carritoItemTotal(item);
     const varsStr=getCartItemVariantsText(item);
     const safeKey=key.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const descTxt=item.desc?`Desc. ${textoDescuento(item.desc)} −${fmt(money2(carritoItemBruto(item)-sub))}`:'';
     return `<div class="cart-row">
       <div class="c-name-wrap">
         <div class="c-name">${name}</div>
         ${varsStr?`<div class="c-mods">${varsStr}</div>`:''}
         ${item.nota?`<div class="c-nota">${escapeHtml(item.nota)}</div>`:''}
+        ${descFn?`<button class="c-desc${item.desc?' on':''}" type="button" onclick="${descFn}('${safeKey}')">${descTxt||'+ Descuento'}</button>`
+          :descTxt?`<div class="c-desc on">${descTxt}</div>`:''}
       </div>
       <div class="qty-wrap">
         <button class="qty-btn" onclick="${changeFn}('${safeKey}',-1)"${item.qty<=1?' disabled':''} aria-label="Restar uno">−</button>
@@ -4539,6 +4602,8 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
   const bloquear=ids=>ids.forEach(k=>{cobroKeys.add(k);cobrosEnCurso.add(k);});
   bloquear([...cobroKeys]);
   const items=Object.values(carrito);
+  // Lo cobrado sale de esta foto: mostrado, pagos, líneas de la venta y cierre usan el mismo resumen.
+  const descTicketCobro=descuentoTicket,resumen=resumenCobro(items,descTicketCobro);
   const btn=$('btn-confirm');btn.disabled=true;btn.textContent='Cerrando…';
   const reservasBeforeCobro=esReserva?cloneReservasState():null;
   let reservaOptimisticHidden=null;
@@ -4554,7 +4619,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
     else{renderMesasSection();renderReservasSection();renderCajaPendingBanner();}
   };
   const cobro=(async()=>{try{
-      const totalVenta=money2(carritoTotalFn(carrito));
+      const totalVenta=resumen.total;
       const paymentState=getCurrentPaymentState(totalVenta);
       if(!paymentState.valido){showToast(paymentState.mensaje||'Revisá los pagos');return;}
       // ── Anti-double-cobro: verificar que la mesa siga abierta en Supabase ──
@@ -4669,7 +4734,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
       const variantesNorm=nombres=>String(nombres||'').split(', ').filter(Boolean).sort().join(', ');
       const firma=lineas=>lineas.map(l=>JSON.stringify(l)).sort().join(';');
       const lineasPendientes=ventaPendiente.map(v=>[String(v.prodId),Number(v.cantidad),variantesNorm(v.variantes),String(v.nota||'').trim(),money2(v.precioBase),money2(v.precioVars),money2(v.total)]);
-      const lineasCarrito=items.map(i=>[String(i.prodId),Number(i.qty),variantesNorm((i.vars||[]).map(x=>x.nombre).join(', ')),String(i.nota||'').trim(),money2(i.precio),money2((i.vars||[]).reduce((s,x)=>s+(Number(x.precio)||0),0)),money2(carritoItemTotal(i))]);
+      const lineasCarrito=items.map((i,n)=>[String(i.prodId),Number(i.qty),variantesNorm((i.vars||[]).map(x=>x.nombre).join(', ')),String(i.nota||'').trim(),money2(i.precio),money2((i.vars||[]).reduce((s,x)=>s+(Number(x.precio)||0),0)),money2(resumen.lineas[n].total)]);
       const pagosNorm=pagos=>(pagos||[]).map(p=>[String(p.metodo),money2(p.monto)]);
       const mismoCobro=new Set(ventaPendiente.map(v=>v.ticket_id)).size===1
         &&firma(lineasPendientes)===firma(lineasCarrito)
@@ -4678,8 +4743,8 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
         showToast('Esta mesa tiene un cobro anterior pendiente con otros productos o forma de pago. Revisalo en Operaciones pendientes antes de cobrar.');
         return;
       }
-      const nuevas=ventaPendiente.length?ventaPendiente:items.map(item=>{
-        const p=findProductById(item.prodId);
+      const nuevas=ventaPendiente.length?ventaPendiente:items.map((item,n)=>{
+        const p=findProductById(item.prodId),l=resumen.lineas[n];
         const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
         const ventaId='v_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
         ventaIds.push(ventaId);
@@ -4689,7 +4754,9 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           producto:p?p.name:'?',variantes:(item.vars||[]).map(v=>v.nombre).join(', '),
           nota:item.nota||'',categoria:getCat(p?.cat).name,seccion:getCat(p?.cat).seccion,
           cantidad:item.qty,precioBase:item.precio,precioVars:varsExtra,
-          total:(item.precio+varsExtra)*item.qty,pago:paymentState.pago,cat:p?.cat,
+          total:l.total,bruto:l.bruto,
+          descuento:l.descLinea||l.descTicket?{linea:l.descLinea,ticket:l.descTicket,regla:item.desc||null,regla_ticket:l.descTicket?descTicketCobro:null}:null,
+          pago:paymentState.pago,cat:p?.cat,
           prodId:item.prodId,_product_sb_id:p?._sb_id||null,_product_legacy_id:p?.legacy_id||(!window.isValidUuid?.(String(p?.id||''))?String(p?.id||''):''),
           _operator_id:operatorId,
           _shift_sb_id:turnoActivo?turnoActivo._sb_id||null:null,
@@ -4900,6 +4967,69 @@ function changeQty(key,d){
   if(carrito[key].qty<=0)delete carrito[key];
   saveMesaCarrito();renderProdGrid();renderCart();
 }
+// key: línea del pedido; null: el ticket. Cada descuento se valida contra lo que queda por cobrar antes de aplicarse.
+let descuentoEdit={key:null,tipo:'pct'};
+function baseDescuento(key){return key===null?resumenCobro(Object.values(carrito),null).subtotal:carritoItemBruto(carrito[key]);}
+function abrirDescuento(key){
+  if(key!==null&&!carrito[key])return;
+  const actual=key===null?descuentoTicket:carrito[key].desc;
+  descuentoEdit={key,tipo:actual?.tipo||'pct'};
+  const nombre=key===null?'':(findProductById(carrito[key].prodId)?.name||carrito[key].prodId);
+  $('descuento-titulo').textContent=key===null?'Descuento al ticket':`Descuento · ${nombre}`;
+  $('descuento-base').textContent=key===null
+    ?`Sobre ${fmt(baseDescuento(null))}, después de los descuentos por producto.`
+    :`Sobre la línea: ${fmt(baseDescuento(key))}.`;
+  $('descuento-valor').value=actual?String(actual.valor):'';
+  $('descuento-quitar').style.display=actual?'':'none';
+  setTipoDescuento(descuentoEdit.tipo);
+  $('modal-descuento').classList.add('open');
+  setTimeout(()=>$('descuento-valor')?.focus(),50);
+}
+function cerrarDescuento(){$('modal-descuento').classList.remove('open');}
+function setTipoDescuento(tipo){
+  descuentoEdit.tipo=tipo;
+  $('desc-tipo-pct').classList.toggle('active',tipo==='pct');
+  $('desc-tipo-monto').classList.toggle('active',tipo==='monto');
+  $('desc-rapidos').style.display=tipo==='pct'?'':'none';
+  previewDescuento();
+}
+function setValorDescuento(v){$('descuento-valor').value=String(v);previewDescuento();}
+function leerDescuento(){
+  const {key,tipo}=descuentoEdit;
+  // Solo un número completo (coma o punto decimal): "10abc" o "1,2,3" no se toman como 10 ni 1,2.
+  const texto=String($('descuento-valor').value).trim();
+  if(!/^\d+([.,]\d+)?$/.test(texto))return{error:'Ingresá solo números (para decimales, usá coma).'};
+  const v=Number(texto.replace(',','.'));
+  if(!(v>0))return{error:'Ingresá un valor mayor a 0.'};
+  const base=baseDescuento(key);
+  if(tipo==='pct'&&v>100)return{error:'El porcentaje no puede superar el 100%.'};
+  if(tipo==='monto'&&v>base)return{error:`El descuento no puede superar ${fmt(base)}.`};
+  const desc={tipo,valor:tipo==='pct'?Math.round(v*100)/100:Math.round(v)};
+  const items=key===null?Object.values(carrito):Object.entries(carrito).map(([k,i])=>k===key?{...i,desc}:i);
+  const total=resumenCobro(items,key===null?desc:descuentoTicket).total;
+  // sale_payments exige importes > 0: un ticket en $0 no se puede registrar como cobro.
+  if(total<=0)return{error:'El ticket no puede quedar en $0.'};
+  return{desc,monto:descuentoSobre(base,desc),total};
+}
+function previewDescuento(){
+  const vacio=!$('descuento-valor').value.trim(),r=vacio?null:leerDescuento();
+  const el=$('descuento-preview');
+  el.textContent=vacio?'':r.error||`−${fmt(r.monto)} · Total a cobrar ${fmt(r.total)}`;
+  el.style.color=r?.error?'var(--red)':'var(--ink2)';
+  $('descuento-aplicar').disabled=vacio||!!r.error;
+}
+function guardarDescuento(desc){
+  const {key}=descuentoEdit;
+  if(key===null){descuentoTicket=desc;persistCurrentPaymentSelection();renderCart();}
+  else if(carrito[key]){
+    const {desc:_previo,...item}=carrito[key];
+    carrito[key]=desc?{...item,desc}:item;
+    saveMesaCarrito();renderCart();
+  }
+  cerrarDescuento();
+}
+function aplicarDescuento(){const r=leerDescuento();if(r.error){previewDescuento();return;}guardarDescuento(r.desc);}
+function quitarDescuento(){guardarDescuento(null);}
 function deleteFromCart(key){
   delete carrito[key];
   saveMesaCarrito();renderProdGrid();renderCart();
@@ -4908,19 +5038,31 @@ function renderCart(){
   const items=Object.entries(carrito);
   const ct=$('cart-total'),ce=$('cart-empty'),cr=$('cart-rows'),bc=$('btn-confirm');
   if(!ct)return;
-  if(!items.length){ce.style.display='block';cr.style.display='none';ct.textContent='$0';updatePaymentUI(0,{valido:false,mensaje:''});if(bc){bc.disabled=true;bc.textContent=etiquetaBotonCobro();}return;}
+  const dg=$('cart-desglose');
+  if(!items.length){ce.style.display='block';cr.style.display='none';ct.textContent='$0';if(dg)dg.innerHTML='';updatePaymentUI(0,{valido:false,mensaje:''});if(bc){bc.disabled=true;bc.textContent=etiquetaBotonCobro();}return;}
   ce.style.display='none';cr.style.display='flex';
   // El refresco de fondo redibuja el pedido: la cantidad que se está escribiendo sigue en su fila, con foco.
   const foco=cr.contains(document.activeElement)&&document.activeElement.matches('input.qty-n')?document.activeElement:null;
   const escrito=foco&&{key:foco.dataset.key,valor:foco.value};
-  cr.innerHTML=renderOrderItemRows(carrito,{changeFn:'changeQty',removeFn:'deleteFromCart'});
+  cr.innerHTML=renderOrderItemRows(carrito,{changeFn:'changeQty',removeFn:'deleteFromCart',descFn:'abrirDescuento'});
   if(escrito){
     const input=[...cr.querySelectorAll('input.qty-n')].find(i=>i.dataset.key===escrito.key);
     if(input){input.value=escrito.valor;input.focus();input.setSelectionRange(escrito.valor.length,escrito.valor.length);}
   }
-  const total=money2(carritoTotalFn(carrito));
+  const r=resumenCobro(Object.values(carrito),descuentoTicket),total=r.total;
   const paymentState=getCurrentPaymentState(total);
   ct.textContent=fmt(total);
+  if(dg){
+    const fila=(txt,monto,cls='')=>`<div class="cart-desglose-row${cls}"><span>${txt}</span><span>${monto}</span></div>`;
+    dg.innerHTML=(r.descLineas||r.descTicket
+      ?fila('Subtotal',fmt(r.bruto))
+        +(r.descLineas?fila('Descuentos en productos','−'+fmt(r.descLineas)):'')
+        +(r.descTicket?fila(`Descuento al ticket (${textoDescuento(descuentoTicket)})`,'−'+fmt(r.descTicket)):'')
+        +fila('Total',fmt(total),' total')
+      :'')
+      +(r.descTicket&&total<=0?fila('El descuento al ticket cubre todo: ajustalo para cobrar.','',' aviso'):'')
+      +`<button class="c-desc${descuentoTicket?' on':''}" type="button" onclick="abrirDescuento(null)">${descuentoTicket?'Cambiar descuento al ticket':'+ Descuento al ticket'}</button>`;
+  }
   updatePaymentUI(total,paymentState);
   if(bc){
     // El botón es uno solo para todas las mesas: estado y texto salen de la operación visible.
@@ -7251,7 +7393,8 @@ if(config.webappUrl){loadFromSheets();}
       const itemMeta=item.metadata||{};
       const productRef=itemMeta.product_legacy_id||itemMeta.prodId||item.product_id||'';
       const key=hasVars?`sb_item_${item.id}`:`${productRef||'_'}_plain`;
-      items[key]={prodId:productRef,qty:Number(item.quantity)||1,vars:item.variants||[],nota:item.note||'',precio:Number(item.unit_price)||0,_sb_item_id:item.id};
+      items[key]={prodId:productRef,qty:Number(item.quantity)||1,vars:item.variants||[],nota:item.note||'',precio:Number(item.unit_price)||0,_sb_item_id:item.id,
+        ...(itemMeta.discount?{desc:itemMeta.discount}:{})};
     });
     return items;
   }
@@ -7260,7 +7403,7 @@ if(config.webappUrl){loadFromSheets();}
   function ooMismosItems(a,b){
     const firma=filas=>(filas||[]).map(i=>{
       const meta=i.metadata||{};
-      return [meta.product_legacy_id||meta.prodId||i.product_name||'',Number(i.quantity)||0,Number(i.unit_price)||0,JSON.stringify(i.variants||[]),String(i.note||'')].join('|');
+      return [meta.product_legacy_id||meta.prodId||i.product_name||'',Number(i.quantity)||0,Number(i.unit_price)||0,JSON.stringify(i.variants||[]),String(i.note||''),JSON.stringify(meta.discount||null)].join('|');
     }).sort().join(';');
     return firma(a)===firma(b);
   }
@@ -7558,22 +7701,9 @@ if(config.webappUrl){loadFromSheets();}
       if(itemsErr)throw itemsErr;
 
       // Agrupar items por pedido
-      const byOrder={};
-      (items||[]).forEach(item=>{
-        if(!byOrder[item.open_order_id])byOrder[item.open_order_id]={};
-        const hasVars=((item.variants)||[]).length>0;
-        const itemMeta=item.metadata||{};
-        const productRef=itemMeta.product_legacy_id||itemMeta.prodId||item.product_id||'';
-        const key=hasVars?`sb_item_${item.id}`:`${productRef||'_'}_plain`;
-        byOrder[item.open_order_id][key]={
-          prodId:productRef,
-          qty:item.quantity||1,
-          vars:item.variants||[],
-          nota:item.note||'',
-          precio:item.unit_price||0,
-          _sb_item_id:item.id
-        };
-      });
+      const filasPorMesa={};
+      (items||[]).forEach(item=>{(filasPorMesa[item.open_order_id]||(filasPorMesa[item.open_order_id]=[])).push(item);});
+      const byOrder=Object.fromEntries(Object.entries(filasPorMesa).map(([id,filas])=>[id,ooItemsDesdeFilas(filas)]));
 
       // La foto puede ser previa a un cobro hecho en este dispositivo mientras se esperaban las lecturas:
       // una mesa con venta local ya confirmada no vuelve a la lista (va después del último await).
@@ -7685,14 +7815,7 @@ if(config.webappUrl){loadFromSheets();}
         .eq('store_id',storeId)
         .eq('open_order_id',order.id),'single_open_order_items');
       if(itemsErr)throw itemsErr;
-      const itemMap={};
-      (items||[]).forEach(item=>{
-        const hasVars=((item.variants)||[]).length>0;
-        const itemMeta=item.metadata||{};
-        const productRef=itemMeta.product_legacy_id||itemMeta.prodId||item.product_id||'';
-        const key=hasVars?`sb_item_${item.id}`:`${productRef||'_'}_plain`;
-        itemMap[key]={prodId:productRef,qty:item.quantity||1,vars:item.variants||[],nota:item.note||'',precio:item.unit_price||0,_sb_item_id:item.id};
-      });
+      const itemMap=ooItemsDesdeFilas(items);
       const meta=order.metadata||{};
       const mesa={
         id:order.id,_sb_id:order.id,open_order_id:order.id,legacy_local_id:meta.legacy_local_id||'',
@@ -7844,10 +7967,9 @@ if(config.webappUrl){loadFromSheets();}
     if(!client||!sbOrderId)return false;
     const rows=Object.values(items||{}).map((item,i)=>{
       const p=typeof window.findProductById==='function'?window.findProductById(item.prodId):null;
-      const varsTotal=(item.vars||[]).reduce((sum,v)=>sum+(Number(v.precio)||0),0);
       const unitPrice=Number(item.precio)||0;
       const qty=Number(item.qty)||1;
-      const lineTotal=(unitPrice+varsTotal)*qty;
+      const lineTotal=carritoItemTotal(item); // con el descuento del producto, si tiene
       const productLegacyId=String(item.prodId||'');
       return{
         store_id:storeId,
@@ -7860,7 +7982,7 @@ if(config.webappUrl){loadFromSheets();}
         variants:item.vars||[],
         note:item.nota||'',
         sort_order:i,
-        metadata:{line_total:lineTotal,product_legacy_id:productLegacyId,prodId:productLegacyId}
+        metadata:{line_total:lineTotal,product_legacy_id:productLegacyId,prodId:productLegacyId,...(item.desc?{discount:item.desc}:{})}
       };
     });
     if(globalThis.crypto?.subtle){
@@ -13788,11 +13910,16 @@ if(config.webappUrl){loadFromSheets();}
       service_type:ref.tipo||'salon',
       table_label:ref.mesa||null,
       payment_mode:normalizePaymentMode(ref.payment_mode,group.payments),
-      subtotal_amount:money2(group.total),
+      // Con descuentos: subtotal antes de descontar, total = suma de líneas = suma de pagos.
+      subtotal_amount:money2((group.rows||[]).reduce((s,r)=>s+(Number(r.bruto??r.total)||0),0)),
       total_amount:money2(group.total),
       notes:null,
       metadata:{
         ticket_id:ref.ticket_id||null,
+        ...((group.rows||[]).some(r=>r.descuento)?{descuento:{
+          productos:money2((group.rows||[]).reduce((s,r)=>s+(Number(r.descuento?.linea)||0),0)),
+          ticket:money2((group.rows||[]).reduce((s,r)=>s+(Number(r.descuento?.ticket)||0),0)),
+          regla_ticket:(group.rows||[]).find(r=>r.descuento?.regla_ticket)?.descuento?.regla_ticket||null}}:{}),
         operator_id:ref._operator_id||null,
         fallback_key:group.fallbackKey||null,
         legacy_pago:ref.pago||null,
@@ -13822,6 +13949,7 @@ if(config.webappUrl){loadFromSheets();}
       variants_price:money2(row.precioVars),
       line_total:money2(row.total),
       metadata:{
+        ...(row.descuento?{descuento:{...row.descuento,bruto:money2(row.bruto)}}:{}),
         cat:row.cat??null,
         prodId:row.prodId??null,
         product_legacy_id:row._product_legacy_id||null,
