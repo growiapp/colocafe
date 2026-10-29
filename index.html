@@ -291,8 +291,13 @@ input.qty-n:focus{border-color:var(--border2);background:var(--surf2);outline:no
 .frecuentes{display:flex;gap:6px;overflow-x:auto;margin-bottom:10px;padding-bottom:2px;scrollbar-width:none}
 .frecuentes::-webkit-scrollbar{display:none}
 .frecuentes .chip{flex:0 0 auto;font:inherit;font-size:12px}
-.frecuentes .frecuente-editar{border-style:dashed;color:var(--ink3)}
-.frecuentes-lista{display:flex;flex-direction:column;gap:4px;max-height:50vh;overflow-y:auto}
+.rapidos-ayuda{font-size:12px;color:var(--ink2);line-height:1.5;margin-bottom:12px}
+.rapidos-titulo{font-size:11px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.08em;margin:14px 0 6px}
+.frecuentes-lista{display:flex;flex-direction:column;gap:4px}
+.rapidos-catalogo{max-height:45vh;overflow-y:auto}
+.frecuentes-fila .rapidos-acciones{display:flex;gap:4px;flex:0 0 auto}
+.frecuentes-fila .rapidos-acciones .btn-sm{min-width:44px;min-height:44px;padding:0 10px}
+.frecuentes-fila .rapidos-nombre{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .frecuentes-fila{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:44px;padding:8px 12px;border:1px solid var(--border2);border-radius:10px;background:var(--surf);color:var(--ink);font:inherit;font-size:14px;text-align:left;cursor:pointer}
 .frecuentes-fila.on{border-color:var(--orange);background:var(--surf2)}
 .frecuentes-pos{min-width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;font-size:12px;font-weight:600}
@@ -1987,6 +1992,7 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
         <div class="inner-tab-bar">
           <button class="inner-tab-btn active" id="itab-cats" onclick="switchMenuTab('cats')">Categorías</button>
           <button class="inner-tab-btn" id="itab-prods" onclick="switchMenuTab('prods')">Productos</button>
+          <button class="inner-tab-btn" id="itab-rapidos" onclick="switchMenuTab('rapidos')">Accesos rápidos</button>
         </div>
         <!-- Categorías -->
         <div id="itab-body-cats">
@@ -2003,6 +2009,22 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
             <button class="btn-sm primary" onclick="openProdRapidoModal('ajustes')">+ Producto</button>
           </div>
           <div id="menu-adm"></div>
+        </div>
+        <!-- Accesos rápidos: barra de la carga de mesas, elegida a mano por el local -->
+        <div id="itab-body-rapidos" style="display:none">
+          <div class="rapidos-ayuda">Productos que el local elige a mano para cargarlos con un toque desde cualquier mesa. No se calculan por ventas. Hasta 12, en el orden en que aparecen en la barra.</div>
+          <div class="rapidos-titulo">En la barra <span id="rapidos-contador"></span></div>
+          <div class="frecuentes-lista" id="rapidos-elegidos"></div>
+          <div id="rapidos-edicion">
+            <div class="rapidos-titulo">Agregar</div>
+            <input class="inv-search" id="rapidos-buscar" type="search" placeholder="Buscar producto…" oninput="renderAccesosRapidos()" style="margin-bottom:8px">
+            <div class="frecuentes-lista rapidos-catalogo" id="rapidos-catalogo"></div>
+            <div class="modal-actions" style="margin-top:12px">
+              <button class="btn-cancel" type="button" id="rapidos-descartar" onclick="descartarAccesosRapidos()">Descartar cambios</button>
+              <button class="btn-save" type="button" id="rapidos-guardar" onclick="guardarFrecuentes()">Guardar</button>
+            </div>
+          </div>
+          <div id="rapidos-solo-lectura" class="rapidos-ayuda" style="display:none;margin-top:10px">Solo el dueño o un administrador del local puede cambiar los accesos rápidos.</div>
         </div>
       </div>
     </div>
@@ -2142,18 +2164,6 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
     <div class="modal-actions" style="margin-top:14px">
       <button class="btn-cancel" type="button" onclick="imprimirPedidoCompleto()">Imprimir pedido completo</button>
       <button class="btn-cancel" type="button" onclick="cerrarComanda()">Cerrar</button>
-    </div>
-  </div>
-</div>
-<div class="modal-ov" id="modal-frecuentes" onclick="if(event.target===this)cerrarFrecuentes()">
-  <div class="modal-box" style="max-width:420px">
-    <div class="modal-title">Productos frecuentes</div>
-    <div style="font-size:13px;color:var(--ink2);margin-bottom:10px">Tocá para agregar o quitar. El número es el orden en la barra. <span id="frecuentes-contador"></span></div>
-    <input class="inv-search" id="frecuentes-buscar" type="search" placeholder="Buscar producto…" oninput="renderListaFrecuentes()" style="margin-bottom:10px">
-    <div class="frecuentes-lista" id="frecuentes-lista"></div>
-    <div class="modal-actions" style="margin-top:14px">
-      <button class="btn-cancel" type="button" onclick="cerrarFrecuentes()">Cancelar</button>
-      <button class="btn-save" type="button" id="frecuentes-guardar" onclick="guardarFrecuentes()">Guardar</button>
     </div>
   </div>
 </div>
@@ -3561,10 +3571,11 @@ function toggleAccordion(key){
   if(!isOpen){body?.classList.add('open');arr?.classList.add('open');}
 }
 function switchMenuTab(tab){
-  ['cats','prods'].forEach(t=>{$(`itab-body-${t}`).style.display=t===tab?'block':'none';$(`itab-${t}`).classList.toggle('active',t===tab);});
+  ['cats','prods','rapidos'].forEach(t=>{$(`itab-body-${t}`).style.display=t===tab?'block':'none';$(`itab-${t}`).classList.toggle('active',t===tab);});
   activeMenuTab=tab;
   if(tab==='prods')renderMenuAdm();
   if(tab==='cats')renderCatMgr();
+  if(tab==='rapidos')renderAccesosRapidos();
 }
 
 // ══════════════════════════════════════════════════
@@ -5073,53 +5084,74 @@ function renderCargaCats(){
   el.innerHTML=all.map(c=>`<div class="chip${catCarga===c.id?' active':''}" onclick="setCargaCat('${c.id}')">${c.id!=='todos'?`<span class="chip-dot" style="background:${c.color}"></span>`:''}${c.name}</div>`).join('');
 }
 function setCargaCat(id){catCarga=id;renderCargaCats();renderProdGrid();}
-// ── Frecuentes: accesos rápidos elegidos por el local (products.metadata.frecuente = posición) ──
+// ── Accesos rápidos: barra de la carga de mesas, elegida por el local (products.metadata.frecuente = posición) ──
+// La mesa solo los usa; se administran en Ajustes > Menú > Accesos rápidos (owner/admin).
 const MAX_FRECUENTES=12;
 function productosFrecuentes(){return (menu||[]).filter(p=>p.active!==false&&Number(p.frecuente)>0).sort((a,b)=>a.frecuente-b.frecuente);}
 function puedeEditarFrecuentes(){return isSupabaseAdminRole()&&hasCatalogRemoteWriteContext();}
 function renderFrecuentes(){
   const el=$('carga-frecuentes');if(!el)return;
   const lista=catalogIsWaitingForSupabase()?[]:productosFrecuentes();
-  const editar=puedeEditarFrecuentes()?`<button class="chip frecuente-editar" type="button" onclick="abrirFrecuentes()">${lista.length?'Editar':'+ Frecuentes'}</button>`:'';
-  el.style.display=lista.length||editar?'':'none';
+  el.style.display=lista.length?'':'none';
   el.innerHTML=lista.map(p=>{
     const qty=getCartQtyForProduct(carrito,p);
     return `<button class="chip frecuente${qty>0?' active':''}" type="button" data-product-id="${escapeAttr(getProductFrontId(p))}">${escapeHtml(p.name)}${qty>0?` · ${qty}`:''}</button>`;
-  }).join('')+editar;
+  }).join('');
   attachProductCardHandlers(el,'addItem');
 }
-let frecuentesBorrador=[];
-function abrirFrecuentes(){
-  if(!puedeEditarFrecuentes()){showToast('Solo un administrador puede elegir los frecuentes.');return;}
-  frecuentesBorrador=productosFrecuentes().map(p=>getProductFrontId(p));
-  $('frecuentes-buscar').value='';
-  renderListaFrecuentes();
-  $('modal-frecuentes').classList.add('open');
+// Borrador de la pestaña de Ajustes: null mientras no hay cambios sin guardar (sigue al catálogo).
+let frecuentesBorrador=null;
+const accesosGuardados=()=>productosFrecuentes().map(p=>getProductFrontId(p));
+function renderAccesosRapidos(){
+  const el=$('rapidos-elegidos');if(!el)return;
+  if(catalogIsWaitingForSupabase()){el.innerHTML='<div class="empty">Cargando datos…</div>';return;}
+  const puede=puedeEditarFrecuentes();
+  if(!puede)frecuentesBorrador=null;
+  const elegidos=frecuentesBorrador||accesosGuardados();
+  const porId=id=>(menu||[]).find(p=>getProductFrontId(p)===id);
+  el.innerHTML=elegidos.map((id,i)=>{
+    const p=porId(id);if(!p)return'';
+    const arg=escapeAttr(escapeJsArg(id));
+    return `<div class="frecuentes-fila on"><span class="frecuentes-pos">${i+1}</span><span class="rapidos-nombre">${escapeHtml(p.name)}</span>${puede?`<span class="rapidos-acciones">
+      <button class="btn-sm" type="button" aria-label="Subir ${escapeAttr(p.name)}" onclick="moverAccesoRapido('${arg}',-1)" ${i===0?'disabled':''}>▲</button>
+      <button class="btn-sm" type="button" aria-label="Bajar ${escapeAttr(p.name)}" onclick="moverAccesoRapido('${arg}',1)" ${i===elegidos.length-1?'disabled':''}>▼</button>
+      <button class="btn-sm" type="button" aria-label="Quitar ${escapeAttr(p.name)}" onclick="quitarAccesoRapido('${arg}')">✕</button></span>`:''}</div>`;
+  }).join('')||'<div class="empty">Todavía no hay accesos rápidos.</div>';
+  $('rapidos-contador').textContent=`· ${elegidos.length} de ${MAX_FRECUENTES}`;
+  $('rapidos-edicion').style.display=puede?'':'none';
+  $('rapidos-solo-lectura').style.display=puede?'none':'';
+  if(!puede)return;
+  const q=($('rapidos-buscar').value||'').trim().toLowerCase();
+  const lleno=elegidos.length>=MAX_FRECUENTES;
+  const lista=(menu||[]).filter(p=>p.active!==false&&!elegidos.includes(getProductFrontId(p))&&(!q||String(p.name||'').toLowerCase().includes(q))).sort((a,b)=>String(a.name).localeCompare(String(b.name),'es'));
+  $('rapidos-catalogo').innerHTML=lista.map(p=>`<div class="frecuentes-fila"><span class="rapidos-nombre">${escapeHtml(p.name)}</span><span class="rapidos-acciones"><button class="btn-sm" type="button" onclick="agregarAccesoRapido('${escapeAttr(escapeJsArg(getProductFrontId(p)))}')" ${lleno?'disabled':''}>+ Agregar</button></span></div>`).join('')
+    ||'<div class="empty">Sin productos para agregar.</div>';
+  const cambios=!!frecuentesBorrador;
+  $('rapidos-guardar').disabled=!cambios;
+  $('rapidos-descartar').disabled=!cambios;
 }
-function cerrarFrecuentes(){$('modal-frecuentes').classList.remove('open');}
-function renderListaFrecuentes(){
-  const q=($('frecuentes-buscar').value||'').trim().toLowerCase();
-  const lista=(menu||[]).filter(p=>p.active!==false&&(!q||String(p.name||'').toLowerCase().includes(q))).sort((a,b)=>String(a.name).localeCompare(String(b.name),'es'));
-  $('frecuentes-lista').innerHTML=lista.map(p=>{
-    const id=getProductFrontId(p),pos=frecuentesBorrador.indexOf(id)+1;
-    return `<button class="frecuentes-fila${pos?' on':''}" type="button" data-product-id="${escapeAttr(id)}"><span>${escapeHtml(p.name)}</span><span class="frecuentes-pos">${pos||''}</span></button>`;
-  }).join('')||'<div class="empty">Sin productos.</div>';
-  attachProductCardHandlers($('frecuentes-lista'),'alternarFrecuente');
-  $('frecuentes-contador').textContent=`${frecuentesBorrador.length} de ${MAX_FRECUENTES}`;
+function editarAccesosRapidos(cambio){
+  if(!puedeEditarFrecuentes()){showToast('Solo el dueño o un administrador puede cambiar los accesos rápidos.');return;}
+  const borrador=[...(frecuentesBorrador||accesosGuardados())];
+  cambio(borrador);
+  frecuentesBorrador=borrador.join()===accesosGuardados().join()?null:borrador;
+  renderAccesosRapidos();
 }
-function alternarFrecuente(id){
-  const i=frecuentesBorrador.indexOf(id);
-  if(i>=0)frecuentesBorrador.splice(i,1);
-  else if(frecuentesBorrador.length>=MAX_FRECUENTES){showToast(`Máximo ${MAX_FRECUENTES} frecuentes.`);return;}
-  else frecuentesBorrador.push(id);
-  renderListaFrecuentes();
+function agregarAccesoRapido(id){
+  editarAccesosRapidos(b=>{if(b.length>=MAX_FRECUENTES){showToast(`Máximo ${MAX_FRECUENTES} accesos rápidos.`);return;}if(!b.includes(id))b.push(id);});
 }
+function quitarAccesoRapido(id){editarAccesosRapidos(b=>{const i=b.indexOf(id);if(i>=0)b.splice(i,1);});}
+function moverAccesoRapido(id,d){
+  editarAccesosRapidos(b=>{const i=b.indexOf(id),j=i+d;if(i<0||j<0||j>=b.length)return;[b[i],b[j]]=[b[j],b[i]];});
+}
+function descartarAccesosRapidos(){frecuentesBorrador=null;renderAccesosRapidos();}
 // Solo cambia metadata.frecuente de los productos que cambiaron: precio, stock y el resto del catálogo no se tocan.
 async function guardarFrecuentes(){
   const client=window.getSupabaseClient?.(),storeId=config?.activeStoreId;
   if(!client||!storeId||!puedeEditarFrecuentes()){showToast('No pudimos conectar. Reintentá.');return;}
-  const cambios=(menu||[]).map(p=>({p,nuevo:frecuentesBorrador.indexOf(getProductFrontId(p))+1})).filter(({p,nuevo})=>(Number(p.frecuente)||0)!==nuevo);
-  const btn=$('frecuentes-guardar');btn.disabled=true;
+  const borrador=frecuentesBorrador||accesosGuardados();
+  const cambios=(menu||[]).map(p=>({p,nuevo:borrador.indexOf(getProductFrontId(p))+1})).filter(({p,nuevo})=>(Number(p.frecuente)||0)!==nuevo);
+  const btn=$('rapidos-guardar');btn.disabled=true;
   let fallas=0;
   for(const {p,nuevo} of cambios){
     try{
@@ -5132,15 +5164,14 @@ async function guardarFrecuentes(){
       p.frecuente=nuevo;
     }catch(err){
       fallas++;
-      if(window.canShowClientTechnicalUi?.())console.warn('[Frecuentes] no se guardó',p.name,err);
+      if(window.canShowClientTechnicalUi?.())console.warn('[Accesos rápidos] no se guardó',p.name,err);
     }
   }
-  btn.disabled=false;
   localStorage.setItem('menu',JSON.stringify(menu));
-  renderProdGrid();
-  if(fallas){showToast(`No pudimos guardar ${fallas} cambio(s). Reintentá.`);return;}
-  cerrarFrecuentes();
-  showToast('Frecuentes guardados.');
+  if(!fallas)frecuentesBorrador=null;
+  renderProdGrid();renderAccesosRapidos();
+  if(fallas){btn.disabled=false;showToast(`No pudimos guardar ${fallas} cambio(s). Reintentá.`);return;}
+  showToast('Accesos rápidos guardados.');
 }
 function renderProdGrid(){
   renderFrecuentes();
@@ -6253,6 +6284,7 @@ function setProdStock(id,val){const p=menu.find(x=>sameId(x.id,id));if(!p||p.ili
 function toggleProdIlimitado(id,checked){const p=menu.find(x=>sameId(x.id,id));if(!p)return;p.ilimitado=checked;save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
 
 function renderMenuAdm(){
+  if(activeMenuTab==='rapidos')renderAccesosRapidos();
   const el=$('menu-adm');if(!el)return;
   if(catalogIsWaitingForSupabase()){
     el.innerHTML='<div class="empty">Cargando datos…</div>';
