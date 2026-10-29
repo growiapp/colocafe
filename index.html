@@ -72,7 +72,7 @@
   pedido.catch(err=>err?.name==='AbortError'?fuera('otra-pestana.html'):incompatible(err));
 })();
 </script>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -121,7 +121,7 @@
   --r:14px; --r-sm:8px; --r-xs:6px;
   --control-h-sm:36px; --control-h:44px;
   --ff-display:'Alfa Slab One',Georgia,serif; --ff-serif:'Sansita',Georgia,serif; --ff:'DM Sans',sans-serif; --ff-mono:'DM Mono',ui-monospace,SFMono-Regular,Consolas,monospace;
-  --nav-h:60px; --header-h:58px;
+  --nav-h:60px; --header-top:58px; --ctx-h:50px; --header-h:calc(var(--header-top) + var(--ctx-h));
   --safe-top:env(safe-area-inset-top,0px); --safe-bottom:env(safe-area-inset-bottom,0px);
 }
 
@@ -200,6 +200,38 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .turno-pill{display:flex;align-items:center;gap:5px;padding:4px 9px;border-radius:20px;border:1px solid var(--border);background:rgba(246,239,228,.92);font-size:11px;color:var(--ink3);flex-shrink:0;cursor:pointer;transition:background .15s;box-shadow:var(--shadow-sm)}
 .turno-pill:hover{background:var(--surf3)}
 .turno-pill.abierto{background:var(--green-bg);border-color:rgba(26,122,74,.2);color:var(--green)}
+/* Contexto operativo: local, cuenta, turno y sincronización siempre visibles en una segunda fila. */
+html{touch-action:manipulation}
+.header{flex-wrap:wrap;align-content:flex-start;row-gap:0}
+.header-left,.header-right{height:var(--header-top)}
+#turno-pill,#sb-pill{display:none!important}
+.ctx-bar{flex-basis:100%;height:var(--ctx-h);display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding-bottom:6px}
+/* El local va en la fila superior, con más ancho para nombres largos. */
+#ctx-local{flex:1 1 0;min-width:0;max-width:480px;margin-right:auto;height:44px}
+.ctx-item{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;min-width:0;min-height:44px;padding:3px 10px;border:1px solid var(--border2);border-radius:var(--r-sm);background:var(--surf);color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.ctx-item:hover{background:var(--surf2)}
+.ctx-item:focus-visible{outline:none;box-shadow:var(--focus);border-color:var(--orange)}
+.ctx-k{font-size:10px;line-height:1.2;color:var(--ink2);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.ctx-v{font-size:13px;line-height:1.25;font-weight:700;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctx-item[data-estado="ok"] .ctx-v{color:var(--green)}
+.ctx-item[data-estado="aviso"]{background:var(--amber-bg)}
+.ctx-item[data-estado="aviso"] .ctx-v{color:var(--amber)}
+.ctx-item[data-estado="error"]{background:var(--red-bg);border-color:var(--red)}
+.ctx-item[data-estado="error"] .ctx-v{color:var(--red)}
+/* Nombres de local largos: hasta dos líneas en cualquier ancho. */
+#ctx-local{padding-top:2px;padding-bottom:2px}
+#ctx-local .ctx-k{line-height:1.1}
+#ctx-local .ctx-v{font-size:12px;line-height:1.1;white-space:normal;overflow-wrap:break-word;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+@media(max-width:767px){
+  :root{--header-top:50px;--ctx-h:58px}
+  .ctx-bar{gap:4px}
+  .ctx-item{padding:1px 5px}
+  .ctx-k{font-size:9px;line-height:1.1}
+  /* En pantallas angostas el valor ocupa hasta tres líneas en lugar de cortarse. */
+  .ctx-v{font-size:11px;line-height:1.1;white-space:normal;overflow-wrap:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+  .header{gap:8px}
+}
+@media(max-width:360px){.header-right .header-date-short{display:none}}
 
 /* ── BOTTOM NAV ── */
 .bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:200;min-height:calc(var(--nav-h) + var(--safe-bottom));background:var(--surf);border-top:1px solid var(--border);display:flex;align-items:stretch;padding-bottom:var(--safe-bottom)}
@@ -1771,6 +1803,7 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
       </div>
     </div>
   </div>
+  <button type="button" class="ctx-item" id="ctx-local" onclick="window.usarCtx?.('ctx-local')"><span class="ctx-k">Local</span><span class="ctx-v">Cargando…</span></button>
   <div class="header-right">
     <span class="header-date header-date-full" id="hoy-lbl"></span>
     <span class="header-date header-date-short" id="hoy-lbl-short"></span>
@@ -1783,6 +1816,11 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
       <span id="gs-txt">Sin conexión</span>
     </div>
   </div>
+  <nav class="ctx-bar" id="ctx-bar" aria-label="Contexto operativo">
+    <button type="button" class="ctx-item" id="ctx-cuenta" onclick="window.usarCtx?.('ctx-cuenta')"><span class="ctx-k">Cuenta</span><span class="ctx-v">Cargando…</span></button>
+    <button type="button" class="ctx-item" id="ctx-turno" onclick="window.usarCtx?.('ctx-turno')"><span class="ctx-k">Turno</span><span class="ctx-v">Cargando…</span></button>
+    <button type="button" class="ctx-item" id="ctx-sync" onclick="window.usarCtx?.('ctx-sync')"><span class="ctx-k">Datos</span><span class="ctx-v" aria-live="polite">Cargando…</span></button>
+  </nav>
 </div>
 
 <!-- PAGE WRAP -->
@@ -3833,7 +3871,133 @@ function renderTurnoPill(){
     pill.className='turno-pill';
   }
   else{pill.innerHTML=`<span class="turno-dot"></span>Sin turno`;pill.className='turno-pill';}
+  renderContextoGlobal();
 }
+// ── Contexto operativo del encabezado ─────────────
+// Solo muestra estado que la app ya conoce; no decide ni escribe nada.
+// "Sin pendientes" exige sesión, local, conexión, una lectura del servidor y la bandeja vacía.
+// El turno se muestra como actual solo si el servidor lo confirmó para esta cuenta y este local.
+const CTX_ROLES={owner:'Dueño',admin:'Admin',operator:'Caja'};
+const ctxAcciones={};
+function setCtxItem(id,valor,detalle,estado,accion,clave){
+  const btn=$(id);if(!btn)return;
+  const v=btn.querySelector('.ctx-v'), k=btn.querySelector('.ctx-k');
+  btn.dataset.k??=k.textContent;
+  const etiqueta=clave||btn.dataset.k;
+  if(k.textContent!==etiqueta)k.textContent=etiqueta;
+  if(v.textContent!==valor)v.textContent=valor;
+  btn.title=detalle||valor;
+  // El nombre accesible empieza con el texto visible (WCAG 2.5.3) y suma el detalle.
+  btn.setAttribute('aria-label',`${etiqueta}: ${valor}${detalle&&detalle!==valor?`. ${detalle}`:''}`);
+  btn.dataset.estado=estado||'';
+  // Cada estado trae su acción; sin acción propia, tocar explica el estado.
+  ctxAcciones[id]=accion||(()=>showToast(detalle||valor));
+}
+function usarCtx(id){ctxAcciones[id]?.();}
+// Cuenta y local activos; vacío sin sesión o sin local.
+function claveTurnoCtx(){
+  const c=window.__contextoCuenta||{};
+  return c.loggedIn&&c.userId&&c.storeId?`${c.userId}|${c.storeId}`:'';
+}
+// Última confirmación del servidor, solo si corresponde a la cuenta y el local activos.
+function turnoVerificadoCtx(){
+  const v=window.__turnoVerificado;
+  return v&&claveTurnoCtx()&&`${v.userId}|${v.storeId}`===claveTurnoCtx()?v:null;
+}
+// Relee el turno y espera la respuesta antes de abrir nada: un turno guardado en el dispositivo
+// solo se abre si el servidor lo confirmó para esta cuenta y este local.
+let revisandoTurno=false;
+async function revisarTurno(){
+  const clave=claveTurnoCtx();
+  if(!clave||revisandoTurno)return;
+  revisandoTurno=true;
+  showToast('Comprobando el turno con el servidor…');
+  try{await window.reloadActiveShiftFromSupabase?.(true);}
+  catch(_){}
+  finally{revisandoTurno=false;}
+  renderContextoGlobal();
+  if(claveTurnoCtx()!==clave){showToast('La cuenta o el local cambiaron mientras comprobábamos el turno. Volvé a tocar Turno.');return;}
+  const ver=turnoVerificadoCtx();
+  if(!ver){showToast('No pudimos confirmar el turno con el servidor. Revisá la conexión y volvé a intentarlo.');return;}
+  if(turno&&turno.abierto){
+    if(ver.abierto&&ver.id&&ver.id===String(turno._sb_id||'')){openTurnoModal();return;}
+    showToast(ver.abierto
+      ?'El servidor tiene otro turno abierto en este local. El turno guardado en este dispositivo no se confirmó.'
+      :'El servidor no tiene un turno abierto en este local. El turno guardado en este dispositivo no se confirmó.');
+    return;
+  }
+  if(!ver.abierto){openTurnoModal();return;}
+  showToast('El servidor tiene un turno abierto en este local que no pudimos cargar. Volvé a intentarlo.');
+}
+// Turno abierto en este dispositivo y todavía no enviado: su flujo sigue disponible (también sin conexión),
+// avisando que el servidor no lo confirmó ni sabe a qué cuenta pertenece.
+function abrirTurnoLocalSinConfirmar(){
+  showToast('Este turno está guardado solo en este dispositivo y el servidor todavía no lo confirmó.');
+  openTurnoModal();
+}
+function irAPendientesCaja(){
+  goTab('carga');
+  renderCajaPendingBanner();
+  const banner=$('caja-pending-banner');
+  if(banner?.classList.contains('show'))banner.scrollIntoView({block:'center',behavior:'smooth'});
+  else showToast('No hay operaciones pendientes en este dispositivo.');
+}
+function renderContextoGlobal(){
+  const cuenta=window.__contextoCuenta||{loading:true};
+  const store=cuenta.store;
+  const abrirCuenta=()=>window.openSupabaseSettings?.();
+
+  if(cuenta.loading)setCtxItem('ctx-cuenta','Cargando…','Cargando la sesión.');
+  else if(!cuenta.loggedIn)setCtxItem('ctx-cuenta','Iniciar sesión','Sin sesión. Tocá para iniciar sesión.','aviso',abrirCuenta);
+  else{
+    const rol=CTX_ROLES[String(store?.role||cuenta.rol||'').toLowerCase()]||'';
+    setCtxItem('ctx-cuenta',cuenta.nombre,`${cuenta.nombre}${rol?` (${rol})`:''}. Tocá para ver la cuenta.`,'',abrirCuenta,rol?`Cuenta · ${rol}`:'');
+  }
+
+  if(cuenta.loading)setCtxItem('ctx-local','Cargando local…','Cargando la sesión.');
+  else if(!cuenta.loggedIn)setCtxItem('ctx-local','Sin local','Iniciá sesión para operar en un local.','aviso',abrirCuenta);
+  else if(store?.name)setCtxItem('ctx-local',store.name,`Local activo: ${store.name}`,'ok',abrirCuenta);
+  else if(cuenta.storeId)setCtxItem('ctx-local','Local no disponible','El local guardado no está entre tus locales. Tocá para elegir otro.','error',abrirCuenta);
+  else setCtxItem('ctx-local',cuenta.storeCount?'Elegí un local':'Sin locales asignados',cuenta.storeCount?'No hay local activo. Tocá para elegir uno.':'Tu cuenta no tiene locales asignados.','aviso',abrirCuenta);
+
+  // Un turno guardado en el dispositivo puede venir de otra cuenta, de otro local o de una sesión cerrada.
+  const ver=turnoVerificadoCtx();
+  const verificado=!!ver;
+  const d=new Date(turno?.apertura);
+  const hora=Number.isFinite(d.getTime())?d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}):'';
+  const quien=turno?.operador?`, lo abrió ${turno.operador}`:'';
+  if(cuenta.loading)setCtxItem('ctx-turno','Cargando…','Cargando la sesión.');
+  else if(!cuenta.loggedIn)setCtxItem('ctx-turno','Sin sesión',turno?.abierto?'Hay un turno guardado en este dispositivo. Iniciá sesión para confirmarlo.':'Iniciá sesión para ver el turno.','aviso',abrirCuenta);
+  else if(!cuenta.storeId)setCtxItem('ctx-turno','Sin local','Elegí un local para ver su turno.','aviso',abrirCuenta);
+  else if(turno&&turno.abierto){
+    if(verificado&&ver.abierto&&ver.id&&ver.id===String(turno._sb_id||''))setCtxItem('ctx-turno',`Abierto${hora?` ${hora}`:''}`,`Turno abierto${hora?` desde las ${hora}`:''}${quien}. Tocá para ver o cerrar.`,'ok',openTurnoModal);
+    else if(!turno._sb_id)setCtxItem('ctx-turno',`Abierto${hora?` ${hora}`:''} · sin confirmar`,`Turno abierto en este dispositivo${quien}, todavía sin confirmar en el servidor. Tocá para ver.`,'aviso',abrirTurnoLocalSinConfirmar);
+    else setCtxItem('ctx-turno','Sin confirmar','Hay un turno guardado en este dispositivo que el servidor no confirmó para esta cuenta y este local. Tocá para comprobarlo.','aviso',revisarTurno);
+  }
+  else if((pendingShiftClosures||[]).some(x=>x&&x.status!=='synced'))setCtxItem('ctx-turno','Cierre pendiente','El cierre de turno todavía no se confirmó en el servidor. Tocá para ver los pendientes.','aviso',irAPendientesCaja);
+  else if(verificado&&!ver.abierto)setCtxItem('ctx-turno','Sin turno · Abrir','No hay turno abierto en este local. Tocá para abrir uno.','aviso',openTurnoModal);
+  else setCtxItem('ctx-turno','Sin confirmar','Todavía no confirmamos con el servidor si hay un turno abierto en este local. Tocá para comprobarlo.','aviso',revisarTurno);
+
+  const s=getCajaPendingBannerState();
+  const oo=window.getOpenOrdersSyncState?.()||{};
+  const pendientes=s.pending.length+s.confirming.length+s.errors.length+s.rejected.length+s.slow.length+s.hidden.length+s.conflicts.length;
+  const nPend=k=>`${k} pendiente${k===1?'':'s'}`;
+  const enDispositivo=pendientes?` Hay ${nPend(pendientes)} en este dispositivo.`:'';
+  if(navigator.onLine===false)setCtxItem('ctx-sync','Sin conexión',`Sin conexión. Lo que registres queda en este dispositivo y se envía al volver la red.${enDispositivo}`,'error',pendientes?irAPendientesCaja:null);
+  else if(cuenta.loading)setCtxItem('ctx-sync','Cargando…','Cargando la sesión.');
+  else if(!cuenta.loggedIn)setCtxItem('ctx-sync','Sin sesión',`Sin sesión no se sincroniza. Tocá para iniciar sesión.${enDispositivo}`,'aviso',abrirCuenta);
+  else if(s.rejected.length||s.conflicts.length){const k=s.rejected.length+s.conflicts.length;setCtxItem('ctx-sync',`Revisar ${k}`,`${k} ${k===1?'operación necesita':'operaciones necesitan'} revisión. Tocá para ver.`,'error',irAPendientesCaja);}
+  else if(s.errors.length)setCtxItem('ctx-sync','Error al sincronizar',`No se pudo sincronizar ${s.errors.length===1?'1 operación':`${s.errors.length} operaciones`}. Tocá para reintentar.`,'error',irAPendientesCaja);
+  else if(s.pending.length||s.confirming.length){const k=s.pending.length+s.confirming.length;setCtxItem('ctx-sync',nPend(k),`${nPend(k)} de sincronizar. Tocá para ver.`,'aviso',irAPendientesCaja);}
+  else if(!cuenta.storeId)setCtxItem('ctx-sync','Sin local','Sin local activo no se sincroniza. Tocá para elegir uno.','aviso',abrirCuenta);
+  else if(oo.state==='error')setCtxItem('ctx-sync','Error de conexión','No pudimos leer los datos del servidor. Tocá para reintentar.','error',()=>{window.triggerOORefresh?.('manual');showToast('Reintentando la conexión con el servidor…');});
+  else if(s.slow.length||s.hidden.length||oo.state==='syncing'||!oo.ready||!oo.hasSupabaseRead)setCtxItem('ctx-sync','Sincronizando…','Sincronizando con el servidor. No hace falta hacer nada.');
+  else setCtxItem('ctx-sync','Sin pendientes','Sin operaciones pendientes en este dispositivo.','ok');
+}
+window.addEventListener('online',renderContextoGlobal);
+window.addEventListener('offline',renderContextoGlobal);
+// ponytail: refresco periódico para cambios sin aviso propio (lecturas del servidor, sesión); hooks por evento si molesta.
+setInterval(renderContextoGlobal,3000);
 async function openTurnoModal(){
   if(turno&&turno.abierto) mostrarResumenTurno();
   else{
@@ -4230,6 +4394,7 @@ function getCajaPendingBannerState(now=Date.now()){
   return state;
 }
 function renderCajaPendingBanner(){
+  renderContextoGlobal();
   const el=$('caja-pending-banner');if(!el)return;
   clearTimeout(cajaPendingBannerTimer);
   cajaPendingBannerTimer=null;
@@ -7351,6 +7516,18 @@ if(config.webappUrl){loadFromSheets();}
       : (loggedIn
           ? (supabaseProfile?.display_name||supabaseProfile?.full_name||(supabaseUser?.email||'').split('@')[0]||'Sesión activa')
           : 'Iniciar sesión');
+    window.__contextoCuenta={
+      loading:!!supabaseContextLoading,
+      loggedIn,
+      nombre:supabaseProfile?.display_name||supabaseProfile?.full_name||(supabaseUser?.email||'').split('@')[0]||'Sesión activa',
+      rol:getSupabaseActiveRole()||'',
+      userId:supabaseUser?.id||'',
+      // window.supabaseStores no se publica: el local sale de la lista de esta sesión.
+      storeId:config.activeStoreId||'',
+      store:supabaseStores.find(s=>s.id===config.activeStoreId)||null,
+      storeCount:supabaseStores.length
+    };
+    window.renderContextoGlobal?.();
     const meta=document.getElementById('acc-supabase-meta');
     if(meta) meta.textContent=!configured ? 'Sin configurar' : (loggedIn ? 'Sesión iniciada' : 'Listo para login');
 
@@ -12469,20 +12646,40 @@ if(config.webappUrl){loadFromSheets();}
     if(!err) return 'Error desconocido';
     return err.message || err.details || String(err);
   }
+  // Encabezado: cuenta y local en que el servidor confirmó por última vez si hay turno abierto. No cambia el turno.
+  // Se toma al empezar la consulta; si la cuenta o el local cambiaron antes de la respuesta, no se confirma nada.
+  function contextoTurnoConsulta(){return {userId:window.__contextoCuenta?.userId||'',storeId:getShiftsStoreId()||''};}
+  function mismoContextoTurno(ctx){
+    const ahora=contextoTurnoConsulta();
+    return !!(ctx.userId&&ctx.storeId&&ctx.userId===ahora.userId&&ctx.storeId===ahora.storeId);
+  }
+  // Sincrónico: compara el contexto del inicio de la consulta con el del momento en que llega la respuesta.
+  function registrarTurnoVerificado(ctx,abierto,id){
+    window.__turnoVerificado=mismoContextoTurno(ctx)?{userId:ctx.userId,storeId:ctx.storeId,abierto:!!abierto,id:abierto?String(id||''):''}:null;
+    window.renderContextoGlobal?.();
+  }
   function refreshShiftUi(){
     try{renderTurnoPill();}catch(_){}
     try{renderAjustes();}catch(_){}
   }
+  // Solo la última lectura iniciada, y con la misma cuenta y local, aplica su respuesta (también un error).
+  let turnoLecturaSeq=0;
   window.loadActiveShiftFromSupabase=async function({silent=false,openRowsOverride=null}={}){
     if(!hasShiftsSupabaseReady()) return false;
+    const ctxTurno=contextoTurnoConsulta();
+    const lectura=++turnoLecturaSeq;
+    const vigente=()=>lectura===turnoLecturaSeq&&mismoContextoTurno(ctxTurno);
     try{
       const diag=openRowsOverride?null:await fetchShiftDiagnostics({includeRows:true});
+      // Respuesta obsoleta: se descarta antes de tocar turno, almacenamiento o estado del módulo.
+      if(!vigente()) return false;
       if(diag){
         shiftsCurrentStoreName=diag.storeName||shiftsCurrentStoreName;
         shiftsCurrentRole=diag.role||shiftsCurrentRole;
         shiftsLastReadAt=stampShiftsMoment();
         shiftsRemoteOpen=(diag.openCount||0)>0;
         if(diag.error){
+          window.__turnoVerificado=null;
           setShiftsState('error',diag.error);
           if(!silent) showToast('Sin conexión. Continuando con el turno guardado.');
           return false;
@@ -12492,6 +12689,7 @@ if(config.webappUrl){loadFromSheets();}
       const rows=openRowsOverride || diag.openRows;
       if(!Array.isArray(rows) || !rows.length){
         shiftsRemoteOpen=false;
+        registrarTurnoVerificado(ctxTurno,false);
         renderShiftsSupabaseUi();
         return false;
       }
@@ -12502,12 +12700,15 @@ if(config.webappUrl){loadFromSheets();}
       turno=mapShiftFromSupabase(remoteRow,turno);
       save();
       shiftsRemoteOpen=true;
+      registrarTurnoVerificado(ctxTurno,true,remoteRow.id);
       setShiftsState('supabase');
       refreshShiftUi();
       if(!silent) showToast('✓ Turno actualizado');
       return true;
     }catch(err){
       console.error('[Shifts load failed]',err);
+      if(!vigente()) return false;
+      window.__turnoVerificado=null;
       setShiftsState('error',err?.message||String(err));
       if(!silent) showToast('Sin conexión. Mostrando datos guardados.');
       return false;
@@ -12515,6 +12716,7 @@ if(config.webappUrl){loadFromSheets();}
   };
   window.saveShiftToSupabase=async function(turnoLocal){
     if(!turnoLocal?.abierto) return null;
+    const ctxTurno=contextoTurnoConsulta();
     if(!hasShiftsSupabaseReady()){
       console.warn('[Shifts save skipped] Supabase no configurado o sin store activa',{turno:turnoLocal});
       return null;
@@ -12534,6 +12736,7 @@ if(config.webappUrl){loadFromSheets();}
       turnoLocal._sync_error='';
       save();
       shiftsRemoteOpen=true;
+      registrarTurnoVerificado(ctxTurno,true,existingRow.id);
       setShiftsState('supabase');
       return existingRow;
     }
@@ -12553,6 +12756,7 @@ if(config.webappUrl){loadFromSheets();}
       save();
       shiftsLastSyncAt=stampShiftsMoment();
       shiftsRemoteOpen=true;
+      registrarTurnoVerificado(ctxTurno,true,res.data.id);
       setShiftsState('supabase');
       return res.data;
     }catch(err){
@@ -12564,6 +12768,7 @@ if(config.webappUrl){loadFromSheets();}
   };
   window.closeShiftInSupabase=async function(turnoLocal,cierre){
     if(!turnoLocal) return null;
+    const ctxTurno=contextoTurnoConsulta();
     if(!hasShiftsSupabaseReady()){
       console.warn('[Shifts close skipped] Supabase no configurado o sin store activa',{turno:turnoLocal,cierre});
       return null;
@@ -12596,6 +12801,7 @@ if(config.webappUrl){loadFromSheets();}
       if(res.error) throw res.error;
       shiftsLastSyncAt=stampShiftsMoment();
       shiftsRemoteOpen=false;
+      registrarTurnoVerificado(ctxTurno,false);
       setShiftsState('supabase');
       return res.data;
     }catch(err){
