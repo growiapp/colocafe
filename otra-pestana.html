@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Colo Café · caja abierta en otra pestaña</title>
+<link rel="icon" type="image/png" href="logo.png">
+<style>
+  :root{--orange:#F27021;--ink:#2b1d14;--ink2:#6b5a4e;--bg:#fdf3e7;--surf:#fffaf3;--border:#ead9c6}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+  main{max-width:420px;margin:16px;padding:28px 24px;background:var(--surf);border:1px solid var(--border);border-radius:16px;text-align:center}
+  h1{font-size:20px;margin:12px 0 8px}
+  p{color:var(--ink2);margin:0 0 18px}
+  button{min-height:48px;width:100%;border:0;border-radius:12px;background:var(--orange);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+  button:disabled{opacity:.5;cursor:default}
+  #estado{min-height:24px;margin:14px 0 0;font-size:14px}
+</style>
+</head>
+<body>
+<main>
+  <img src="logo.png" alt="" width="56" height="56">
+  <h1 id="titulo">La caja ya está abierta en otra pestaña</h1>
+  <p id="texto">Para no pisar mesas ni ventas, solo una pestaña de este navegador puede operar la caja. Seguí en la otra pestaña o pasá la caja a esta.</p>
+  <button id="usar" type="button">Usar esta pestaña</button>
+  <p id="estado" role="status"></p>
+</main>
+<script>
+// Página sin la app: acá no se lee ni se escribe nada de la caja. Para operar en esta pestaña se pide el bloqueo
+// "colocafe-caja" (ver index.html): si la otra pestaña está cobrando, no lo cede.
+(function(){
+  const estado=document.getElementById('estado'),boton=document.getElementById('usar');
+  if(/[?&]cedida=1/.test(location.search)){
+    document.getElementById('titulo').textContent='La caja pasó a otra pestaña';
+    document.getElementById('texto').textContent='Todo lo de esta pestaña quedó guardado. Seguí en la otra o volvé a tomar la caja acá.';
+  }
+  if(!(navigator.locks&&window.BroadcastChannel)){boton.disabled=true;estado.textContent='Este navegador no permite pasar la caja entre pestañas. Cerrá esta pestaña.';return;}
+  const canal=new BroadcastChannel('colocafe-caja');
+  let espera=null;
+  canal.onmessage=e=>{
+    if(e.data?.tipo!=='ocupada')return;
+    espera?.abort();espera=null; // no tomar la caja más tarde sin que nadie lo pida
+    estado.textContent='La otra pestaña está cobrando. Probá de nuevo cuando termine.';boton.disabled=false;
+  };
+  boton.onclick=()=>{
+    boton.disabled=true;estado.textContent='Pasando la caja a esta pestaña…';
+    let tomada=false;
+    navigator.locks.request('colocafe-caja',{ifAvailable:true},lock=>{
+      if(lock){tomada=true;irALaCaja();return new Promise(()=>{});}
+      canal.postMessage({tipo:'ceder'});
+      // Si la otra pestaña cede (o se cierra), el bloqueo queda libre y esta pasa a la caja.
+      espera=new AbortController();
+      return navigator.locks.request('colocafe-caja',{signal:espera.signal},()=>{tomada=true;irALaCaja();return new Promise(()=>{});}).catch(()=>{});
+    });
+    setTimeout(()=>{if(!tomada&&boton.disabled&&estado.textContent.startsWith('Pasando'))estado.textContent='Esperando que la otra pestaña suelte la caja. Si está colgada, cerrala.';},3000);
+  };
+  function irALaCaja(){location.replace('./?tomar=1');}
+})();
+</script>
+</body>
+</html>
