@@ -7663,6 +7663,13 @@ if(config.webappUrl){loadFromSheets();}
     tail.then(()=>{if(ooItemsCandados.get(key)===tail)ooItemsCandados.delete(key);});
     return run;
   }
+  // El candado no alcanza entre dispositivos: cada línea toma un id derivado de la mesa y su posición, así dos
+  // reemplazos simultáneos chocan en la clave primaria (23505) en lugar de duplicar los ítems.
+  async function idItemDeterminista(orderId,indice){
+    const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(`open_order_item:${orderId}:${indice}`)));
+    const h=[...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');
+    return `${h.slice(0,8)}-${h.slice(8,12)}-5${h.slice(13,16)}-${(8|(parseInt(h[16],16)&3)).toString(16)}${h.slice(17,20)}-${h.slice(20,32)}`;
+  }
   function syncOpenOrderItems(sbOrderId,items,storeId,syncStartedAt=''){
     return conCandadoItems(sbOrderId,()=>syncOpenOrderItemsSinCandado(sbOrderId,items,storeId,syncStartedAt));
   }
@@ -7690,6 +7697,10 @@ if(config.webappUrl){loadFromSheets();}
         metadata:{line_total:lineTotal,product_legacy_id:productLegacyId,prodId:productLegacyId}
       };
     });
+    if(globalThis.crypto?.subtle){
+      const ids=await Promise.all(rows.map((_,i)=>idItemDeterminista(sbOrderId,i)));
+      rows.forEach((row,i)=>{row.id=ids[i];});
+    }
     upsertPendingOpenOrderItemSync({
       type:'open_order_items_replace',
       status:'pending',
@@ -7700,11 +7711,13 @@ if(config.webappUrl){loadFromSheets();}
       local_items:Object.values(items||{})
     });
     try{
-      // Replace-all strategy: delete + insert
-      ooRememberOperation('open_order_items','delete_existing',`delete items where store_id=${storeId} and open_order_id=${sbOrderId}`);
-      const deleteRes=await client.from('open_order_items').delete().eq('open_order_id',sbOrderId).eq('store_id',storeId);
-      if(deleteRes.error)throw deleteRes.error;
-      if(rows.length){
+      // Replace-all strategy: delete + insert. Si otro dispositivo insertó entre nuestro borrado y nuestra
+      // inserción (23505 por los ids deterministas), se repite el reemplazo: queda el carrito de este dispositivo.
+      for(let intento=1;;intento++){
+        ooRememberOperation('open_order_items','delete_existing',`delete items where store_id=${storeId} and open_order_id=${sbOrderId}`);
+        const deleteRes=await client.from('open_order_items').delete().eq('open_order_id',sbOrderId).eq('store_id',storeId);
+        if(deleteRes.error)throw deleteRes.error;
+        if(!rows.length)break;
         ooRememberOperation('open_order_items','insert',`insert ${rows.length} current cart items`);
         let {error}=await client.from('open_order_items').insert(rows);
         if(error && String(error.message||'').toLowerCase().includes('line_total')){
@@ -7713,7 +7726,9 @@ if(config.webappUrl){loadFromSheets();}
           const fallback=await client.from('open_order_items').insert(fallbackRows);
           error=fallback.error;
         }
+        if(error?.code==='23505'&&intento<3)continue;
         if(error)throw error;
+        break;
       }
       clearPendingOpenOrderItemSync(sbOrderId);
       return true;
