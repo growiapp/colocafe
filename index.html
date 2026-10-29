@@ -830,6 +830,10 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
 .mesa-sync-row,.reserva-sync-row,.gasto-sync-row{margin-top:6px}
 .pending-ops-banner{display:none;background:var(--amber-bg);border:1px solid rgba(138,90,0,.22);border-radius:var(--r-sm);padding:10px 12px;margin:10px 0 12px;color:var(--ink);align-items:center;justify-content:space-between;gap:10px}
 .pending-ops-banner.show{display:flex}
+.pending-ops-lista{display:flex;flex-direction:column;gap:8px;flex:1;min-width:0}
+.pending-ops-linea{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;line-height:1.4}
+.pending-ops-linea.accion .pending-ops-text,.pending-ops-linea.accion .pending-ops-text strong{color:var(--red)}
+@media(max-width:560px){.pending-ops-linea{flex-direction:column;align-items:stretch}.pending-ops-linea .btn-sm{width:100%}}
 .pending-ops-text{font-size:12px;line-height:1.35;color:var(--ink2)}
 .pending-ops-text strong{color:var(--amber)}
 @media(max-width:560px){.pending-ops-banner.show{align-items:flex-start;flex-direction:column}.pending-ops-banner .btn-sm{width:100%}}
@@ -4077,13 +4081,24 @@ function getCajaPendingOperationsForBanner(){
   if(typeof window.getPendingOperationsOutbox==='function')return window.getPendingOperationsOutbox();
   return Array.from({length:getCajaPendingOperationsCount()},()=>({type:'unknown',operation:'pending',status:'pending'}));
 }
+// Una venta cobrada que falló sin respuesta del servidor (red, timeout, lectura de confirmación) pudo haber llegado:
+// se muestra como "confirmando", no como error. Solo un rechazo con código del servidor pide intervención.
+function ventaRechazadaPorServidor(operation){
+  const code=String(operation?.error_code||'');
+  return !!code&&!code.startsWith('READ_BACK')&&code!=='23505';
+}
 function getCajaPendingBannerState(now=Date.now()){
-  const state={hidden:[],slow:[],pending:[],errors:[],nextRefreshMs:0};
+  const state={hidden:[],slow:[],pending:[],errors:[],confirming:[],rejected:[],conflicts:[],nextRefreshMs:0};
+  state.conflicts=(mesas||[]).filter(m=>m?._items_conflict);
   const transientOperations=new Set(['create_open_order','sync_open_order_items','replace_open_order_items']);
   const openOrdersReady=window.getOpenOrdersSyncState?.()?.ready;
   getCajaPendingOperationsForBanner().forEach(operation=>{
     const status=String(operation?.status||'pending').toLowerCase();
     const isError=['error','failed','sync_error','partial_error'].includes(status)||!!operation?.last_error;
+    if(operation?.type==='venta'){
+      (isError&&ventaRechazadaPorServidor(operation)?state.rejected:state.confirming).push(operation);
+      return;
+    }
     if(isError){state.errors.push(operation);return;}
     const isTransientOpenOrder=operation?.type==='mesa'&&transientOperations.has(String(operation?.operation||''));
     const createdAt=Date.parse(operation?.created_at||'');
@@ -4118,24 +4133,23 @@ function renderCajaPendingBanner(){
     },Math.max(50,state.nextRefreshMs+25));
   }
   const clockBad=new Date().getTimezoneOffset()!==180;
-  const errorCount=state.errors.length;
-  const pendingCount=state.pending.length;
-  const slowCount=state.slow.length;
-  if(!errorCount&&!pendingCount&&!slowCount&&!clockBad){el.classList.remove('show');el.innerHTML='';return;}
+  const n=(k,uno,varios)=>`${k} ${k===1?uno:varios}`;
+  const lineas=[];
+  // Lo que pide una acción del operador va primero; después lo que se resuelve solo.
+  state.conflicts.forEach(m=>lineas.push({cls:'accion',texto:`<strong>${escapeHtml(m.nombre||'Una mesa')} cambió en otro dispositivo.</strong> Entrá y elegí qué versión queda.`,
+    boton:`<button class="btn-sm" type="button" onclick="abrirMesa('${escapeAttr(getMesaOpenOrderId(m))}')">Revisar mesa</button>`}));
+  if(state.rejected.length)lineas.push({cls:'accion',texto:`<strong>El servidor rechazó ${n(state.rejected.length,'venta cobrada','ventas cobradas')}.</strong> Está guardada en este dispositivo: no la cobres de nuevo y avisá al administrador.`});
+  if(state.errors.length)lineas.push({cls:'error',texto:`<strong>No pudimos sincronizar ${n(state.errors.length,'operación','operaciones')}.</strong> Se reintenta sola; podés reintentar ahora.`,reintentar:true});
+  if(state.confirming.length)lineas.push({cls:'espera',texto:`<strong>${n(state.confirming.length,'venta cobrada','ventas cobradas')} esperando confirmación del servidor.</strong> Ya está${state.confirming.length===1?'':'n'} guardada${state.confirming.length===1?'':'s'} acá: no la${state.confirming.length===1?'':'s'} cobres de nuevo.`,reintentar:true});
+  if(state.pending.length)lineas.push({cls:'espera',texto:`<strong>${n(state.pending.length,'operación pendiente','operaciones pendientes')}.</strong> No cierres la app hasta que se sincronice.`,reintentar:true});
+  if(state.slow.length)lineas.push({cls:'espera',texto:`Terminando de sincronizar ${n(state.slow.length,'operación','operaciones')}.`});
+  if(clockBad)lineas.push({cls:'error',texto:'<strong>Revisá la hora del dispositivo.</strong> Puede afectar ventas y reservas.'});
+  if(!lineas.length){el.classList.remove('show');el.innerHTML='';return;}
   el.classList.add('show');
-  let pendingText='';
-  let showRetry=false;
-  if(errorCount){
-    pendingText=`<strong>No pudimos sincronizar ${errorCount} operación${errorCount===1?'':'es'}.</strong><br>Reintentá.`;
-    showRetry=true;
-  }else if(pendingCount){
-    pendingText=`<strong>${pendingCount} operación${pendingCount===1?'':'es'} pendiente${pendingCount===1?'':'s'}.</strong><br>No cierres la app hasta que se sincronice.`;
-    showRetry=true;
-  }else if(slowCount){
-    pendingText=`<strong>Estamos terminando de sincronizar ${slowCount} operación${slowCount===1?'':'es'}.</strong>`;
-  }
-  const clockText=clockBad?`${pendingText?'<br>':''}<strong>Revisá la hora del dispositivo.</strong><br>Puede afectar ventas y reservas.`:'';
-  el.innerHTML=`<div class="pending-ops-text">${pendingText}${clockText}</div>${showRetry?`<button class="btn-sm" type="button" onclick="retryCajaPendingOperations()">Reintentar</button>`:''}`;
+  const reintentar=lineas.some(l=>l.reintentar);
+  // Reintentar es seguro: cada venta viaja con su id estable y el servidor no la duplica.
+  el.innerHTML=`<div class="pending-ops-lista">${lineas.map(l=>`<div class="pending-ops-linea ${l.cls}"><div class="pending-ops-text">${l.texto}</div>${l.boton||''}</div>`).join('')}</div>`
+    +(reintentar?`<button class="btn-sm" type="button" onclick="retryCajaPendingOperations()">Reintentar</button>`:'');
 }
 async function retryCajaPendingOperations(){
   const openOrdersTask=window.retryPendingOpenOrderWrites?.({reason:'manual'});
@@ -4190,6 +4204,7 @@ function setVentasFiltro(t){ventasFiltroTipo=t;renderVentasFiltroChips();renderM
 
 function renderMesasSection(){
   const c=$('mesas-container'),e=$('mesas-empty');if(!c)return;
+  renderCajaPendingBanner(); // un conflicto o una sync nueva cambia el aviso de la misma vista
   const ooSync=window.getOpenOrdersSyncState?.();
   const loadingTooLong=ooSync?.state==='syncing'&&ooSync?.loadingStartedAt&&(Date.now()-ooSync.loadingStartedAt>11000);
   if(ooSync?.state==='syncing' && !ooSync?.hasSupabaseRead && !(mesas||[]).length && !loadingTooLong){
@@ -6908,7 +6923,7 @@ if(config.webappUrl){loadFromSheets();}
   function buildPendingOperationsOutbox(){
     const ops=[];
     (window.findPendingSalesSyncGroups?.(ventas||[])||[]).forEach(group=>{
-      ops.push({type:'venta',operation:'save_sale',status:window.getGroupSyncMeta?.(group)?.status||'pending',label:getStableSaleLegacyId?.(group)||'Venta pendiente',idempotency_key:getStableSaleLegacyId?.(group)||'',attempts:Math.max(...(group.rows||[]).map(r=>Number(r._sb_retry_count)||0),0),last_error:(group.rows||[]).map(r=>r._sb_sync_error).filter(Boolean).join(' | '),payload:{rows:(group.rows||[]).length,total:money2(group.total)}});
+      ops.push({type:'venta',operation:'save_sale',status:window.getGroupSyncMeta?.(group)?.status||'pending',label:getStableSaleLegacyId?.(group)||'Venta pendiente',idempotency_key:getStableSaleLegacyId?.(group)||'',attempts:Math.max(...(group.rows||[]).map(r=>Number(r._sb_retry_count)||0),0),last_error:(group.rows||[]).map(r=>r._sb_sync_error).filter(Boolean).join(' | '),error_code:(group.rows||[]).map(r=>r._sb_sync_error_code).find(Boolean)||'',payload:{rows:(group.rows||[]).length,total:money2(group.total)}});
     });
     const pendingMesaKeys=new Set();
     (mesas||[]).filter(m=>m&&((!m._sb_id)||m._syncing||m._sync_status==='partial_error')).forEach(m=>{
@@ -14190,7 +14205,7 @@ if(config.webappUrl){loadFromSheets();}
     };
   };
 
-  function markLocalSaleRowsSync(rows,{saleId,status,error=''}={}){
+  function markLocalSaleRowsSync(rows,{saleId,status,error='',code=''}={}){
     const ids=new Set((rows||[]).map(r=>String(r.id||'')));
     let changed=false;
     const syncStamp=status==='synced'?stampSalesMoment():'';
@@ -14203,6 +14218,7 @@ if(config.webappUrl){loadFromSheets();}
         _sb_sale_id:saleId||v._sb_sale_id||null,
         _sb_sync_status:status||v._sb_sync_status||'pending',
         _sb_sync_error:error||'',
+        _sb_sync_error_code:code||'',
         _sb_synced_at:syncStamp||v._sb_synced_at||'',
         _sb_retry_count:nextRetryCount
       };
@@ -14285,7 +14301,7 @@ if(config.webappUrl){loadFromSheets();}
     }catch(err){
       err._sb_sync_status=saleId?'partial_error':'error';
       logSalesWriteAttempt('error',{operation:salePayload?.metadata?.source_kind||'venta',storeId,session,salePayload,itemsPayload,paymentsPayload,saleResult:saleData,itemsResult:itemsData,paymentsResult:paymentsData,readBack:err?.readBack||null,error:err});
-      markLocalSaleRowsSync(group.rows,{saleId:saleId||null,status:saleId?'partial_error':'error',error:err?.message||String(err)});
+      markLocalSaleRowsSync(group.rows,{saleId:saleId||null,status:saleId?'partial_error':'error',error:err?.message||String(err),code:err?.code||''});
       setSalesWriteState('error',err?.message||String(err));
       throw err;
     }
