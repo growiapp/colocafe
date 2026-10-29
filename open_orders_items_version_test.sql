@@ -56,13 +56,15 @@ begin
   r := public.replace_open_order_items(v_order, v2, '[]');
   assert r->>'reason' = 'conflict', 'tras una escritura directa, la versión anterior queda en conflicto';
 
-  -- Una fila de otro local que apunta a esta mesa no mueve su versión.
+  -- Una fila de otro local no puede apuntar a esta mesa (open_order_items_store_isolation.sql) ni mueve su versión.
   insert into public.stores (name, slug) values ('Prueba ajeno', 'prueba-ajeno-' || gen_random_uuid()) returning id into v_otro;
-  insert into public.open_order_items (store_id, open_order_id, product_name, quantity, unit_price, line_total)
-    values (v_otro, v_order, 'Ajeno', 1, 1, 1);
+  begin
+    insert into public.open_order_items (store_id, open_order_id, product_name, quantity, unit_price, line_total)
+      values (v_otro, v_order, 'Ajeno', 1, 1, 1);
+    raise exception 'un ítem de otro local no debería poder apuntar a esta mesa';
+  exception when foreign_key_violation then null;
+  end;
   assert (select items_version from public.open_orders where id = v_order) = v3, 'un ítem de otro local no sube la versión';
-  delete from public.open_order_items where store_id = v_otro;
-  assert (select items_version from public.open_orders where id = v_order) = v3, 'borrarlo tampoco';
 
   -- Lista vacía con la versión correcta: deja la mesa sin ítems.
   r := public.replace_open_order_items(v_order, v3, '[]');
