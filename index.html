@@ -2001,6 +2001,19 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
   </div>
 </div>
 
+<!-- MODAL: CONFLICTO DE ÍTEMS DE UNA MESA -->
+<div class="modal-ov" id="modal-conflicto-mesa" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal-box" style="max-width:420px">
+    <div class="modal-title">Esta mesa cambió en otro dispositivo</div>
+    <div style="font-size:13px;color:var(--ink2);line-height:1.5;margin-bottom:12px" id="conflicto-mesa-texto"></div>
+    <div style="font-size:13px;line-height:1.6;margin-bottom:18px" id="conflicto-mesa-detalle"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" type="button" onclick="resolverConflictoMesa('guardada')">Usar la versión guardada</button>
+      <button class="btn-save" type="button" onclick="resolverConflictoMesa('local')">Guardar la de este dispositivo</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: TURNO -->
 <div class="modal-ov" id="modal-turno" onclick="closeModalTurno(event)">
   <div class="modal-box">
@@ -3263,6 +3276,46 @@ function ejecutarConfirm(){
   cerrarModalConfirm();
 }
 
+// ── Conflicto de ítems de una mesa ───────────────
+// Ninguna versión se pierde sola: la de este dispositivo queda en la mesa y la guardada en _items_conflict
+// hasta que el operador elige. Mientras tanto la mesa no se cobra ni se reintenta.
+let conflictoMesaId=null;
+function nombreItemConflicto(prodId,nombre){return nombre||window.findProductById?.(prodId)?.name||prodId||'?';}
+window.mostrarConflictoMesa=function(m){
+  if(!m?._items_conflict)return;
+  conflictoMesaId=getMesaOpenOrderId(m);
+  const local=Object.values(m.items||{}).map(i=>`${Number(i.qty)||1} × ${escapeHtml(nombreItemConflicto(i.prodId))}`);
+  const guardada=(m._items_conflict.items||[]).map(i=>`${Number(i.quantity)||1} × ${escapeHtml(nombreItemConflicto(i.metadata?.product_legacy_id,i.product_name))}`);
+  $('conflicto-mesa-texto').textContent=`${m.nombre||'Mesa'}: otro dispositivo guardó cambios mientras este tenía una versión anterior. Elegí cuál queda; todavía no se borró nada.`;
+  $('conflicto-mesa-detalle').innerHTML=`<div><strong>Guardada en el sistema</strong><br>${guardada.join('<br>')||'Sin ítems'}</div>`
+    +`<div style="margin-top:10px"><strong>En este dispositivo</strong><br>${local.join('<br>')||'Sin ítems'}</div>`;
+  $('modal-conflicto-mesa').classList.add('open');
+};
+async function resolverConflictoMesa(opcion){
+  const m=findMesaByAnyId(conflictoMesaId);
+  $('modal-conflicto-mesa').classList.remove('open');
+  if(!m?._items_conflict)return;
+  const c=m._items_conflict;
+  m._items_version=c.version;
+  delete m._items_conflict;
+  const esLaVisible=mesaActivaId&&findMesaByAnyId(mesaActivaId)===m;
+  if(opcion==='guardada'){
+    m.items=window.ooItemsDesdeFilas?.(c.items)||{};
+    m._syncing=false;m._sync_status='confirmed';m._sync_error='';
+    save();
+    if(esLaVisible){carrito={...m.items};renderCart();}
+    renderMesasSection();
+    showToast('Quedó la versión guardada.');
+    return;
+  }
+  // Elegir la de este dispositivo la guarda sobre la versión que se mostró; si cambió otra vez, se vuelve a preguntar.
+  m._syncing=true;m._sync_status='pending';save();renderMesasSection();
+  const ok=await window.syncMesaToSupabase?.(m).catch(()=>false);
+  m._syncing=!ok&&!m._items_conflict;save();renderMesasSection();
+  showToast(ok?'Quedó la versión de este dispositivo.':(m._items_conflict?'La mesa volvió a cambiar: revisala de nuevo.':'No pudimos guardar. Se reintenta solo.'));
+  if(m._items_conflict)window.mostrarConflictoMesa(m);
+}
+
 // ── Date ticker ──────────────────────────────────
 function updateDate(){const now=new Date();$('hoy-lbl').textContent=fmtFull(now);const s=$('hoy-lbl-short');if(s)s.textContent=fmtShort(now);}
 updateDate();setInterval(updateDate,30000);
@@ -4054,7 +4107,7 @@ function renderMesasSection(){
     return `<div class="mesa-card mobile-card ${items>0?'con-items':'sin-items'}" onclick="${closePending?`event.stopPropagation();window.retryPendingOpenOrderClosures?.({silent:false})`:`abrirMesa('${escapeJsArg(openId)}')`}">
       <span class="mesa-tipo-badge ${tipoBadgeClass(m.tipo||'salon')}">${tipoLabel(m.tipo||'salon')}</span>
       <div class="mesa-nombre">${escapeHtml(m.nombre||'Mesa')}</div>
-      <div class="mesa-items">${closePending?'Venta cobrada':`${items} ítem${items!==1?'s':''}${syncing?' · guardando…':''}`}</div>
+      <div class="mesa-items">${closePending?'Venta cobrada':`${items} ítem${items!==1?'s':''}${m._items_conflict?' · ⚠ cambió en otro dispositivo':(syncing?' · guardando…':'')}`}</div>
       ${syncBadge?`<div class="mesa-sync-row">${syncBadge}${renderSyncHelp(syncRecord,{localWhenNoRemoteId:true})}</div>`:''}
       <div class="mesa-total">${items>0?fmt(total):'—'}</div>
       <div class="mesa-actions mobile-actions">
@@ -4297,6 +4350,7 @@ async function abrirMesa(id){
     renderMesasSection();
     return;
   }
+  if(m._items_conflict){window.mostrarConflictoMesa?.(m);return;}
   const openId=getMesaOpenOrderId(m);
   if(m._sb_id&&window.checkOpenOrderStillOpen){
     const stillOpen=await window.checkOpenOrderStillOpen(m._sb_id).catch(()=>null);
@@ -4519,6 +4573,17 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
               console.warn('[Caja] cobro bloqueado: no se pudo preparar open_order remoto',{mesaId,nombre:mesaChk.nombre});
             }
             showToast('No pudimos verificar esta mesa. Reintentá antes de cobrar.');
+            return;
+          }
+        }
+        if(mesaChk?._sb_id&&window.mesaItemsVersionadoActivo?.()){
+          // Con ítems versionados la mesa se guarda antes de cobrar: si cambió en otro dispositivo, el cobro se frena
+          // y se ofrece resolver el conflicto (nunca se cobra una versión vieja de la mesa).
+          mesaChk.items={...carrito};
+          const guardada=await cajaWithTimeout(window.syncMesaToSupabase(mesaChk,{cobroVivo:()=>!cobroTerminado}),'sync_items_before_payment',12000).catch(()=>false);
+          if(!guardada){
+            if(mesaChk._items_conflict){showToast('La mesa cambió en otro dispositivo. Revisala antes de cobrar.');window.mostrarConflictoMesa?.(mesaChk);}
+            else showToast('No pudimos verificar esta mesa. Reintentá antes de cobrar.');
             return;
           }
         }
@@ -7159,8 +7224,85 @@ if(config.webappUrl){loadFromSheets();}
     try{ return JSON.parse(localStorage.getItem('config')||'{}').activeStoreId||''; }catch{return '';}
   }
   function ooReady(){return !!(ooClient()&&ooStoreId());}
+  // ── Ítems versionados (open_orders_items_version.sql) ─────
+  // Con la migración, cada mesa tiene items_version y los ítems se reemplazan con replace_open_order_items, que
+  // rechaza una versión base vieja: un reintento atrasado o una edición simultánea de otro dispositivo ya no
+  // sobrescribe en silencio; la mesa queda en conflicto y el operador elige. Sin la migración, sigue el reemplazo previo.
+  let ooVersionado=null; // null: sin comprobar todavía
+  // Solo una migración ausente (la función o la columna no existen) habilita el reemplazo anterior.
+  // Permisos, red, timeout o validación no: la mesa queda pendiente y nunca se borra + inserta sin versión.
+  function ooFaltaFuncionVersionado(err){return err?.code==='PGRST202';}
+  function ooFaltaColumnaVersion(err){return err?.code==='42703'&&/\bitems_version\b.*does not exist/.test(err?.message||'');}
+  async function ooSelectOrders(cols,armar,etiqueta){
+    if(ooVersionado!==false){
+      const r=await ooWithTimeout(armar(`${cols},items_version`),etiqueta);
+      if(!r.error){ooVersionado=true;return r;}
+      if(!ooFaltaColumnaVersion(r.error))return r;
+      ooVersionado=false;
+    }
+    return ooWithTimeout(armar(cols),etiqueta);
+  }
+  function ooItemsDesdeFilas(filas){
+    const items={};
+    (filas||[]).forEach(item=>{
+      const hasVars=((item.variants)||[]).length>0;
+      const itemMeta=item.metadata||{};
+      const productRef=itemMeta.product_legacy_id||itemMeta.prodId||item.product_id||'';
+      const key=hasVars?`sb_item_${item.id}`:`${productRef||'_'}_plain`;
+      items[key]={prodId:productRef,qty:Number(item.quantity)||1,vars:item.variants||[],nota:item.note||'',precio:Number(item.unit_price)||0,_sb_item_id:item.id};
+    });
+    return items;
+  }
+  window.ooItemsDesdeFilas=ooItemsDesdeFilas;
+  window.mesaItemsVersionadoActivo=()=>ooVersionado===true;
+  function ooMismosItems(a,b){
+    const firma=filas=>(filas||[]).map(i=>{
+      const meta=i.metadata||{};
+      return [meta.product_legacy_id||meta.prodId||i.product_name||'',Number(i.quantity)||0,Number(i.unit_price)||0,JSON.stringify(i.variants||[]),String(i.note||'')].join('|');
+    }).sort().join(';');
+    return firma(a)===firma(b);
+  }
+  function ooFijarVersionMesa(orderId,mesa,version,conflicto){
+    const objetivos=new Set([mesa,findMesaByAnyId(orderId)].filter(Boolean));
+    let nuevo=false;
+    objetivos.forEach(m=>{
+      if(conflicto){
+        // La versión base no cambia: el conflicto guarda la versión e ítems del servidor hasta que el operador elija.
+        nuevo=nuevo||!m._items_conflict;
+        m._items_conflict=conflicto;m._syncing=false;m._sync_status='conflict';m._sync_error='La mesa cambió en otro dispositivo';
+      }else{
+        if(version!=null)m._items_version=version;
+        delete m._items_conflict;
+      }
+    });
+    if(typeof window.save==='function')window.save();
+    if(conflicto&&nuevo){
+      const nombre=(mesa||findMesaByAnyId(orderId))?.nombre||'';
+      showToast(`La mesa ${nombre} cambió en otro dispositivo. Entrá a la mesa para elegir qué versión queda.`);
+      renderMesasSection();
+    }
+  }
+  // true: reemplazada; false: conflicto, mesa cerrada o inexistente (no escribe nada); 'sin_rpc': base sin migración.
+  async function ooReemplazarItemsVersionado(client,orderId,base,rows,mesa){
+    ooRememberOperation('open_order_items','replace_versioned',`replace items of ${orderId} from version ${base}`);
+    const {data,error}=await ooWithTimeout(client.rpc('replace_open_order_items',
+      {p_open_order_id:orderId,p_base_version:Number.isFinite(base)?base:-1,p_items:rows}),'replace_open_order_items');
+    if(error){
+      if(ooFaltaFuncionVersionado(error)){ooVersionado=false;return 'sin_rpc';}
+      throw error;
+    }
+    ooVersionado=true;
+    clearPendingOpenOrderItemSync(orderId);
+    if(data?.ok){ooFijarVersionMesa(orderId,mesa,Number(data.version),null);return true;}
+    if(data?.reason==='conflict'){
+      // Mismo contenido (versión desconocida o lectura atrasada): no hay nada que resolver.
+      if(ooMismosItems(data.items,rows)){ooFijarVersionMesa(orderId,mesa,Number(data.version),null);return true;}
+      ooFijarVersionMesa(orderId,mesa,null,{version:Number(data.version),items:data.items||[]});
+    }
+    return false;
+  }
   function ooShouldPreserveLocal(mesa){
-    return isLocalPersistencePending(mesa)||!!getPendingOpenOrderClosureForMesa(mesa);
+    return isLocalPersistencePending(mesa)||!!getPendingOpenOrderClosureForMesa(mesa)||!!mesa?._items_conflict;
   }
   // snapshotAt: cuándo se pidió la foto remota. Una mesa que recibió su id remoto después no puede estar en esa foto:
   // se conserva aunque ya no esté "pendiente" (si no, el refresh viejo la borra y el cobro pierde el open_order_id).
@@ -7353,9 +7495,9 @@ if(config.webappUrl){loadFromSheets();}
       let orders,ordersErr;
       const extendedCols='id,store_id,shift_id,operator_name,service_type,label,table_label,business_date,opened_at,metadata,created_at';
       ooRememberOperation('open_orders','select',`select ${extendedCols} where store_id=${storeId} and status=open`);
-      ({data:orders,error:ordersErr}=await ooWithTimeout(client
+      ({data:orders,error:ordersErr}=await ooSelectOrders(extendedCols,cols=>client
         .from('open_orders')
-        .select(extendedCols)
+        .select(cols)
         .eq('store_id',storeId)
         .eq('status','open'),'open_orders'));
       if(ordersErr)throw ordersErr;
@@ -7363,9 +7505,9 @@ if(config.webappUrl){loadFromSheets();}
       if((!orders||!orders.length)&&Date.now()<ooRecentLocalCreateUntil&&ooLocalMesaCount()){
         await new Promise(r=>setTimeout(r,800));
         ooRememberOperation('open_orders','select_retry',`select ${extendedCols} where store_id=${storeId} and status=open`);
-        ({data:orders,error:ordersErr}=await ooWithTimeout(client
+        ({data:orders,error:ordersErr}=await ooSelectOrders(extendedCols,cols=>client
           .from('open_orders')
-          .select(extendedCols)
+          .select(cols)
           .eq('store_id',storeId)
           .eq('status','open'),'open_orders_retry'));
         if(ordersErr)throw ordersErr;
@@ -7454,7 +7596,8 @@ if(config.webappUrl){loadFromSheets();}
           payment_mode:meta.payment_mode||'single',
           pagos:meta.pagos||[],
           apertura:meta.apertura||o.opened_at||o.created_at||'',
-          operator_name:o.operator_name||meta.operator_name||''
+          operator_name:o.operator_name||meta.operator_name||'',
+          ...(o.items_version!=null?{_items_version:Number(o.items_version)}:{})
         };
       });
       if(keepActiveDraft){
@@ -7506,18 +7649,18 @@ if(config.webappUrl){loadFromSheets();}
     try{
       const orderSelect='id,store_id,shift_id,operator_name,service_type,label,table_label,business_date,opened_at,metadata,created_at,status';
       ooRememberOperation('open_orders','select_single',`select ${orderSelect} where store_id=${storeId} and id=${sid}`);
-      let {data:order,error}=await ooWithTimeout(client
+      let {data:order,error}=await ooSelectOrders(orderSelect,cols=>client
         .from('open_orders')
-        .select(orderSelect)
+        .select(cols)
         .eq('store_id',storeId)
         .eq('id',sid)
         .maybeSingle(),'single_open_order');
       if(error)throw error;
       if(!order){
         ooRememberOperation('open_orders','select_single_legacy',`select ${orderSelect} where store_id=${storeId} and metadata.legacy_local_id=${sid}`);
-        const byLegacy=await ooWithTimeout(client
+        const byLegacy=await ooSelectOrders(orderSelect,cols=>client
           .from('open_orders')
-          .select(orderSelect)
+          .select(cols)
           .eq('store_id',storeId)
           .eq('status','open')
           .contains('metadata',{legacy_local_id:sid})
@@ -7554,7 +7697,8 @@ if(config.webappUrl){loadFromSheets();}
         status:'open',store_id:order.store_id||storeId,shift_id:order.shift_id||null,
         nombre:order.table_label||order.label||meta.table_label||meta.label||'Mesa',tipo:order.service_type||meta.service_type||'salon',
         items:itemMap,pago:meta.pago||'ef',payment_mode:meta.payment_mode||'single',pagos:meta.pagos||[],
-        apertura:meta.apertura||order.opened_at||order.created_at||'',operator_name:order.operator_name||meta.operator_name||''
+        apertura:meta.apertura||order.opened_at||order.created_at||'',operator_name:order.operator_name||meta.operator_name||'',
+        ...(order.items_version!=null?{_items_version:Number(order.items_version)}:{})
       };
       const idx=(mesas||[]).findIndex(m=>[m.id,m._sb_id,m.open_order_id,m.legacy_local_id].some(v=>String(v||'')===sid||String(v||'')===String(order.id)));
       if(idx>=0)mesas[idx]=mesa;else mesas.push(mesa);
@@ -7690,10 +7834,10 @@ if(config.webappUrl){loadFromSheets();}
     const h=[...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');
     return `${h.slice(0,8)}-${h.slice(8,12)}-5${h.slice(13,16)}-${(8|(parseInt(h[16],16)&3)).toString(16)}${h.slice(17,20)}-${h.slice(20,32)}`;
   }
-  function syncOpenOrderItems(sbOrderId,items,storeId,syncStartedAt=''){
-    return conCandadoItems(sbOrderId,()=>syncOpenOrderItemsSinCandado(sbOrderId,items,storeId,syncStartedAt));
+  function syncOpenOrderItems(sbOrderId,items,storeId,syncStartedAt='',mesa=null){
+    return conCandadoItems(sbOrderId,()=>syncOpenOrderItemsSinCandado(sbOrderId,items,storeId,syncStartedAt,mesa));
   }
-  async function syncOpenOrderItemsSinCandado(sbOrderId,items,storeId,syncStartedAt=''){
+  async function syncOpenOrderItemsSinCandado(sbOrderId,items,storeId,syncStartedAt='',mesa=null){
     const client=ooClient();
     if(!client||!sbOrderId)return false;
     const rows=Object.values(items||{}).map((item,i)=>{
@@ -7728,9 +7872,14 @@ if(config.webappUrl){loadFromSheets();}
       open_order_id:sbOrderId,
       store_id:storeId,
       payload:rows,
+      base_version:Number.isFinite(mesa?._items_version)?mesa._items_version:null,
       local_items:Object.values(items||{})
     });
     try{
+      if(ooVersionado!==false){
+        const r=await ooReemplazarItemsVersionado(client,sbOrderId,Number.isFinite(mesa?._items_version)?mesa._items_version:null,rows,mesa);
+        if(r!=='sin_rpc')return r;
+      }
       // Replace-all strategy: delete + insert. Si otro dispositivo insertó entre nuestro borrado y nuestra
       // inserción (23505 por los ids deterministas), se repite el reemplazo: queda el carrito de este dispositivo.
       for(let intento=1;;intento++){
@@ -7816,24 +7965,26 @@ if(config.webappUrl){loadFromSheets();}
         mesa.status='open';
         mesa._syncing=false;
         mesa._sb_linked_at=Date.now();
+        mesa._items_version=0;
         // Persistir _sb_id en el array global
         const arr=mesas||[];
         const idx=arr.findIndex(m=>[m.id,m._sb_id,m.open_order_id,m.legacy_local_id].some(v=>String(v||'')===String(previousId)||String(v||'')===String(sbId)));
-        if(idx>=0){arr[idx]={...arr[idx],id:sbId,_sb_id:sbId,open_order_id:sbId,legacy_local_id:previousId,status:'open',_syncing:false,_sb_linked_at:mesa._sb_linked_at};}
+        if(idx>=0){arr[idx]={...arr[idx],id:sbId,_sb_id:sbId,open_order_id:sbId,legacy_local_id:previousId,status:'open',_syncing:false,_sb_linked_at:mesa._sb_linked_at,_items_version:0};}
         if(typeof window.save==='function')window.save();
       }
     }
     if(!mesa._sb_id)return false;
     const headerOk=await updateOpenOrderHeaderInSupabase(mesa,storeId);
-    const itemsOk=await syncOpenOrderItems(mesa._sb_id,mesa.items||{},storeId,mesa._sync_started_at);
+    const itemsOk=await syncOpenOrderItems(mesa._sb_id,mesa.items||{},storeId,mesa._sync_started_at,mesa);
     const ok=headerOk&&itemsOk;
-    mesa._syncing=!ok;
-    mesa._sync_status=ok?'confirmed':'partial_error';
-    mesa._sync_error=ok?'':'No pudimos actualizar todos los ítems de la mesa';
+    const conflicto=!ok&&!!mesa._items_conflict;
+    mesa._syncing=!ok&&!conflicto;
+    mesa._sync_status=ok?'confirmed':(conflicto?'conflict':'partial_error');
+    mesa._sync_error=ok?'':(conflicto?'La mesa cambió en otro dispositivo':'No pudimos actualizar todos los ítems de la mesa');
     if(ok)delete mesa._sync_started_at;
     const idx=(mesas||[]).findIndex(m=>[m.id,m._sb_id,m.open_order_id,m.legacy_local_id].some(v=>String(v||'')===String(mesa.id)||String(v||'')===String(mesa._sb_id)||String(v||'')===String(previousId)));
     if(idx>=0){
-      mesas[idx]._syncing=!ok;mesas[idx]._sync_status=mesa._sync_status;mesas[idx]._sync_error=mesa._sync_error;
+      mesas[idx]._syncing=mesa._syncing;mesas[idx]._sync_status=mesa._sync_status;mesas[idx]._sync_error=mesa._sync_error;
       if(ok)delete mesas[idx]._sync_started_at;
       else mesas[idx]._sync_started_at=mesa._sync_started_at;
     }
@@ -7841,7 +7992,7 @@ if(config.webappUrl){loadFromSheets();}
     return ok;
   }
   window.retryPendingOpenOrdersSync=async function({silent=false}={}){
-    const pending=(mesas||[]).filter(m=>m&&((!m._sb_id)||m._syncing));
+    const pending=(mesas||[]).filter(m=>m&&!m._items_conflict&&((!m._sb_id)||m._syncing));
     if(!pending.length){
       if(!silent)showToast('No hay mesas pendientes.');
       return {ok:true,total:0,synced:0,failed:0};
@@ -8298,6 +8449,16 @@ if(config.webappUrl){loadFromSheets();}
       savePendingOutboxes();
       try{
         const rows=Array.isArray(entry.payload)?entry.payload:[];
+        if(ooVersionado!==false){
+          // Una entrada vieja (sin versión base) se compara con lo guardado: nunca pisa una versión más nueva.
+          const mesaEntrada=findMesaByAnyId(entry.open_order_id);
+          const r=await ooReemplazarItemsVersionado(client,entry.open_order_id,Number.isFinite(entry.base_version)?entry.base_version:null,rows,mesaEntrada);
+          if(r!=='sin_rpc'){
+            if(r===true&&mesaEntrada){mesaEntrada._syncing=false;mesaEntrada._sync_status='confirmed';mesaEntrada._sync_error='';delete mesaEntrada._sync_started_at;}
+            summary.synced++;
+            return;
+          }
+        }
         const deleteRes=await ooWithTimeout(client.from('open_order_items').delete().eq('open_order_id',entry.open_order_id).eq('store_id',storeId),'retry_items_delete');
         if(deleteRes.error)throw deleteRes.error;
         if(rows.length){
