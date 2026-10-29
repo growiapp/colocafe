@@ -72,7 +72,7 @@
   pedido.catch(err=>err?.name==='AbortError'?fuera('otra-pestana.html'):incompatible(err));
 })();
 </script>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -121,7 +121,7 @@
   --r:14px; --r-sm:8px; --r-xs:6px;
   --control-h-sm:36px; --control-h:44px;
   --ff-display:'Alfa Slab One',Georgia,serif; --ff-serif:'Sansita',Georgia,serif; --ff:'DM Sans',sans-serif; --ff-mono:'DM Mono',ui-monospace,SFMono-Regular,Consolas,monospace;
-  --nav-h:60px; --header-h:58px;
+  --nav-h:60px; --header-top:58px; --ctx-h:50px; --header-h:calc(var(--header-top) + var(--ctx-h));
   --safe-top:env(safe-area-inset-top,0px); --safe-bottom:env(safe-area-inset-bottom,0px);
 }
 
@@ -200,6 +200,30 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .turno-pill{display:flex;align-items:center;gap:5px;padding:4px 9px;border-radius:20px;border:1px solid var(--border);background:rgba(246,239,228,.92);font-size:11px;color:var(--ink3);flex-shrink:0;cursor:pointer;transition:background .15s;box-shadow:var(--shadow-sm)}
 .turno-pill:hover{background:var(--surf3)}
 .turno-pill.abierto{background:var(--green-bg);border-color:rgba(26,122,74,.2);color:var(--green)}
+/* Contexto operativo: local, cuenta, turno y sincronización siempre visibles en una segunda fila. */
+html{touch-action:manipulation}
+.header{flex-wrap:wrap;align-content:flex-start;row-gap:0}
+.header-left,.header-right{height:var(--header-top)}
+#turno-pill,#sb-pill{display:none!important}
+.ctx-bar{flex-basis:100%;height:var(--ctx-h);display:grid;grid-template-columns:minmax(0,1.5fr) repeat(3,minmax(0,1fr));gap:6px;padding-bottom:6px}
+.ctx-item{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;min-width:0;min-height:44px;padding:3px 10px;border:1px solid var(--border2);border-radius:var(--r-sm);background:var(--surf);color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.ctx-item:hover{background:var(--surf2)}
+.ctx-item:focus-visible{outline:none;box-shadow:var(--focus);border-color:var(--orange)}
+.ctx-k{font-size:10px;line-height:1.2;color:var(--ink2);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.ctx-v{font-size:13px;line-height:1.25;font-weight:700;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctx-item[data-estado="ok"] .ctx-v{color:var(--green)}
+.ctx-item[data-estado="aviso"]{background:var(--amber-bg)}
+.ctx-item[data-estado="aviso"] .ctx-v{color:var(--amber)}
+.ctx-item[data-estado="error"]{background:var(--red-bg);border-color:var(--red)}
+.ctx-item[data-estado="error"] .ctx-v{color:var(--red)}
+@media(max-width:767px){
+  :root{--header-top:50px;--ctx-h:52px}
+  .ctx-bar{gap:4px}
+  .ctx-item{padding:2px 6px}
+  .ctx-k{font-size:9px}
+  /* En pantallas angostas el valor usa dos líneas en lugar de cortarse ("Iniciar sesión", "Sin turno · Abrir"). */
+  .ctx-v{font-size:11.5px;line-height:1.15;white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+}
 
 /* ── BOTTOM NAV ── */
 .bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:200;min-height:calc(var(--nav-h) + var(--safe-bottom));background:var(--surf);border-top:1px solid var(--border);display:flex;align-items:stretch;padding-bottom:var(--safe-bottom)}
@@ -1783,6 +1807,12 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
       <span id="gs-txt">Sin conexión</span>
     </div>
   </div>
+  <nav class="ctx-bar" id="ctx-bar" aria-label="Contexto operativo">
+    <button type="button" class="ctx-item" id="ctx-local" onclick="window.openSupabaseSettings?.()"><span class="ctx-k">Local</span><span class="ctx-v">Cargando…</span></button>
+    <button type="button" class="ctx-item" id="ctx-cuenta" onclick="window.openSupabaseSettings?.()"><span class="ctx-k">Cuenta</span><span class="ctx-v">Cargando…</span></button>
+    <button type="button" class="ctx-item" id="ctx-turno" onclick="window.openTurnoModal?.()"><span class="ctx-k">Turno</span><span class="ctx-v">Cargando…</span></button>
+    <button type="button" class="ctx-item" id="ctx-sync" onclick="window.abrirPendientesDesdeEncabezado?.()"><span class="ctx-k">Datos</span><span class="ctx-v" aria-live="polite">Cargando…</span></button>
+  </nav>
 </div>
 
 <!-- PAGE WRAP -->
@@ -3833,7 +3863,71 @@ function renderTurnoPill(){
     pill.className='turno-pill';
   }
   else{pill.innerHTML=`<span class="turno-dot"></span>Sin turno`;pill.className='turno-pill';}
+  renderContextoGlobal();
 }
+// ── Contexto operativo del encabezado ─────────────
+// Solo muestra estado que la app ya conoce; no decide ni escribe nada.
+// "Sin pendientes" exige sesión, local, conexión, una lectura del servidor y la bandeja vacía.
+const CTX_ROLES={owner:'Dueño',admin:'Admin',operator:'Caja'};
+function setCtxItem(id,valor,detalle,estado){
+  const btn=$(id);if(!btn)return;
+  const v=btn.querySelector('.ctx-v');
+  if(v.textContent!==valor)v.textContent=valor;
+  btn.title=detalle||valor;
+  // El nombre accesible empieza con el texto visible (WCAG 2.5.3) y suma el detalle.
+  btn.setAttribute('aria-label',`${btn.querySelector('.ctx-k').textContent}: ${valor}${detalle&&detalle!==valor?`. ${detalle}`:''}`);
+  btn.dataset.estado=estado||'';
+}
+function renderContextoGlobal(){
+  const cuenta=window.__contextoCuenta||{loading:true};
+  const store=cuenta.store;
+
+  if(cuenta.loading)setCtxItem('ctx-cuenta','Cargando…');
+  else if(!cuenta.loggedIn)setCtxItem('ctx-cuenta','Iniciar sesión','Sin sesión. Tocá para iniciar sesión.','aviso');
+  else{
+    const rol=CTX_ROLES[String(store?.role||cuenta.rol||'').toLowerCase()]||'';
+    setCtxItem('ctx-cuenta',cuenta.nombre+(rol?` · ${rol}`:''),`${cuenta.nombre}${rol?` (${rol})`:''}. Tocá para ver la cuenta.`);
+  }
+
+  if(cuenta.loading)setCtxItem('ctx-local','Cargando local…');
+  else if(!cuenta.loggedIn)setCtxItem('ctx-local','Sin local','Iniciá sesión para operar en un local.','aviso');
+  else if(store?.name)setCtxItem('ctx-local',store.name,`Local activo: ${store.name}`,'ok');
+  else if(cuenta.storeId)setCtxItem('ctx-local','Local no disponible','El local guardado no está entre tus locales. Tocá para elegir otro.','error');
+  else setCtxItem('ctx-local',cuenta.storeCount?'Elegí un local':'Sin locales asignados',cuenta.storeCount?'No hay local activo. Tocá para elegir uno.':'Tu cuenta no tiene locales asignados.','aviso');
+
+  if(turno&&turno.abierto){
+    const d=new Date(turno.apertura);
+    const hora=Number.isFinite(d.getTime())?d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}):'';
+    setCtxItem('ctx-turno',`Abierto${hora?` ${hora}`:''}`,`Turno abierto${hora?` desde las ${hora}`:''}${turno.operador?`, lo abrió ${turno.operador}`:''}. Tocá para ver o cerrar.`,'ok');
+  }else if((pendingShiftClosures||[]).some(x=>x&&x.status!=='synced'))setCtxItem('ctx-turno','Cierre pendiente','El cierre de turno todavía no se confirmó en el servidor.','aviso');
+  else setCtxItem('ctx-turno','Sin turno · Abrir','No hay turno abierto. Tocá para abrir uno.','aviso');
+
+  const s=getCajaPendingBannerState();
+  const oo=window.getOpenOrdersSyncState?.()||{};
+  const pendientes=s.pending.length+s.confirming.length+s.errors.length+s.rejected.length+s.slow.length+s.hidden.length;
+  const nPend=k=>`${k} pendiente${k===1?'':'s'}`;
+  if(navigator.onLine===false)setCtxItem('ctx-sync','Sin conexión',`Sin conexión.${pendientes?` ${nPend(pendientes)} en este dispositivo.`:''}`,'error');
+  else if(cuenta.loading)setCtxItem('ctx-sync','Cargando…');
+  else if(!cuenta.loggedIn)setCtxItem('ctx-sync','Sin sesión',`Sin sesión no se sincroniza.${pendientes?` ${nPend(pendientes)} en este dispositivo.`:''}`,'aviso');
+  else if(s.rejected.length||s.conflicts.length){const k=s.rejected.length+s.conflicts.length;setCtxItem('ctx-sync',`Revisar ${k}`,`${k} ${k===1?'operación necesita':'operaciones necesitan'} revisión. Tocá para ver.`,'error');}
+  else if(s.errors.length)setCtxItem('ctx-sync','Error al sincronizar',`No se pudo sincronizar ${s.errors.length===1?'1 operación':`${s.errors.length} operaciones`}. Tocá para reintentar.`,'error');
+  else if(s.pending.length||s.confirming.length){const k=s.pending.length+s.confirming.length;setCtxItem('ctx-sync',nPend(k),`${nPend(k)} de sincronizar. Tocá para ver.`,'aviso');}
+  else if(!cuenta.storeId)setCtxItem('ctx-sync','Sin local','Sin local activo no se sincroniza.','aviso');
+  else if(oo.state==='error')setCtxItem('ctx-sync','Error de conexión','No pudimos leer los datos del servidor. Se reintenta solo.','error');
+  else if(s.slow.length||s.hidden.length||oo.state==='syncing'||!oo.ready||!oo.hasSupabaseRead)setCtxItem('ctx-sync','Sincronizando…','Sincronizando con el servidor.');
+  else setCtxItem('ctx-sync','Sin pendientes','Sin operaciones pendientes en este dispositivo.','ok');
+}
+function abrirPendientesDesdeEncabezado(){
+  goTab('carga');
+  renderCajaPendingBanner();
+  const banner=$('caja-pending-banner');
+  if(banner?.classList.contains('show'))banner.scrollIntoView({block:'center',behavior:'smooth'});
+  else showToast('No hay operaciones pendientes en este dispositivo.');
+}
+window.addEventListener('online',renderContextoGlobal);
+window.addEventListener('offline',renderContextoGlobal);
+// ponytail: refresco periódico para cambios sin aviso propio (lecturas del servidor, sesión); hooks por evento si molesta.
+setInterval(renderContextoGlobal,3000);
 async function openTurnoModal(){
   if(turno&&turno.abierto) mostrarResumenTurno();
   else{
@@ -4230,6 +4324,7 @@ function getCajaPendingBannerState(now=Date.now()){
   return state;
 }
 function renderCajaPendingBanner(){
+  renderContextoGlobal();
   const el=$('caja-pending-banner');if(!el)return;
   clearTimeout(cajaPendingBannerTimer);
   cajaPendingBannerTimer=null;
@@ -7351,6 +7446,17 @@ if(config.webappUrl){loadFromSheets();}
       : (loggedIn
           ? (supabaseProfile?.display_name||supabaseProfile?.full_name||(supabaseUser?.email||'').split('@')[0]||'Sesión activa')
           : 'Iniciar sesión');
+    window.__contextoCuenta={
+      loading:!!supabaseContextLoading,
+      loggedIn,
+      nombre:supabaseProfile?.display_name||supabaseProfile?.full_name||(supabaseUser?.email||'').split('@')[0]||'Sesión activa',
+      rol:getSupabaseActiveRole()||'',
+      // window.supabaseStores no se publica: el local sale de la lista de esta sesión.
+      storeId:config.activeStoreId||'',
+      store:supabaseStores.find(s=>s.id===config.activeStoreId)||null,
+      storeCount:supabaseStores.length
+    };
+    window.renderContextoGlobal?.();
     const meta=document.getElementById('acc-supabase-meta');
     if(meta) meta.textContent=!configured ? 'Sin configurar' : (loggedIn ? 'Sesión iniciada' : 'Listo para login');
 
