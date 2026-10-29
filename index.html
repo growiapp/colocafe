@@ -2646,7 +2646,12 @@ window.__catalogBootState={
   serviceWorkerUnregistered:false
 };
 function updateCatalogBootState(patch={}){
+  const esperaba=catalogIsWaitingForSupabase();
   window.__catalogBootState={...(window.__catalogBootState||{}),...patch};
+  // La ventana de nueva mesa abierta durante la carga quedó en "Cargando datos…": al terminar (listo o local), se completa.
+  if(esperaba&&!catalogIsWaitingForSupabase()&&$('modal-nueva-mesa')?.classList.contains('open')){
+    renderMesaSetupProdChips();renderMesaSetupProductoGrid();
+  }
   return window.__catalogBootState;
 }
 function catalogIsWaitingForSupabase(){
