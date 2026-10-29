@@ -210,6 +210,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .qty-wrap{display:flex;align-items:center;gap:5px;flex-shrink:0}
 .qty-btn{width:26px;height:26px;border-radius:50%;border:1px solid var(--border2);background:var(--surf2);color:var(--ink);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;user-select:none;flex-shrink:0}
 .qty-n{font-size:13px;font-weight:500;min-width:16px;text-align:center}
+input.qty-n{width:38px;height:26px;padding:0;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink);font-family:inherit}
+input.qty-n:focus{border-color:var(--border2);background:var(--surf2);outline:none}
 .c-sub{font-size:12px;color:var(--ink2);min-width:64px;text-align:right;flex-shrink:0}
 .divider{height:1px;background:var(--border);margin:10px 0}
 .pago-lbl{font-size:11px;color:var(--ink3);margin-bottom:7px}
@@ -838,6 +840,7 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
   .btn-sm,.btn,.btn-cancel,.btn-save{padding:11px 14px}
   .modal-input,.modal-select,.modal-textarea,.cfg-input,.inv-search,.dash-fecha-input,.auth-card label input,.auth-card label select{min-height:44px;font-size:16px}
   .qty-btn,.icon-btn,.cat-del,.modal-close{min-width:44px;min-height:44px}
+  input.qty-n{width:48px;height:44px;font-size:16px}
   .modal-close{top:10px;right:10px}
 
   .ventas-header{display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:14px}
@@ -3303,7 +3306,7 @@ async function resolverConflictoMesa(opcion){
     m.items=window.ooItemsDesdeFilas?.(c.items)||{};
     m._syncing=false;m._sync_status='confirmed';m._sync_error='';
     save();
-    if(esLaVisible){carrito={...m.items};renderCart();}
+    if(esLaVisible){carrito={...m.items};renderProdGrid();renderCart();}
     renderMesasSection();
     showToast('Quedó la versión guardada.');
     return;
@@ -4191,10 +4194,12 @@ function renderOrderItemRows(cart,{changeFn,removeFn}){
         ${item.nota?`<div class="c-nota">${escapeHtml(item.nota)}</div>`:''}
       </div>
       <div class="qty-wrap">
-        <button class="qty-btn" onclick="${changeFn}('${safeKey}',-1)">−</button>
-        <span class="qty-n">${item.qty}</span>
-        <button class="qty-btn" onclick="${changeFn}('${safeKey}',1)">+</button>
-        <button class="qty-btn" onclick="${removeFn}('${safeKey}')" style="color:var(--red);margin-left:2px" title="Eliminar">×</button>
+        <button class="qty-btn" onclick="${changeFn}('${safeKey}',-1)"${item.qty<=1?' disabled':''} aria-label="Restar uno">−</button>
+        <input class="qty-n" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="${item.qty}" aria-label="Cantidad" data-key="${escapeAttr(key)}"
+          onfocus="this.select()" onkeydown="if(event.key==='Enter')this.blur()"
+          onchange="${changeFn}('${safeKey}',Math.min(999,Math.max(1,Math.floor(+this.value)||${item.qty}))-${item.qty})">
+        <button class="qty-btn" onclick="${changeFn}('${safeKey}',1)" aria-label="Sumar uno">+</button>
+        <button class="qty-btn" onclick="${removeFn}('${safeKey}')" style="color:var(--red);margin-left:2px" title="Eliminar" aria-label="Eliminar">×</button>
       </div>
       <span class="c-sub">${fmt(sub)}</span>
     </div>`;
@@ -4407,8 +4412,13 @@ function saveMesaCarrito(){
     m.items={...carrito};m._syncing=!!window.getOpenOrdersSyncState?.()?.ready;save();syncMesasSheets();
     window.syncMesaToSupabase?.(m)
       .then(ok=>{
-        m._syncing=!ok;save();
+        m._syncing=!ok&&!m._items_conflict;save();
         if(ok) setTimeout(()=>window.triggerOORefresh?.('post_action'),300);
+        // Otro dispositivo cambió la mesa mientras se editaba: se pregunta ya, no al cobrar.
+        else if(m._items_conflict){
+          const visible=mesaActivaId&&findMesaByAnyId(mesaActivaId);
+          if(visible?._items_conflict&&(visible===m||visible._sb_id===m._sb_id))window.mostrarConflictoMesa?.(visible);
+        }
         else if(window.getOpenOrdersSyncState?.()?.ready) showToast('No pudimos actualizar esta mesa. Reintentá.');
       })
       .catch(()=>{m._syncing=true;save();showToast('No pudimos actualizar esta mesa. Reintentá.');});
@@ -4883,7 +4893,10 @@ function addItem(id){
   }
 }
 function changeQty(key,d){
-  if(!carrito[key])return;carrito[key].qty+=d;
+  if(!carrito[key])return;
+  if(document.activeElement?.matches?.('#cart-rows input.qty-n'))document.activeElement.blur(); // cantidad confirmada: renderCart no la retiene
+  if(!d){renderCart();return;} // cantidad escrita igual o inválida: no hay nada que guardar
+  carrito[key].qty+=d;
   if(carrito[key].qty<=0)delete carrito[key];
   saveMesaCarrito();renderProdGrid();renderCart();
 }
@@ -4897,25 +4910,14 @@ function renderCart(){
   if(!ct)return;
   if(!items.length){ce.style.display='block';cr.style.display='none';ct.textContent='$0';updatePaymentUI(0,{valido:false,mensaje:''});if(bc){bc.disabled=true;bc.textContent=etiquetaBotonCobro();}return;}
   ce.style.display='none';cr.style.display='flex';
-  cr.innerHTML=items.map(([key,item])=>{
-    const p=findProductById(item.prodId);if(!p){logProductDiag('carrito con producto no resoluble',item);return'';}
-    const sub=carritoItemTotal(item);
-    const varsStr=getCartItemVariantsText(item);
-    const safeKey=key.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    return `<div class="cart-row">
-      <div class="c-name-wrap"><div class="c-name">${escapeHtml(p.name)}</div>
-        ${varsStr?`<div class="c-mods">${varsStr}</div>`:''}
-        ${item.nota?`<div class="c-nota">${item.nota}</div>`:''}
-      </div>
-      <div class="qty-wrap">
-        <button class="qty-btn" onclick="changeQty('${safeKey}',-1)">−</button>
-        <span class="qty-n">${item.qty}</span>
-        <button class="qty-btn" onclick="changeQty('${safeKey}',1)">+</button>
-        <button class="qty-btn" onclick="deleteFromCart('${safeKey}')" style="color:var(--red);margin-left:2px" title="Eliminar">×</button>
-      </div>
-      <span class="c-sub">${fmt(sub)}</span>
-    </div>`;
-  }).join('');
+  // El refresco de fondo redibuja el pedido: la cantidad que se está escribiendo sigue en su fila, con foco.
+  const foco=cr.contains(document.activeElement)&&document.activeElement.matches('input.qty-n')?document.activeElement:null;
+  const escrito=foco&&{key:foco.dataset.key,valor:foco.value};
+  cr.innerHTML=renderOrderItemRows(carrito,{changeFn:'changeQty',removeFn:'deleteFromCart'});
+  if(escrito){
+    const input=[...cr.querySelectorAll('input.qty-n')].find(i=>i.dataset.key===escrito.key);
+    if(input){input.value=escrito.valor;input.focus();input.setSelectionRange(escrito.valor.length,escrito.valor.length);}
+  }
   const total=money2(carritoTotalFn(carrito));
   const paymentState=getCurrentPaymentState(total);
   ct.textContent=fmt(total);
