@@ -7652,7 +7652,21 @@ if(config.webappUrl){loadFromSheets();}
   }
 
   // ── Sync items: mesa.items → open_order_items ─────
-  async function syncOpenOrderItems(sbOrderId,items,storeId,syncStartedAt=''){
+  // El reemplazo de ítems (borrar + insertar) de una mesa corre de a uno: la sync y el reintento de pendientes
+  // lo hacían en paralelo y cada inserción quedaba duplicada.
+  const ooItemsCandados=new Map();
+  function conCandadoItems(orderId,fn){
+    const key=String(orderId||'');
+    const run=(ooItemsCandados.get(key)||Promise.resolve()).then(fn);
+    const tail=run.catch(()=>{});
+    ooItemsCandados.set(key,tail);
+    tail.then(()=>{if(ooItemsCandados.get(key)===tail)ooItemsCandados.delete(key);});
+    return run;
+  }
+  function syncOpenOrderItems(sbOrderId,items,storeId,syncStartedAt=''){
+    return conCandadoItems(sbOrderId,()=>syncOpenOrderItemsSinCandado(sbOrderId,items,storeId,syncStartedAt));
+  }
+  async function syncOpenOrderItemsSinCandado(sbOrderId,items,storeId,syncStartedAt=''){
     const client=ooClient();
     if(!client||!sbOrderId)return false;
     const rows=Object.values(items||{}).map((item,i)=>{
@@ -8238,7 +8252,11 @@ if(config.webappUrl){loadFromSheets();}
       return {ok:false,total:pending.length,synced:0,failed:pending.length};
     }
     const summary={ok:true,total:pending.length,synced:0,failed:0,errors:[]};
-    for(const entry of pending){
+    for(const entryInicial of pending){
+      // Mismo candado que la sync de la mesa, y solo si la entrada sigue pendiente: la sync en curso pudo resolverla.
+      await conCandadoItems(entryInicial.open_order_id,async()=>{
+      const entry=(pendingOpenOrderItemSyncs||[]).find(e=>e&&String(e.open_order_id||'')===String(entryInicial.open_order_id||'')&&e.status!=='synced');
+      if(!entry){summary.synced++;return;}
       entry.status='syncing';
       entry.updated_at=getLocalTimestamp();
       entry.attempts=(Number(entry.attempts)||0)+1;
@@ -8269,6 +8287,7 @@ if(config.webappUrl){loadFromSheets();}
         summary.errors.push({open_order_id:entry.open_order_id,message:entry.last_error,code:err?.code||'',details:err?.details||'',hint:err?.hint||''});
         console.error('[retryPendingOpenOrderItemSyncs failed]',{entry:{...entry},message:err?.message||String(err),code:err?.code||'',details:err?.details||'',hint:err?.hint||''});
       }
+      });
     }
     savePendingOutboxes();
     save();
