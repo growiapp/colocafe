@@ -218,6 +218,24 @@ input.qty-n:focus{border-color:var(--border2);background:var(--surf2);outline:no
 .cart-desglose-row{display:flex;justify-content:space-between;gap:8px}
 .cart-desglose-row.total{font-weight:600;color:var(--ink)}
 .cart-desglose-row.aviso{color:var(--red)}
+#print-area{display:none}
+@media print{
+  /* El alto lo pone el rollo: sin "size" manda el papel de 80 mm elegido en la impresora (80mm auto no es válido). */
+  @page{margin:0}
+  body>*:not(#print-area){display:none!important}
+  html,body{background:#fff!important;margin:0!important;padding:0!important}
+  #print-area{display:block;width:72mm;padding:3mm 4mm;color:#000;background:#fff;font:12px/1.35 'Courier New',Courier,monospace}
+  .pr-doc{break-after:page;page-break-after:always}
+  .pr-doc:last-child{break-after:auto;page-break-after:auto}
+  .pr-center{text-align:center}
+  .pr-strong{font-weight:700}
+  .pr-big{font-size:15px;font-weight:700}
+  .pr-small{font-size:10px}
+  .pr-sub{padding-left:4mm;font-size:11px}
+  .pr-sep{border-top:1px dashed #000;margin:2mm 0}
+  .pr-item{margin:1mm 0;break-inside:avoid}
+  .pr-row{display:flex;justify-content:space-between;gap:2mm}
+}
 .c-sub{font-size:12px;color:var(--ink2);min-width:64px;text-align:right;flex-shrink:0}
 .divider{height:1px;background:var(--border);margin:10px 0}
 .pago-lbl{font-size:11px;color:var(--ink3);margin-bottom:7px}
@@ -1708,6 +1726,7 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
           <button class="btn-sm" onclick="volverAMesas()">← Volver</button>
           <div style="font-family:var(--ff-serif);font-size:16px;color:var(--ink);flex:1" id="mesa-titulo"></div>
           <div id="mesa-tipo-badge" class="mesa-tipo-badge"></div>
+          <button class="btn-sm" onclick="imprimirComandaMesa()" style="font-size:11px;padding:5px 10px">Imprimir comanda</button>
           <button class="btn-sm primary" onclick="openProdRapidoModal()" style="font-size:11px;padding:5px 10px">+ Producto</button>
         </div>
         <div class="cat-chips" id="carga-cats"></div>
@@ -2013,6 +2032,7 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
 </div>
 
 <!-- MODAL: CONFLICTO DE ÍTEMS DE UNA MESA -->
+<div id="print-area" aria-hidden="true"></div>
 <div class="modal-ov" id="modal-descuento" onclick="if(event.target===this)cerrarDescuento()">
   <div class="modal-box" style="max-width:380px">
     <div class="modal-title" id="descuento-titulo">Descuento</div>
@@ -5545,6 +5565,12 @@ function getLocalHistoryTicketsForUi(){
       mesa:group.ref?.mesa||'',
       tipo:group.ref?.tipo||'salon',
       total:money2(group.total),
+      subtotal:money2((group.rows||[]).reduce((s,r)=>s+(Number(r.bruto??r.total)||0),0)),
+      descuento:(group.rows||[]).some(r=>r.descuento)?{
+        productos:money2((group.rows||[]).reduce((s,r)=>s+(Number(r.descuento?.linea)||0),0)),
+        ticket:money2((group.rows||[]).reduce((s,r)=>s+(Number(r.descuento?.ticket)||0),0))}:null,
+      // Solo se imprime lo que el servidor confirmó: una venta local pendiente todavía no es la fuente de verdad.
+      persistida:(group.rows||[]).every(r=>r._sb_sync_status==='synced'),
       itemCount:(group.rows||[]).length,
       paymentCount:pagos.length,
       paymentTotal:totalPagos,
@@ -5559,7 +5585,9 @@ function getLocalHistoryTicketsForUi(){
         cantidad:Number(r.cantidad)||0,
         variantes:r.variantes||'',
         nota:r.nota||'',
-        total:money2(r.total)
+        total:money2(r.total),
+        bruto:money2(r.bruto??r.total),
+        descLinea:money2(r.descuento?.linea||0)
       })),
       payments:pagos
     };
@@ -5576,6 +5604,7 @@ function renderHistVentas(){
     ? (histState?.tickets||[])
     : ((histState?.tickets&&histState.tickets.length)?histState.tickets:fallbackTickets);
   const tickets=(allTickets||[]).filter(ticketMatchesHistoryFilters);
+  histTicketsVisibles=tickets;
   const sourceLabel=useSupabase?'Supabase':(isFallback?'Modo sin conexión (historial local)':'Local');
   const canTech=window.canShowClientTechnicalUi?.()||false;
   if(activeTab==='historial' && window.ensureVisibleHistorySource) setTimeout(()=>window.ensureVisibleHistorySource(),0);
@@ -5647,10 +5676,91 @@ function renderHistVentas(){
           <div class="hist-row2" style="padding-top:6px">
             <span style="font-weight:500">Total ticket</span><span style="font-weight:500">${fmt(t.total||0)}</span>
           </div>
+          <div class="hist-row2" style="padding-top:8px;justify-content:flex-end">
+            ${t.persistida
+              ?`<button class="btn ghost" type="button" onclick="event.stopPropagation();imprimirTicketHistorial(${i})">Imprimir ticket</button>`
+              :`<span style="font-size:12px;color:var(--ink3)">El ticket se puede imprimir cuando la venta quede confirmada.</span>`}
+          </div>
         </div>
       </div>`;
     }).join('')}
   `;
+}
+let histTicketsVisibles=[];
+// ── Impresión (navegador, papel de 80 mm) ────────
+// Comanda: lo que se ve de la mesa, por sector. Ticket: la venta ya guardada (historial), nunca el carrito.
+// ponytail: window.print del navegador; ESC/POS, USB o Bluetooth cuando haya un modelo de impresora real.
+const SECTORES_COMANDA={cafeteria:'Cafetería',cocina:'Cocina'};
+function imprimirDocumentos(html){
+  const area=$('print-area');if(!area)return;
+  area.innerHTML=html;
+  window.addEventListener('afterprint',()=>{area.innerHTML='';},{once:true});
+  window.print();
+}
+// getActiveStoreName devuelve el id del local cuando no conoce el nombre: eso no va en un ticket.
+function nombreComercio(){const n=window.getActiveStoreName?.();return n&&n!=='—'&&!window.isValidUuid?.(n)?n:'Colo Café';}
+function htmlComanda(target,items,momento=new Date()){
+  const porSector={};
+  Object.values(items||{}).filter(i=>i.qty>0).forEach(i=>{
+    const p=findProductById(i.prodId),sec=getCat(p?.cat).seccion||'cafeteria';
+    (porSector[sec]||(porSector[sec]=[])).push({i,p});
+  });
+  const operador=target?.operator_name||(turno&&turno.abierto?turno.operador:'')||'';
+  const cuando=`${getLocalDateString(momento)} ${getLocalTimeString(momento)}`;
+  return Object.keys(porSector).sort((a,b)=>(a==='cafeteria'?0:1)-(b==='cafeteria'?0:1)).map(sec=>`<div class="pr-doc">
+    <div class="pr-center pr-strong">COMANDA · ${escapeHtml((SECTORES_COMANDA[sec]||sec).toUpperCase())}</div>
+    <div class="pr-center pr-big">${escapeHtml(target?.nombre||target?.cliente||'Mesa')}</div>
+    <div class="pr-center">${escapeHtml(tipoLabel(target?.tipo||'salon'))} · ${escapeHtml(cuando)}</div>
+    ${operador?`<div class="pr-center">Operador: ${escapeHtml(operador)}</div>`:''}
+    <div class="pr-sep"></div>
+    ${porSector[sec].map(({i,p})=>`<div class="pr-item">
+      <div class="pr-strong">${Number(i.qty)} × ${escapeHtml(p?.name||i.prodId)}</div>
+      ${(i.vars||[]).map(v=>`<div class="pr-sub">+ ${escapeHtml(v.nombre)}</div>`).join('')}
+      ${i.nota?`<div class="pr-sub">* ${escapeHtml(i.nota)}</div>`:''}
+    </div>`).join('')}
+    <div class="pr-sep"></div>
+    <div class="pr-center">${(n=>`${n} ${n===1?'unidad':'unidades'}`)(porSector[sec].reduce((s,{i})=>s+Number(i.qty),0))}</div>
+  </div>`).join('');
+}
+function imprimirComandaMesa(){
+  const html=htmlComanda(getCurrentVentaTarget(),carrito);
+  if(!html){showToast('No hay productos para la comanda.');return;}
+  imprimirDocumentos(html);
+}
+function htmlTicket(t){
+  const fila=(a,b,cls='')=>`<div class="pr-row${cls}"><span>${a}</span><span>${b}</span></div>`;
+  const desc=t.descuento||{};
+  const d=parseLocalDateSafe(t.fecha||t.timestamp||today());
+  return `<div class="pr-doc">
+    <div class="pr-center pr-big">${escapeHtml(nombreComercio())}</div>
+    <div class="pr-center">Comprobante de venta</div>
+    <div class="pr-center">${escapeHtml(fmtShort(d))}${t.hora?` · ${escapeHtml(t.hora)}`:''}</div>
+    <div class="pr-center">${escapeHtml(tipoLabel(t.tipo||'salon'))}${t.mesa?` · ${escapeHtml(t.mesa)}`:''}</div>
+    ${t.operador?`<div class="pr-center">Atendió: ${escapeHtml(t.operador)}</div>`:''}
+    <div class="pr-center pr-small">Ticket ${escapeHtml(String(t.ticketId||'').slice(-12))}</div>
+    <div class="pr-sep"></div>
+    ${(t.items||[]).map(it=>`<div class="pr-item">
+      ${fila(`${Number(it.cantidad)||0} × ${escapeHtml(it.producto)}`,fmt(it.bruto??it.total))}
+      ${it.variantes?`<div class="pr-sub">${escapeHtml(it.variantes)}</div>`:''}
+      ${it.nota?`<div class="pr-sub">* ${escapeHtml(it.nota)}</div>`:''}
+      ${it.descLinea?fila('<span class="pr-sub">Descuento</span>','−'+fmt(it.descLinea)):''}
+    </div>`).join('')}
+    <div class="pr-sep"></div>
+    ${desc.productos||desc.ticket?fila('Subtotal',fmt(t.subtotal)):''}
+    ${desc.productos?fila('Descuentos en productos','−'+fmt(desc.productos)):''}
+    ${desc.ticket?fila('Descuento al ticket','−'+fmt(desc.ticket)):''}
+    ${fila('TOTAL',fmt(t.total),' pr-big')}
+    <div class="pr-sep"></div>
+    ${getVisualTicketPayments(t.payments||[]).map(p=>fila(escapeHtml(getPaymentMethodMeta(p.metodo).label),fmt(p.monto))).join('')}
+    <div class="pr-sep"></div>
+    <div class="pr-center pr-small">No válido como factura</div>
+    <div class="pr-center">Gracias por tu visita</div>
+  </div>`;
+}
+function imprimirTicketHistorial(i){
+  const t=histTicketsVisibles[i];
+  if(!t?.persistida){showToast('El ticket se puede imprimir cuando la venta quede confirmada.');return;}
+  imprimirDocumentos(htmlTicket(t));
 }
 function toggleHist(i){const d=$('hd-'+i),a=$('ha-'+i);const open=d.classList.toggle('open');a.classList.toggle('open',open);}
 function copyHistorySummary(){
@@ -13512,6 +13622,9 @@ if(config.webappUrl){loadFromSheets();}
       mesa:sale.table_label||'',
       tipo:sale.service_type||'salon',
       total:money2(sale.total_amount),
+      subtotal:money2(sale.subtotal_amount??sale.total_amount),
+      descuento:sale.metadata?.descuento||null,
+      persistida:true,
       itemCount:(items||[]).length,
       paymentCount:(payments||[]).length,
       paymentTotal:money2(comparablePayments.reduce((sum,p)=>sum+(Number(p.monto)||0),0)),
@@ -13526,7 +13639,9 @@ if(config.webappUrl){loadFromSheets();}
         cantidad:Number(item.quantity)||0,
         variantes:item.variant_summary||'',
         nota:item.note||'',
-        total:money2(item.line_total)
+        total:money2(item.line_total),
+        bruto:money2(item.metadata?.descuento?.bruto??item.line_total),
+        descLinea:money2(item.metadata?.descuento?.linea||0)
       })),
       products:(items||[]).map(item=>`${item.product_name||''} x${Number(item.quantity)||0}`),
       payments:comparablePayments
