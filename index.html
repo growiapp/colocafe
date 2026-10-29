@@ -7229,15 +7229,15 @@ if(config.webappUrl){loadFromSheets();}
   // rechaza una versión base vieja: un reintento atrasado o una edición simultánea de otro dispositivo ya no
   // sobrescribe en silencio; la mesa queda en conflicto y el operador elige. Sin la migración, sigue el reemplazo previo.
   let ooVersionado=null; // null: sin comprobar todavía
-  function ooEsFaltaDeVersionado(err){
-    const t=`${err?.code||''} ${err?.message||''} ${err?.details||''}`;
-    return /PGRST202|42883|42703|items_version|replace_open_order_items/.test(t);
-  }
+  // Solo una migración ausente (la función o la columna no existen) habilita el reemplazo anterior.
+  // Permisos, red, timeout o validación no: la mesa queda pendiente y nunca se borra + inserta sin versión.
+  function ooFaltaFuncionVersionado(err){return err?.code==='PGRST202';}
+  function ooFaltaColumnaVersion(err){return err?.code==='42703'&&/\bitems_version\b.*does not exist/.test(err?.message||'');}
   async function ooSelectOrders(cols,armar,etiqueta){
     if(ooVersionado!==false){
       const r=await ooWithTimeout(armar(`${cols},items_version`),etiqueta);
       if(!r.error){ooVersionado=true;return r;}
-      if(!ooEsFaltaDeVersionado(r.error))return r;
+      if(!ooFaltaColumnaVersion(r.error))return r;
       ooVersionado=false;
     }
     return ooWithTimeout(armar(cols),etiqueta);
@@ -7288,7 +7288,7 @@ if(config.webappUrl){loadFromSheets();}
     const {data,error}=await ooWithTimeout(client.rpc('replace_open_order_items',
       {p_open_order_id:orderId,p_base_version:Number.isFinite(base)?base:-1,p_items:rows}),'replace_open_order_items');
     if(error){
-      if(ooEsFaltaDeVersionado(error)){ooVersionado=false;return 'sin_rpc';}
+      if(ooFaltaFuncionVersionado(error)){ooVersionado=false;return 'sin_rpc';}
       throw error;
     }
     ooVersionado=true;
