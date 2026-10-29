@@ -12649,22 +12649,30 @@ if(config.webappUrl){loadFromSheets();}
   // Encabezado: cuenta y local en que el servidor confirmó por última vez si hay turno abierto. No cambia el turno.
   // Se toma al empezar la consulta; si la cuenta o el local cambiaron antes de la respuesta, no se confirma nada.
   function contextoTurnoConsulta(){return {userId:window.__contextoCuenta?.userId||'',storeId:getShiftsStoreId()||''};}
+  function mismoContextoTurno(ctx){
+    const ahora=contextoTurnoConsulta();
+    return !!(ctx.userId&&ctx.storeId&&ctx.userId===ahora.userId&&ctx.storeId===ahora.storeId);
+  }
   // Sincrónico: compara el contexto del inicio de la consulta con el del momento en que llega la respuesta.
   function registrarTurnoVerificado(ctx,abierto,id){
-    const ahora=contextoTurnoConsulta();
-    const mismo=!!(ctx.userId&&ctx.storeId&&ctx.userId===ahora.userId&&ctx.storeId===ahora.storeId);
-    window.__turnoVerificado=mismo?{userId:ctx.userId,storeId:ctx.storeId,abierto:!!abierto,id:abierto?String(id||''):''}:null;
+    window.__turnoVerificado=mismoContextoTurno(ctx)?{userId:ctx.userId,storeId:ctx.storeId,abierto:!!abierto,id:abierto?String(id||''):''}:null;
     window.renderContextoGlobal?.();
   }
   function refreshShiftUi(){
     try{renderTurnoPill();}catch(_){}
     try{renderAjustes();}catch(_){}
   }
+  // Solo la última lectura iniciada, y con la misma cuenta y local, aplica su respuesta (también un error).
+  let turnoLecturaSeq=0;
   window.loadActiveShiftFromSupabase=async function({silent=false,openRowsOverride=null}={}){
     if(!hasShiftsSupabaseReady()) return false;
     const ctxTurno=contextoTurnoConsulta();
+    const lectura=++turnoLecturaSeq;
+    const vigente=()=>lectura===turnoLecturaSeq&&mismoContextoTurno(ctxTurno);
     try{
       const diag=openRowsOverride?null:await fetchShiftDiagnostics({includeRows:true});
+      // Respuesta obsoleta: se descarta antes de tocar turno, almacenamiento o estado del módulo.
+      if(!vigente()) return false;
       if(diag){
         shiftsCurrentStoreName=diag.storeName||shiftsCurrentStoreName;
         shiftsCurrentRole=diag.role||shiftsCurrentRole;
@@ -12699,6 +12707,7 @@ if(config.webappUrl){loadFromSheets();}
       return true;
     }catch(err){
       console.error('[Shifts load failed]',err);
+      if(!vigente()) return false;
       window.__turnoVerificado=null;
       setShiftsState('error',err?.message||String(err));
       if(!silent) showToast('Sin conexión. Mostrando datos guardados.');
