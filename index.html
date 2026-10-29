@@ -3894,6 +3894,47 @@ function setCtxItem(id,valor,detalle,estado,accion,clave){
   ctxAcciones[id]=accion||(()=>showToast(detalle||valor));
 }
 function usarCtx(id){ctxAcciones[id]?.();}
+// Cuenta y local activos; vacío sin sesión o sin local.
+function claveTurnoCtx(){
+  const c=window.__contextoCuenta||{};
+  return c.loggedIn&&c.userId&&c.storeId?`${c.userId}|${c.storeId}`:'';
+}
+// Última confirmación del servidor, solo si corresponde a la cuenta y el local activos.
+function turnoVerificadoCtx(){
+  const v=window.__turnoVerificado;
+  return v&&claveTurnoCtx()&&`${v.userId}|${v.storeId}`===claveTurnoCtx()?v:null;
+}
+// Relee el turno y espera la respuesta antes de abrir nada: un turno guardado en el dispositivo
+// solo se abre si el servidor lo confirmó para esta cuenta y este local.
+let revisandoTurno=false;
+async function revisarTurno(){
+  const clave=claveTurnoCtx();
+  if(!clave||revisandoTurno)return;
+  revisandoTurno=true;
+  showToast('Comprobando el turno con el servidor…');
+  try{await window.reloadActiveShiftFromSupabase?.(true);}
+  catch(_){}
+  finally{revisandoTurno=false;}
+  renderContextoGlobal();
+  if(claveTurnoCtx()!==clave){showToast('La cuenta o el local cambiaron mientras comprobábamos el turno. Volvé a tocar Turno.');return;}
+  const ver=turnoVerificadoCtx();
+  if(!ver){showToast('No pudimos confirmar el turno con el servidor. Revisá la conexión y volvé a intentarlo.');return;}
+  if(turno&&turno.abierto){
+    if(ver.abierto&&ver.id&&ver.id===String(turno._sb_id||'')){openTurnoModal();return;}
+    showToast(ver.abierto
+      ?'El servidor tiene otro turno abierto en este local. El turno guardado en este dispositivo no se confirmó.'
+      :'El servidor no tiene un turno abierto en este local. El turno guardado en este dispositivo no se confirmó.');
+    return;
+  }
+  if(!ver.abierto){openTurnoModal();return;}
+  showToast('El servidor tiene un turno abierto en este local que no pudimos cargar. Volvé a intentarlo.');
+}
+// Turno abierto en este dispositivo y todavía no enviado: su flujo sigue disponible (también sin conexión),
+// avisando que el servidor no lo confirmó ni sabe a qué cuenta pertenece.
+function abrirTurnoLocalSinConfirmar(){
+  showToast('Este turno está guardado solo en este dispositivo y el servidor todavía no lo confirmó.');
+  openTurnoModal();
+}
 function irAPendientesCaja(){
   goTab('carga');
   renderCajaPendingBanner();
@@ -3920,9 +3961,8 @@ function renderContextoGlobal(){
   else setCtxItem('ctx-local',cuenta.storeCount?'Elegí un local':'Sin locales asignados',cuenta.storeCount?'No hay local activo. Tocá para elegir uno.':'Tu cuenta no tiene locales asignados.','aviso',abrirCuenta);
 
   // Un turno guardado en el dispositivo puede venir de otra cuenta, de otro local o de una sesión cerrada.
-  const ver=window.__turnoVerificado;
-  const verificado=!!(cuenta.loggedIn&&cuenta.storeId&&ver&&ver.userId===cuenta.userId&&ver.storeId===cuenta.storeId);
-  const revisarTurno=()=>{window.reloadActiveShiftFromSupabase?.(true);openTurnoModal();};
+  const ver=turnoVerificadoCtx();
+  const verificado=!!ver;
   const d=new Date(turno?.apertura);
   const hora=Number.isFinite(d.getTime())?d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}):'';
   const quien=turno?.operador?`, lo abrió ${turno.operador}`:'';
@@ -3931,12 +3971,12 @@ function renderContextoGlobal(){
   else if(!cuenta.storeId)setCtxItem('ctx-turno','Sin local','Elegí un local para ver su turno.','aviso',abrirCuenta);
   else if(turno&&turno.abierto){
     if(verificado&&ver.abierto&&ver.id&&ver.id===String(turno._sb_id||''))setCtxItem('ctx-turno',`Abierto${hora?` ${hora}`:''}`,`Turno abierto${hora?` desde las ${hora}`:''}${quien}. Tocá para ver o cerrar.`,'ok',openTurnoModal);
-    else if(!turno._sb_id)setCtxItem('ctx-turno',`Abierto${hora?` ${hora}`:''} · sin confirmar`,`Turno abierto en este dispositivo${quien}, todavía sin confirmar en el servidor. Tocá para ver.`,'aviso',openTurnoModal);
-    else setCtxItem('ctx-turno','Sin confirmar','Hay un turno guardado en este dispositivo que el servidor no confirmó para esta cuenta y este local. Tocá para revisar.','aviso',revisarTurno);
+    else if(!turno._sb_id)setCtxItem('ctx-turno',`Abierto${hora?` ${hora}`:''} · sin confirmar`,`Turno abierto en este dispositivo${quien}, todavía sin confirmar en el servidor. Tocá para ver.`,'aviso',abrirTurnoLocalSinConfirmar);
+    else setCtxItem('ctx-turno','Sin confirmar','Hay un turno guardado en este dispositivo que el servidor no confirmó para esta cuenta y este local. Tocá para comprobarlo.','aviso',revisarTurno);
   }
   else if((pendingShiftClosures||[]).some(x=>x&&x.status!=='synced'))setCtxItem('ctx-turno','Cierre pendiente','El cierre de turno todavía no se confirmó en el servidor. Tocá para ver los pendientes.','aviso',irAPendientesCaja);
   else if(verificado&&!ver.abierto)setCtxItem('ctx-turno','Sin turno · Abrir','No hay turno abierto en este local. Tocá para abrir uno.','aviso',openTurnoModal);
-  else setCtxItem('ctx-turno','Sin confirmar','Todavía no confirmamos con el servidor si hay un turno abierto en este local. Tocá para revisar.','aviso',revisarTurno);
+  else setCtxItem('ctx-turno','Sin confirmar','Todavía no confirmamos con el servidor si hay un turno abierto en este local. Tocá para comprobarlo.','aviso',revisarTurno);
 
   const s=getCajaPendingBannerState();
   const oo=window.getOpenOrdersSyncState?.()||{};
@@ -12607,12 +12647,13 @@ if(config.webappUrl){loadFromSheets();}
     return err.message || err.details || String(err);
   }
   // Encabezado: cuenta y local en que el servidor confirmó por última vez si hay turno abierto. No cambia el turno.
-  async function registrarTurnoVerificado(abierto,id){
-    const storeId=getShiftsStoreId();
-    try{
-      const session=await getShiftsSession(window.getSupabaseClient?.());
-      window.__turnoVerificado={userId:session?.user?.id||'',storeId,abierto:!!abierto,id:abierto?String(id||''):''};
-    }catch(_){window.__turnoVerificado=null;}
+  // Se toma al empezar la consulta; si la cuenta o el local cambiaron antes de la respuesta, no se confirma nada.
+  function contextoTurnoConsulta(){return {userId:window.__contextoCuenta?.userId||'',storeId:getShiftsStoreId()||''};}
+  // Sincrónico: compara el contexto del inicio de la consulta con el del momento en que llega la respuesta.
+  function registrarTurnoVerificado(ctx,abierto,id){
+    const ahora=contextoTurnoConsulta();
+    const mismo=!!(ctx.userId&&ctx.storeId&&ctx.userId===ahora.userId&&ctx.storeId===ahora.storeId);
+    window.__turnoVerificado=mismo?{userId:ctx.userId,storeId:ctx.storeId,abierto:!!abierto,id:abierto?String(id||''):''}:null;
     window.renderContextoGlobal?.();
   }
   function refreshShiftUi(){
@@ -12621,6 +12662,7 @@ if(config.webappUrl){loadFromSheets();}
   }
   window.loadActiveShiftFromSupabase=async function({silent=false,openRowsOverride=null}={}){
     if(!hasShiftsSupabaseReady()) return false;
+    const ctxTurno=contextoTurnoConsulta();
     try{
       const diag=openRowsOverride?null:await fetchShiftDiagnostics({includeRows:true});
       if(diag){
@@ -12639,7 +12681,7 @@ if(config.webappUrl){loadFromSheets();}
       const rows=openRowsOverride || diag.openRows;
       if(!Array.isArray(rows) || !rows.length){
         shiftsRemoteOpen=false;
-        registrarTurnoVerificado(false);
+        registrarTurnoVerificado(ctxTurno,false);
         renderShiftsSupabaseUi();
         return false;
       }
@@ -12650,13 +12692,14 @@ if(config.webappUrl){loadFromSheets();}
       turno=mapShiftFromSupabase(remoteRow,turno);
       save();
       shiftsRemoteOpen=true;
-      registrarTurnoVerificado(true,remoteRow.id);
+      registrarTurnoVerificado(ctxTurno,true,remoteRow.id);
       setShiftsState('supabase');
       refreshShiftUi();
       if(!silent) showToast('✓ Turno actualizado');
       return true;
     }catch(err){
       console.error('[Shifts load failed]',err);
+      window.__turnoVerificado=null;
       setShiftsState('error',err?.message||String(err));
       if(!silent) showToast('Sin conexión. Mostrando datos guardados.');
       return false;
@@ -12664,6 +12707,7 @@ if(config.webappUrl){loadFromSheets();}
   };
   window.saveShiftToSupabase=async function(turnoLocal){
     if(!turnoLocal?.abierto) return null;
+    const ctxTurno=contextoTurnoConsulta();
     if(!hasShiftsSupabaseReady()){
       console.warn('[Shifts save skipped] Supabase no configurado o sin store activa',{turno:turnoLocal});
       return null;
@@ -12683,7 +12727,7 @@ if(config.webappUrl){loadFromSheets();}
       turnoLocal._sync_error='';
       save();
       shiftsRemoteOpen=true;
-      registrarTurnoVerificado(true,existingRow.id);
+      registrarTurnoVerificado(ctxTurno,true,existingRow.id);
       setShiftsState('supabase');
       return existingRow;
     }
@@ -12703,7 +12747,7 @@ if(config.webappUrl){loadFromSheets();}
       save();
       shiftsLastSyncAt=stampShiftsMoment();
       shiftsRemoteOpen=true;
-      registrarTurnoVerificado(true,res.data.id);
+      registrarTurnoVerificado(ctxTurno,true,res.data.id);
       setShiftsState('supabase');
       return res.data;
     }catch(err){
@@ -12715,6 +12759,7 @@ if(config.webappUrl){loadFromSheets();}
   };
   window.closeShiftInSupabase=async function(turnoLocal,cierre){
     if(!turnoLocal) return null;
+    const ctxTurno=contextoTurnoConsulta();
     if(!hasShiftsSupabaseReady()){
       console.warn('[Shifts close skipped] Supabase no configurado o sin store activa',{turno:turnoLocal,cierre});
       return null;
@@ -12747,7 +12792,7 @@ if(config.webappUrl){loadFromSheets();}
       if(res.error) throw res.error;
       shiftsLastSyncAt=stampShiftsMoment();
       shiftsRemoteOpen=false;
-      registrarTurnoVerificado(false);
+      registrarTurnoVerificado(ctxTurno,false);
       setShiftsState('supabase');
       return res.data;
     }catch(err){
