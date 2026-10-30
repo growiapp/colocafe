@@ -3008,11 +3008,12 @@ function aplicarContextoVerificado(nuevo){
   return confirmarTransicion({listas:est.listas,turno:est.turno,aparcados:est.aparcados,cuarentena:est.cuarentena,
     ctx:{user_id:nuevo.user_id,store_id:nuevo.store_id,verified_at:new Date().toISOString()},config:{...config,activeStoreId:nuevo.store_id}});
 }
-// B-04: un turno local pendiente que el servidor reemplaza se guarda antes en la cuarentena; si no se puede, no se reemplaza.
-function preservarTurnoLocal(t,motivo){
+// B-04 / N-02: un turno local pendiente que el servidor reemplaza va a la cuarentena y el remoto ocupa su lugar en la misma
+// transición: si se corta, al arrancar se completa desde el diario y nunca quedan dos copias. Si no se puede, no se reemplaza.
+function preservarTurnoLocal(t,motivo,reemplazo){
   const cuarentena=leerCuarentena(),clave=claveDe(t);
   if(!cuarentena.some(q=>q.lista==='turno'&&q.clave===clave))cuarentena.push({lista:'turno',tipo:'turno',clave,motivo,movido_at:new Date().toISOString(),registro:t});
-  return confirmarTransicion({cuarentena});
+  return confirmarTransicion({cuarentena,turno:reemplazo||null});
 }
 
 // ── Envíos en curso (M-02) ──
@@ -13045,10 +13046,10 @@ if(config.webappUrl){loadFromSheets();}
       if(turno&&turno.abierto&&String(turno._sb_id||'')!==String(remoteRow.id||'')){
         console.warn('[Shifts warning] Turno local abierto y turno remoto abierto distintos. Se prioriza remoto.',{local:turno,remote:remoteRow});
       }
-      if(turno&&turnoPendiente(turno)&&String(turno._sb_id||'')!==String(remoteRow.id||'')&&!preservarTurnoLocal(turno,'turno_reemplazado_por_remoto')){
-        console.warn('[F0B] No se pudo preservar el turno local pendiente: no se aplica el turno remoto');return false;
-      }
-      turno=mapShiftFromSupabase(remoteRow,turno);
+      const turnoRemoto=mapShiftFromSupabase(remoteRow,turno);
+      if(turno&&turnoPendiente(turno)&&String(turno._sb_id||'')!==String(remoteRow.id||'')){
+        if(!preservarTurnoLocal(turno,'turno_reemplazado_por_remoto',turnoRemoto)){console.warn('[F0B] No se pudo preservar el turno local pendiente: no se aplica el turno remoto');return false;}
+      }else turno=turnoRemoto;
       save();
       shiftsRemoteOpen=true;
       registrarTurnoVerificado(ctxTurno,true,remoteRow.id);
