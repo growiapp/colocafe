@@ -5039,6 +5039,7 @@ async function abrirMesa(id){
     m=await window.loadSingleOpenOrderFromSupabase(id).catch(()=>null);
   }
   if(!m){showToast('No pudimos cargar esta mesa. Reintentá.');return;}
+  if(mesaRetenidaDeOtraCuenta(m)){showToast(MSG_MESA_DE_OTRA_CUENTA);return;}
   if(m._close_pending||m.status==='close_pending'||getPendingOpenOrderClosureForMesa(m)){
     showToast('Venta cobrada. Cierre de mesa pendiente.');
     renderMesasSection();
@@ -5154,6 +5155,7 @@ async function reservationHasRemoteSale(reservation){
 
 // ── Operador al cobrar ─────────────────────────────
 async function cerrarMesaOReserva(){
+  if(mesaRetenidaDeOtraCuenta(findMesaByAnyId(mesaActivaId))){showToast(MSG_MESA_DE_OTRA_CUENTA);return;}
   const items=Object.values(carrito);
   if(!items.length){showToast('El pedido está vacío');return;}
   const paymentState=getCurrentPaymentState();
@@ -5676,6 +5678,7 @@ function addItem(id){
   }
 }
 function changeQty(key,d){
+  if(mesaRetenidaDeOtraCuenta(findMesaByAnyId(mesaActivaId))){showToast(MSG_MESA_DE_OTRA_CUENTA);return;}
   if(!carrito[key])return;
   if(document.activeElement?.matches?.('#cart-rows input.qty-n'))document.activeElement.blur(); // cantidad confirmada: renderCart no la retiene
   if(!d){renderCart();return;} // cantidad escrita igual o inválida: no hay nada que guardar
@@ -6450,6 +6453,7 @@ const pedidoCompleto=items=>Object.fromEntries(Object.entries(lineasPorSector(it
 // Imprimir no marca nada: "Marcar como enviada" registra lo que se mostró. Así una impresión cancelada no se pierde.
 let comandaEstado=null;
 async function abrirComandaMesa(){
+  if(mesaRetenidaDeOtraCuenta(findMesaByAnyId(mesaActivaId))){showToast(MSG_MESA_DE_OTRA_CUENTA);return;}
   const target=getCurrentVentaTarget();
   const orderId=String(mesaActivaId||'').startsWith('reserva_')?'':getMesaOpenOrderId(target);
   comandaEstado={target,orderId:window.isValidUuid?.(orderId)?orderId:'',envios:null,mostrado:{},aviso:'Cargando comandas enviadas…'};
