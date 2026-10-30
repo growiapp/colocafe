@@ -2866,6 +2866,24 @@ function mesaRetenidaDeOtraCuenta(m){
   const o=m?._origin;
   return !!(m&&mesaPendiente(m)&&o?.pendiente&&o.user_id&&!o.legacy&&!o.sin_contexto&&o.user_id!==String(window.__sesionUserId?.()||''));
 }
+// N-03: el detalle de una mesa o reserva pertenece a la cuenta que lo abrió. Al cerrar sesión se cierra, y si la cuenta
+// cambió sin cerrarlo, la próxima edición lo cierra sin guardar nada. Cada edición del detalle pasa por edicionDelDetallePermitida.
+let cuentaDelDetalle=null;
+const MSG_DETALLE_CERRADO='La mesa que estaba abierta era de otra sesión y se cerró sin cambios. Volvé a abrirla desde la lista.';
+function marcarDetalleAbierto(){cuentaDelDetalle=String(window.__sesionUserId?.()||'');}
+function invalidarDetalle(){
+  if(typeof mesaActivaId==='undefined'||!mesaActivaId)return;
+  mesaActivaId=null;carrito={};cuentaDelDetalle=null;
+  try{renderVentas();}catch(_){}
+}
+function edicionDelDetallePermitida(){
+  if(!mesaActivaId)return true;
+  if(operacionesBloqueadasPorDiario())return false;
+  if(cuentaDelDetalle!==null&&cuentaDelDetalle!==String(window.__sesionUserId?.()||'')){invalidarDetalle();showToast(MSG_DETALLE_CERRADO);return false;}
+  const m=String(mesaActivaId).startsWith('reserva_')?null:findMesaByAnyId(mesaActivaId);
+  if(m&&mesaRetenidaDeOtraCuenta(m)){invalidarDetalle();showToast(MSG_MESA_DE_OTRA_CUENTA);return false;}
+  return true;
+}
 function operacionesRetenidas(){
   const out=[],add=(tipo,rec,clave)=>{const r=origenPermite(rec,tipo);if(!r.ok)out.push({tipo,clave,motivo:r.motivo,origen:rec._origin||null});};
   (window.findPendingSalesSyncGroups?.(ventas||[])||[]).forEach(g=>{const fila=(g.rows||[]).find(r=>!origenEnviable(r,'venta'));if(fila)add('venta',fila,fila.ticket_id||fila.id);});
@@ -5086,7 +5104,7 @@ async function abrirMesa(id){
       showToast('No pudimos verificar esta mesa. Mostrando datos guardados; los cambios quedarán pendientes.');
     }
   }
-  mesaActivaId=openId;carrito={};
+  mesaActivaId=openId;carrito={};marcarDetalleAbierto();
   const search=$('carga-prod-search');if(search)search.value='';
   setCajaNavEvent('open_detail');
   Object.entries(m.items||{}).forEach(([k,v])=>{carrito[k]={...v};});
@@ -5099,7 +5117,7 @@ async function abrirMesa(id){
 function abrirReservaComoVenta(id){
   const r=reservas.find(x=>sameId(x.id,id));if(!r)return;
   if(!isReservationVisibleInCaja(r)){showToast('Esta reserva ya no está disponible.');renderReservasSection();return;}
-  mesaActivaId='reserva_'+id;carrito={};
+  mesaActivaId='reserva_'+id;carrito={};marcarDetalleAbierto();
   const search=$('carga-prod-search');if(search)search.value='';
   setCajaNavEvent('open_reservation');
   (r.items||[]).forEach((item,i)=>{carrito[`res_${i}`]={...item};});
@@ -5110,6 +5128,7 @@ function abrirReservaComoVenta(id){
   loadPaymentState(r);renderCargaCats();renderProdGrid();renderCart();
 }
 async function volverAMesas(){
+  if(!edicionDelDetallePermitida()){renderVentas();return;}
   if(mesaActivaId&&!mesaActivaId.startsWith('reserva_')){
     const m=findMesaByAnyId(mesaActivaId);if(m){
       m.items={...carrito};m.pago=pago;m.payment_mode=paymentMode;m.pagos=paymentMode==='mixed'?getDraftMixedPayments():[];
@@ -5125,6 +5144,7 @@ async function volverAMesas(){
 }
 function saveMesaCarrito(){
   if(!mesaActivaId||mesaActivaId.startsWith('reserva_'))return;
+  if(!edicionDelDetallePermitida())return;
   const m=findMesaByAnyId(mesaActivaId);
   if(m){
     m.items={...carrito};m._syncing=!!window.getOpenOrdersSyncState?.()?.ready;save();syncMesasSheets();
@@ -5183,7 +5203,7 @@ async function reservationHasRemoteSale(reservation){
 
 // ── Operador al cobrar ─────────────────────────────
 async function cerrarMesaOReserva(){
-  if(mesaRetenidaDeOtraCuenta(findMesaByAnyId(mesaActivaId))){showToast(MSG_MESA_DE_OTRA_CUENTA);return;}
+  if(operacionesBloqueadasPorDiario()||!edicionDelDetallePermitida())return;
   const items=Object.values(carrito);
   if(!items.length){showToast('El pedido está vacío');return;}
   const paymentState=getCurrentPaymentState();
@@ -5694,6 +5714,7 @@ function renderProdGrid(){
   attachProductCardHandlers(el,'addItem');
 }
 function addItem(id){
+  if(!edicionDelDetallePermitida())return;
   const p=findProductById(id);
   if(!p){logProductDiag('handler no encontró producto',{id});showToast('Producto no encontrado');return;}
   if(!p.ilimitado&&Number(p.stock)<=0) logProductDiag('stock 0 no bloquea venta',{id,product:p});
@@ -5706,7 +5727,7 @@ function addItem(id){
   }
 }
 function changeQty(key,d){
-  if(mesaRetenidaDeOtraCuenta(findMesaByAnyId(mesaActivaId))){showToast(MSG_MESA_DE_OTRA_CUENTA);return;}
+  if(!edicionDelDetallePermitida())return;
   if(!carrito[key])return;
   if(document.activeElement?.matches?.('#cart-rows input.qty-n'))document.activeElement.blur(); // cantidad confirmada: renderCart no la retiene
   if(!d){renderCart();return;} // cantidad escrita igual o inválida: no hay nada que guardar
@@ -6482,7 +6503,7 @@ const pedidoCompleto=items=>Object.fromEntries(Object.entries(lineasPorSector(it
 // Imprimir no marca nada: "Marcar como enviada" registra lo que se mostró. Así una impresión cancelada no se pierde.
 let comandaEstado=null;
 async function abrirComandaMesa(){
-  if(mesaRetenidaDeOtraCuenta(findMesaByAnyId(mesaActivaId))){showToast(MSG_MESA_DE_OTRA_CUENTA);return;}
+  if(!edicionDelDetallePermitida())return;
   const target=getCurrentVentaTarget();
   const orderId=String(mesaActivaId||'').startsWith('reserva_')?'':getMesaOpenOrderId(target);
   comandaEstado={target,orderId:window.isValidUuid?.(orderId)?orderId:'',envios:null,mostrado:{},aviso:'Cargando comandas enviadas…'};
@@ -7942,6 +7963,7 @@ if(config.webappUrl){loadFromSheets();}
   }
 
   function clearSupabaseContext(render=true){
+    if(typeof invalidarDetalle==='function')invalidarDetalle(); // N-03: el detalle abierto era de la sesión que termina
     supabaseSession=null;
     supabaseUser=null;
     supabaseProfile=null;
