@@ -2757,22 +2757,36 @@ if(storedDataVersion!==APP_DATA_VERSION){
 
 let cats      = readLocalArray('cats')||DEFAULT_CATS;
 let menu      = readLocalArray('menu')||DEFAULT_MENU;
-let ventas    = JSON.parse(localStorage.getItem('ventas')||'[]');
-let config    = JSON.parse(localStorage.getItem('config')||'{}');
-let mesas     = JSON.parse(localStorage.getItem('mesas')||'[]');
-let clientes  = JSON.parse(localStorage.getItem('clientes')||'[]');
-let reservas  = JSON.parse(localStorage.getItem('reservas')||'[]');
-let turno     = JSON.parse(localStorage.getItem('turno')||'null');
-let gastos    = JSON.parse(localStorage.getItem('gastos')||'[]');
+// ── Diario de transiciones de contexto (F0-B) ───────────
+// Un cambio de cuenta o de local escribe primero, en una sola clave, el estado final de todo lo que cambia: ese es el
+// punto de decisión. Recién después se escriben las claves y se cambia la memoria. Si algo se interrumpe después de
+// decidir (cuota llena, cierre del navegador), al arrancar se completa desde el diario; antes de decidir, no cambió nada.
+const DIARIO_CTX_KEY='colocafe_diario_contexto_v1';
+let diarioPendiente=(()=>{
+  const d=safeJsonParse(localStorage.getItem(DIARIO_CTX_KEY),null);
+  if(!d||!d.valores||typeof d.valores!=='object')return null;
+  let ok=true;
+  for(const [k,v] of Object.entries(d.valores)){try{v===null?localStorage.removeItem(k):localStorage.setItem(k,v);}catch(_){ok=false;}}
+  if(ok){try{localStorage.removeItem(DIARIO_CTX_KEY);return null;}catch(_){}}
+  return d; // no se pudo completar: hasta completarlo, lo que dice el diario manda sobre las claves
+})();
+function leerLS(k){return diarioPendiente&&Object.prototype.hasOwnProperty.call(diarioPendiente.valores,k)?diarioPendiente.valores[k]:localStorage.getItem(k);}
+let ventas    = JSON.parse(leerLS('ventas')||'[]');
+let config    = JSON.parse(leerLS('config')||'{}');
+let mesas     = JSON.parse(leerLS('mesas')||'[]');
+let clientes  = JSON.parse(leerLS('clientes')||'[]');
+let reservas  = JSON.parse(leerLS('reservas')||'[]');
+let turno     = JSON.parse(leerLS('turno')||'null');
+let gastos    = JSON.parse(leerLS('gastos')||'[]');
 let operadores= JSON.parse(localStorage.getItem('operadores')||'[]');
 const PENDING_OPEN_ORDER_CLOSURES_KEY='pending_open_order_closures';
 const PENDING_SHIFT_CLOSURES_KEY='pending_shift_closures';
 const PENDING_OPEN_ORDER_ITEM_SYNCS_KEY='pending_open_order_item_syncs';
 const OPEN_ORDER_BANNER_GRACE_MS=5000;
 const OPEN_ORDER_BANNER_URGENT_MS=15000;
-let pendingOpenOrderClosures=safeJsonParse(localStorage.getItem(PENDING_OPEN_ORDER_CLOSURES_KEY),[]);
-let pendingShiftClosures=safeJsonParse(localStorage.getItem(PENDING_SHIFT_CLOSURES_KEY),[]);
-let pendingOpenOrderItemSyncs=safeJsonParse(localStorage.getItem(PENDING_OPEN_ORDER_ITEM_SYNCS_KEY),[]);
+let pendingOpenOrderClosures=safeJsonParse(leerLS(PENDING_OPEN_ORDER_CLOSURES_KEY),[]);
+let pendingShiftClosures=safeJsonParse(leerLS(PENDING_SHIFT_CLOSURES_KEY),[]);
+let pendingOpenOrderItemSyncs=safeJsonParse(leerLS(PENDING_OPEN_ORDER_ITEM_SYNCS_KEY),[]);
 let cajaPendingBannerTimer=null;
 if(!Array.isArray(pendingOpenOrderClosures))pendingOpenOrderClosures=[];
 if(!Array.isArray(pendingShiftClosures))pendingShiftClosures=[];
@@ -2780,14 +2794,16 @@ if(!Array.isArray(pendingOpenOrderItemSyncs))pendingOpenOrderItemSyncs=[];
 // ── Origen de las operaciones (F0-B · aislamiento entre cuentas y locales) ─────────
 // Cada operación pendiente guarda en `_origin` la cuenta, el local y el turno verificados con que se creó o se
 // modificó por última vez. Solo se envía si la sesión y el local actuales verificados son los de ese origen; si no,
-// queda retenida: no se envía, no se borra y no se reasigna. Los pendientes que ya existían antes de esta versión
-// no tienen origen conocido y quedan en cuarentena (`_origin.legacy`). Al cambiar de local, lo del local anterior
-// se aparta (no se borra) y vuelve al regresar; al cambiar de cuenta en el mismo local, solo se aparta un turno
-// todavía no confirmado de la otra cuenta.
+// queda retenida: no se envía, no se borra y no se reasigna. Lo pendiente sin origen conocido (de una versión anterior,
+// `legacy`, o creado sin sesión, `sin_contexto`) sale de las listas operativas a una cuarentena propia, sin perder nada.
+// Los cambios de cuenta o de local pasan por el diario (todo o nada) y respetan DEC-07.
 const CTX_VERIFICADO_KEY='colocafe_ctx_verificado';
 const ORIGEN_MIGRADO_KEY='colocafe_origen_migrado_v1';
 const APARCADOS_KEY='colocafe_contextos_aparcados_v1';
-const leerCtxVerificado=()=>safeJsonParse(localStorage.getItem(CTX_VERIFICADO_KEY),null);
+const CUARENTENA_KEY='colocafe_cuarentena_v1';
+const leerCtxVerificado=()=>safeJsonParse(leerLS(CTX_VERIFICADO_KEY),null);
+const leerAparcados=()=>safeJsonParse(leerLS(APARCADOS_KEY),{})||{};
+const leerCuarentena=()=>{const v=safeJsonParse(leerLS(CUARENTENA_KEY),[]);return Array.isArray(v)?v:[];};
 function contextoVerificadoActual(){
   const v=leerCtxVerificado(),uid=String(window.__sesionUserId?.()||''),store=String(config?.activeStoreId||'');
   return v&&uid&&store&&v.user_id===uid&&v.store_id===store?{user_id:uid,store_id:store}:null;
@@ -2843,6 +2859,13 @@ function origenPermite(rec,tipo){
   return {ok:true,motivo:''};
 }
 const origenEnviable=(rec,tipo)=>origenPermite(rec,tipo).ok;
+const enCuarentenaDe=rec=>!!(rec?._origin?.pendiente&&(rec._origin.legacy||rec._origin.sin_contexto));
+// B-05: una mesa con cambios pendientes de otra cuenta queda en manos de esa cuenta (no se transfiere la autoría).
+const MSG_MESA_DE_OTRA_CUENTA='Esta mesa tiene cambios de otra cuenta que todavía no se enviaron. Para no mezclar quién hizo cada cambio, solo esa cuenta puede seguir con ella; los cambios no se pierden.';
+function mesaRetenidaDeOtraCuenta(m){
+  const o=m?._origin;
+  return !!(m&&mesaPendiente(m)&&o?.pendiente&&o.user_id&&!o.legacy&&!o.sin_contexto&&o.user_id!==String(window.__sesionUserId?.()||''));
+}
 function operacionesRetenidas(){
   const out=[],add=(tipo,rec,clave)=>{const r=origenPermite(rec,tipo);if(!r.ok)out.push({tipo,clave,motivo:r.motivo,origen:rec._origin||null});};
   (window.findPendingSalesSyncGroups?.(ventas||[])||[]).forEach(g=>{const fila=(g.rows||[]).find(r=>!origenEnviable(r,'venta'));if(fila)add('venta',fila,fila.ticket_id||fila.id);});
@@ -2852,90 +2875,191 @@ function operacionesRetenidas(){
   (clientes||[]).filter(isLocalPersistencePending).forEach(c=>add('cliente',c,c.id));
   if(turnoPendiente(turno))add('turno',turno,turno.legacy_id||turno.apertura);
   [['cierre_mesa',pendingOpenOrderClosures],['items_mesa',pendingOpenOrderItemSyncs],['cierre_turno',pendingShiftClosures]].forEach(([t,l])=>(l||[]).filter(colaPendiente).forEach(x=>add(t,x,x.idempotency_key||x.id)));
+  leerCuarentena().forEach(q=>out.push({tipo:q.tipo,clave:q.clave,motivo:q.motivo,origen:q.registro?._origin||null,enCuarentena:true}));
   return out;
 }
-// Cuarentena preventiva, una sola vez por dispositivo: lo pendiente sin origen no se envía, no se reasigna ni se
-// borra. Conserva su contenido y sus claves de idempotencia; `F0B.inventarioCuarentena()` lo lista.
-(function cuarentenaPendientesHeredados(){
-  if(localStorage.getItem(ORIGEN_MIGRADO_KEY))return;
-  const detectado=new Date().toISOString(),activo=String(config?.activeStoreId||'');
-  const marcar=(rec,tipo)=>{if(rec&&typeof rec==='object'&&!rec._origin&&registroPendiente(rec,tipo))rec._origin={legacy:true,pendiente:true,detectado_at:detectado,local_activo_al_detectar:activo};};
-  (ventas||[]).forEach(r=>marcar(r,'venta'));(mesas||[]).forEach(m=>marcar(m,'mesa'));
-  [gastos,reservas,clientes].forEach(l=>(l||[]).forEach(r=>marcar(r,'registro')));
-  if(turno)marcar(turno,'turno');
-  [pendingOpenOrderClosures,pendingOpenOrderItemSyncs,pendingShiftClosures].forEach(l=>(l||[]).forEach(x=>marcar(x,'cola')));
-  [['ventas',ventas],['mesas',mesas],['gastos',gastos],['reservas',reservas],['clientes',clientes]].forEach(([k,v])=>localStorage.setItem(k,JSON.stringify(v||[])));
-  if(turno)localStorage.setItem('turno',JSON.stringify(turno));
-  localStorage.setItem(PENDING_OPEN_ORDER_CLOSURES_KEY,JSON.stringify(pendingOpenOrderClosures||[]));
-  localStorage.setItem(PENDING_SHIFT_CLOSURES_KEY,JSON.stringify(pendingShiftClosures||[]));
-  localStorage.setItem(PENDING_OPEN_ORDER_ITEM_SYNCS_KEY,JSON.stringify(pendingOpenOrderItemSyncs||[]));
-  localStorage.setItem(ORIGEN_MIGRADO_KEY,detectado);
-})();
-const LISTAS_POR_LOCAL={ventas:()=>ventas,mesas:()=>mesas,gastos:()=>gastos,reservas:()=>reservas,clientes:()=>clientes,
-  pendingOpenOrderClosures:()=>pendingOpenOrderClosures,pendingOpenOrderItemSyncs:()=>pendingOpenOrderItemSyncs,pendingShiftClosures:()=>pendingShiftClosures};
+
+// ── Listas por clave de almacenamiento ──
+const CLAVES_LISTA={ventas:'ventas',mesas:'mesas',gastos:'gastos',reservas:'reservas',clientes:'clientes',
+  pendingOpenOrderClosures:PENDING_OPEN_ORDER_CLOSURES_KEY,pendingOpenOrderItemSyncs:PENDING_OPEN_ORDER_ITEM_SYNCS_KEY,pendingShiftClosures:PENDING_SHIFT_CLOSURES_KEY};
+const TIPO_LISTA={ventas:'venta',mesas:'mesa',gastos:'registro',reservas:'registro',clientes:'registro',pendingOpenOrderClosures:'cola',pendingOpenOrderItemSyncs:'cola',pendingShiftClosures:'cola'};
+const TIPO_INVENTARIO={ventas:'venta',mesas:'mesa',gastos:'gasto',reservas:'reserva',clientes:'cliente',pendingOpenOrderClosures:'cierre_mesa',pendingOpenOrderItemSyncs:'items_mesa',pendingShiftClosures:'cierre_turno'};
+function listaActual(n){return {ventas,mesas,gastos,reservas,clientes,pendingOpenOrderClosures,pendingOpenOrderItemSyncs,pendingShiftClosures}[n];}
 function asignarListaLocal(n,v){
   if(n==='ventas')ventas=v;else if(n==='mesas')mesas=v;else if(n==='gastos')gastos=v;else if(n==='reservas')reservas=v;else if(n==='clientes')clientes=v;
   else if(n==='pendingOpenOrderClosures')pendingOpenOrderClosures=v;else if(n==='pendingOpenOrderItemSyncs')pendingOpenOrderItemSyncs=v;else if(n==='pendingShiftClosures')pendingShiftClosures=v;
 }
-// Cambio de local: lo de otro local se aparta en su propio espacio y lo del local nuevo vuelve. Lo heredado sin
-// origen (cuarentena) y lo creado sin contexto quedan donde están, siempre retenidos.
-function aislarEstadoPorLocal(prevStore,nuevoStore){
-  // Todo o nada: se arma el resultado aparte y recién se aplica si el espacio apartado se pudo guardar (cuota llena = no cambia).
-  const aparcados=safeJsonParse(localStorage.getItem(APARCADOS_KEY),{})||{};
-  const espacio=id=>(aparcados[id]=aparcados[id]||{});
-  const localDe=rec=>rec?._origin?.legacy||rec?._origin?.sin_contexto?null:(rec?._origin?.store_id||prevStore);
-  const nuevas={};let nuevoTurno=turno;
-  Object.keys(LISTAS_POR_LOCAL).forEach(n=>{
-    const quedan=[];
-    (LISTAS_POR_LOCAL[n]()||[]).forEach(rec=>{const d=localDe(rec);if(d&&d!==nuevoStore)(espacio(d)[n]=espacio(d)[n]||[]).push(rec);else quedan.push(rec);});
-    nuevas[n]=quedan;
-  });
-  if(nuevoTurno){const d=nuevoTurno._origin?.store_id||prevStore;if(d&&d!==nuevoStore){if(espacio(d).turno)(espacio(d).turnosExtra=espacio(d).turnosExtra||[]).push(nuevoTurno);else espacio(d).turno=nuevoTurno;nuevoTurno=null;}}
-  const vuelve=aparcados[nuevoStore];
-  if(vuelve){
-    Object.keys(LISTAS_POR_LOCAL).forEach(n=>{
-      if(!vuelve[n]?.length)return;
-      const ids=new Set(nuevas[n].map(r=>String(r?.id||'')));
-      nuevas[n]=[...nuevas[n],...vuelve[n].filter(r=>!ids.has(String(r?.id||'')))];
-      delete vuelve[n];
-    });
-    if(vuelve.turno&&!nuevoTurno){nuevoTurno=vuelve.turno;delete vuelve.turno;}
-    if(!Object.keys(vuelve).length)delete aparcados[nuevoStore];
+const claveDe=rec=>String(rec?.id||rec?.idempotency_key||rec?.legacy_id||rec?.apertura||'');
+
+// ── Diario: confirmar una transición y completarla ──
+function valorEnMemoria(k){
+  const n=Object.keys(CLAVES_LISTA).find(x=>CLAVES_LISTA[x]===k);
+  if(n)return JSON.stringify(listaActual(n)||[]);
+  if(k==='turno')return turno?JSON.stringify(turno):null;
+  if(k==='config')return JSON.stringify(config||{});
+  return undefined;
+}
+function vaciarDiario(){
+  if(!diarioPendiente)return true;
+  let ok=true;
+  for(const [k,v] of Object.entries(diarioPendiente.valores)){
+    const mem=valorEnMemoria(k),val=mem!==undefined?mem:v;
+    try{val===null?localStorage.removeItem(k):localStorage.setItem(k,val);}catch(_){ok=false;}
   }
-  try{localStorage.setItem(APARCADOS_KEY,JSON.stringify(aparcados));}
-  catch(err){console.error('[F0B] No se pudo apartar el local anterior: no se cambia de local',err);return false;}
-  Object.keys(nuevas).forEach(n=>asignarListaLocal(n,nuevas[n]));
-  turno=nuevoTurno;
+  if(ok){try{localStorage.removeItem(DIARIO_CTX_KEY);diarioPendiente=null;}catch(_){ok=false;}}
+  return ok;
+}
+// cambios: {listas:{nombre:array}, turno?, aparcados?, cuarentena?, ctx?, config?, marca?:[clave,valor]}
+function confirmarTransicion(cambios){
+  if(diarioPendiente&&!vaciarDiario())return false; // no se encadena otra transición sin terminar la anterior
+  const valores={};
+  Object.entries(cambios.listas||{}).forEach(([n,v])=>{valores[CLAVES_LISTA[n]]=JSON.stringify(v||[]);});
+  if('turno' in cambios)valores.turno=cambios.turno?JSON.stringify(cambios.turno):null;
+  if('aparcados' in cambios)valores[APARCADOS_KEY]=JSON.stringify(cambios.aparcados||{});
+  if('cuarentena' in cambios)valores[CUARENTENA_KEY]=JSON.stringify(cambios.cuarentena||[]);
+  if('ctx' in cambios)valores[CTX_VERIFICADO_KEY]=cambios.ctx?JSON.stringify(cambios.ctx):null;
+  if('config' in cambios)valores.config=JSON.stringify(cambios.config||{});
+  if(cambios.marca)valores[cambios.marca[0]]=cambios.marca[1];
+  try{localStorage.setItem(DIARIO_CTX_KEY,JSON.stringify({at:new Date().toISOString(),valores}));}
+  catch(err){console.error('[F0B] No se pudo registrar el cambio de contexto: no se aplica nada',err);return false;}
+  // Decidido: memoria y almacenamiento terminan en el mismo estado, ahora o en el próximo guardado o arranque.
+  Object.entries(cambios.listas||{}).forEach(([n,v])=>asignarListaLocal(n,v||[]));
+  if('turno' in cambios)turno=cambios.turno||null;
+  if('config' in cambios&&cambios.config)config.activeStoreId=String(cambios.config.activeStoreId||'');
+  diarioPendiente={valores};
+  if(!vaciarDiario())console.warn('[F0B] Cambio decidido; se completa en el próximo guardado o arranque');
   return true;
 }
-// Cambio de cuenta en el mismo local: el turno confirmado es del local y se comparte; una apertura de turno que no
-// llegó al servidor es de la cuenta que la hizo y se aparta hasta que esa cuenta vuelva.
-function aislarTurnoPorCuenta(userId,storeId){
-  const aparcados=safeJsonParse(localStorage.getItem(APARCADOS_KEY),{})||{};
-  const esp=(aparcados[storeId]=aparcados[storeId]||{}),porCuenta=(esp.turnosPorCuenta=esp.turnosPorCuenta||{});
-  if(turnoPendiente(turno)&&turno._origin?.user_id&&turno._origin.user_id!==userId){porCuenta[turno._origin.user_id]=turno;turno=null;}
-  if(!turno&&porCuenta[userId]){turno=porCuenta[userId];delete porCuenta[userId];}
-  if(!Object.keys(porCuenta).length)delete esp.turnosPorCuenta;
-  if(!Object.keys(esp).length)delete aparcados[storeId];
-  try{localStorage.setItem(APARCADOS_KEY,JSON.stringify(aparcados));}catch(err){console.error('[F0B] No se pudo apartar el turno de otra cuenta',err);}
+
+// ── Transformaciones puras sobre un estado de trabajo ──
+// Cuarentena (B-01): lo pendiente sin origen conocido sale de las listas operativas, con su contenido intacto.
+function moverACuarentena(est){
+  const ya=new Set(est.cuarentena.map(q=>`${q.lista}|${q.clave}`)),ahora=new Date().toISOString();
+  let movidos=0;
+  const guardar=(lista,tipo,rec)=>{const k=`${lista}|${claveDe(rec)}`;if(!ya.has(k)){est.cuarentena.push({lista,tipo,clave:claveDe(rec),motivo:rec._origin.legacy?'cuarentena':'sin_contexto',movido_at:ahora,registro:rec});ya.add(k);}movidos++;};
+  Object.keys(CLAVES_LISTA).forEach(n=>{est.listas[n]=est.listas[n].filter(rec=>{if(enCuarentenaDe(rec)){guardar(n,TIPO_INVENTARIO[n],rec);return false;}return true;});});
+  if(est.turno&&enCuarentenaDe(est.turno)){guardar('turno','turno',est.turno);est.turno=null;}
+  return movidos;
 }
+// Cambio de local: lo de otro local se aparta en su espacio y lo del local nuevo vuelve.
+function apartarPorLocal(est,prevStore,nuevoStore){
+  const espacio=id=>(est.aparcados[id]=est.aparcados[id]||{});
+  const localDe=rec=>rec?._origin?.store_id||prevStore;
+  Object.keys(CLAVES_LISTA).forEach(n=>{
+    est.listas[n]=est.listas[n].filter(rec=>{const d=localDe(rec);if(d&&d!==nuevoStore){(espacio(d)[n]=espacio(d)[n]||[]).push(rec);return false;}return true;});
+  });
+  if(est.turno){const d=est.turno._origin?.store_id||prevStore;if(d&&d!==nuevoStore){if(espacio(d).turno)(espacio(d).turnosExtra=espacio(d).turnosExtra||[]).push(est.turno);else espacio(d).turno=est.turno;est.turno=null;}}
+  const vuelve=est.aparcados[nuevoStore];
+  if(vuelve){
+    Object.keys(CLAVES_LISTA).forEach(n=>{
+      if(!vuelve[n]?.length)return;
+      const ids=new Set(est.listas[n].map(claveDe));
+      est.listas[n]=[...est.listas[n],...vuelve[n].filter(r=>!ids.has(claveDe(r)))];
+      delete vuelve[n];
+    });
+    if(vuelve.turno&&!est.turno){est.turno=vuelve.turno;delete vuelve.turno;}
+    if(!Object.keys(vuelve).length)delete est.aparcados[nuevoStore];
+  }
+}
+// Cambio de cuenta en el mismo local: el turno confirmado es del local; una apertura sin confirmar es de su cuenta.
+function apartarTurnoPorCuenta(est,userId,storeId){
+  const esp=(est.aparcados[storeId]=est.aparcados[storeId]||{}),porCuenta=(esp.turnosPorCuenta=esp.turnosPorCuenta||{});
+  if(turnoPendiente(est.turno)&&est.turno._origin?.user_id&&est.turno._origin.user_id!==userId){porCuenta[est.turno._origin.user_id]=est.turno;est.turno=null;}
+  if(!est.turno&&porCuenta[userId]){est.turno=porCuenta[userId];delete porCuenta[userId];}
+  if(!Object.keys(porCuenta).length)delete esp.turnosPorCuenta;
+  if(!Object.keys(esp).length)delete est.aparcados[storeId];
+}
+function estadoDeTrabajo(){
+  return {listas:Object.fromEntries(Object.keys(CLAVES_LISTA).map(n=>[n,[...(listaActual(n)||[])]])),turno,aparcados:leerAparcados(),cuarentena:leerCuarentena()};
+}
+// Devuelve false si no se pudo dejar el dispositivo listo: en ese caso no cambió nada.
 function aplicarContextoVerificado(nuevo){
-  if(!nuevo?.user_id||!nuevo?.store_id)return;
+  if(!nuevo?.user_id||!nuevo?.store_id)return false;
   const prev=leerCtxVerificado();
   if(prev?.user_id&&prev.user_id===String(window.__sesionUserId?.()||''))sellarOrigenes(prev); // lo pendiente sin sellar es del contexto anterior
-  if(prev?.store_id&&prev.store_id!==nuevo.store_id&&!aislarEstadoPorLocal(prev.store_id,nuevo.store_id)){
-    config.activeStoreId=prev.store_id;localStorage.setItem('config',JSON.stringify(config));
-    showToast('No hay espacio en este dispositivo para apartar los datos del local anterior. No se cambió de local.');
+  const est=estadoDeTrabajo(),turnoAntes=est.turno;
+  const movidos=moverACuarentena(est);
+  const cambiaLocal=!!(prev?.store_id&&prev.store_id!==nuevo.store_id);
+  if(cambiaLocal)apartarPorLocal(est,prev.store_id,nuevo.store_id);
+  apartarTurnoPorCuenta(est,nuevo.user_id,nuevo.store_id);
+  const sinCambios=prev&&prev.user_id===nuevo.user_id&&!cambiaLocal&&!movidos&&est.turno===turnoAntes&&String(config?.activeStoreId||'')===nuevo.store_id;
+  if(sinCambios)return true;
+  return confirmarTransicion({listas:est.listas,turno:est.turno,aparcados:est.aparcados,cuarentena:est.cuarentena,
+    ctx:{user_id:nuevo.user_id,store_id:nuevo.store_id,verified_at:new Date().toISOString()},config:{...config,activeStoreId:nuevo.store_id}});
+}
+// B-04: un turno local pendiente que el servidor reemplaza se guarda antes en la cuarentena; si no se puede, no se reemplaza.
+function preservarTurnoLocal(t,motivo){
+  const cuarentena=leerCuarentena(),clave=claveDe(t);
+  if(!cuarentena.some(q=>q.lista==='turno'&&q.clave===clave))cuarentena.push({lista:'turno',tipo:'turno',clave,motivo,movido_at:new Date().toISOString(),registro:t});
+  return confirmarTransicion({cuarentena});
+}
+
+// ── Envíos en curso (M-02) ──
+// Cada envío guarda el contexto con que empezó; justo antes de cada escritura, si el contexto ya no es ese, se corta.
+const enviosActivos=new Set();
+const claveContexto=()=>{const c=contextoVerificadoActual();return c?`${c.user_id}|${c.store_id}`:'';};
+async function conEnvio(fn){const t={clave:claveContexto()};enviosActivos.add(t);try{return await fn();}finally{enviosActivos.delete(t);}}
+function fetchConControlDeOrigen(input,init){
+  const metodo=String(init?.method||input?.method||'GET').toUpperCase(),url=String(input?.url||input||'');
+  if(metodo!=='GET'&&metodo!=='HEAD'&&url.includes('/rest/v1/')){
+    const actual=claveContexto();
+    for(const t of enviosActivos){if(t.clave!==actual)return Promise.reject(new TypeError('F0B: la cuenta o el local cambiaron durante el envío; la operación queda pendiente'));}
+  }
+  return fetch(input,init);
+}
+// Las funciones de envío publicadas en window se registran cuando ya se definieron todas (el arranque repite DOMContentLoaded).
+document.addEventListener('DOMContentLoaded',()=>{
+  ['saveSaleGroupToSupabase','saveExpenseToSupabase','saveCustomerToSupabase','saveReservationToSupabase','saveShiftToSupabase','closeShiftInSupabase',
+   'syncLocalExpensesToSupabase','syncLocalCustomersToSupabase','syncLocalReservationsToSupabase','syncLocalShiftToSupabase',
+   'retryPendingOpenOrderClosures','retryPendingOpenOrderItemSyncs','retryPendingOpenOrdersSync','retryPendingShiftClosures'].forEach(n=>{
+    const f=window[n];if(typeof f!=='function'||f.__f0bEnvio)return;
+    const w=function(...a){return conEnvio(()=>f.apply(this,a));};w.__f0bEnvio=true;window[n]=w;
+  });
+},{once:true});
+
+// ── DEC-07: no se cambia de local con turno abierto, operaciones pendientes, datos sin conciliar o envíos en curso ──
+function motivosBloqueoCambioLocal(){
+  const m=[],pend=Object.keys(CLAVES_LISTA).reduce((s,n)=>s+(listaActual(n)||[]).filter(r=>registroPendiente(r,TIPO_LISTA[n])).length,0);
+  if(turno&&turno.abierto)m.push('hay un turno abierto (cerralo desde Turno)');
+  if(pend)m.push(`hay ${pend} ${pend===1?'operación':'operaciones'} sin enviar (Reintentar; si son de otra cuenta, esa cuenta tiene que enviarlas)`);
+  if((mesas||[]).some(x=>x&&x._items_conflict))m.push('hay mesas con cambios en conflicto (revisalas)');
+  if(enviosActivos.size||window.__escriturasEnVuelo?.()>0||window.__cajaSincronizandoMesas?.())m.push('se están enviando operaciones (esperá unos segundos)');
+  if(diarioPendiente)m.push('hay un cambio de contexto sin terminar de guardar (liberá espacio en el dispositivo)');
+  return m;
+}
+function intentarCambioDeLocal(destino,sesionUsuario,stores){
+  if(String(destino||'')===String(config?.activeStoreId||''))return true;
+  const motivos=motivosBloqueoCambioLocal();
+  if(motivos.length){showToast(`No se puede cambiar de local: ${motivos.join('; ')}.`,6000);return false;}
+  const anterior=config.activeStoreId;
+  config.activeStoreId=String(destino||'');
+  if(sesionUsuario&&(stores||[]).some(s=>s.id===config.activeStoreId)&&!aplicarContextoVerificado({user_id:sesionUsuario.id,store_id:config.activeStoreId})){
+    config.activeStoreId=anterior;
+    showToast('No se pudo cambiar de local: no hay espacio en el dispositivo para apartar los datos del local actual. No se perdió nada.',6000);
     return false;
   }
-  aislarTurnoPorCuenta(nuevo.user_id,nuevo.store_id);
-  localStorage.setItem(CTX_VERIFICADO_KEY,JSON.stringify({user_id:nuevo.user_id,store_id:nuevo.store_id,verified_at:new Date().toISOString()}));
-  save();savePendingOutboxes();
+  return true;
 }
+
+// ── Cuarentena preventiva, una sola vez por dispositivo (B-01) ──
+// Lo pendiente sin origen de una versión anterior no se envía, no se reasigna ni se borra: pasa a la cuarentena con su
+// contenido y sus claves de idempotencia. Si no se puede registrar, se reintenta en el próximo arranque.
+(function cuarentenaPendientesHeredados(){
+  if(leerLS(ORIGEN_MIGRADO_KEY))return;
+  const detectado=new Date().toISOString(),activo=String(config?.activeStoreId||'');
+  const marcar=(rec,tipo)=>{if(rec&&typeof rec==='object'&&!rec._origin&&registroPendiente(rec,tipo))rec._origin={legacy:true,pendiente:true,detectado_at:detectado,local_activo_al_detectar:activo};};
+  Object.keys(CLAVES_LISTA).forEach(n=>(listaActual(n)||[]).forEach(r=>marcar(r,TIPO_LISTA[n])));
+  if(turno)marcar(turno,'turno');
+  const est=estadoDeTrabajo();moverACuarentena(est);
+  confirmarTransicion({listas:est.listas,turno:est.turno,cuarentena:est.cuarentena,marca:[ORIGEN_MIGRADO_KEY,detectado]});
+})();
+// Coherencia al arrancar: las listas son del local verificado; si la configuración dice otro (por ejemplo, de una versión
+// anterior), se muestra el local de los datos hasta que la cuenta vuelva a verificar el contexto.
+(function(){const v=leerCtxVerificado();if(v?.store_id&&config&&config.activeStoreId&&config.activeStoreId!==v.store_id)config.activeStoreId=v.store_id;})();
 window.F0B={
   contexto:contextoVerificadoActual,permite:origenPermite,retenidas:operacionesRetenidas,
-  inventarioCuarentena:()=>operacionesRetenidas().filter(x=>x.motivo==='cuarentena'||x.motivo==='sin_contexto'),
-  aparcados:()=>safeJsonParse(localStorage.getItem(APARCADOS_KEY),{})||{}
+  inventarioCuarentena:()=>leerCuarentena().map(q=>({tipo:q.tipo,clave:q.clave,motivo:q.motivo,movido_at:q.movido_at,registro:q.registro})),
+  aparcados:leerAparcados,bloqueosCambioLocal:motivosBloqueoCambioLocal,diarioPendiente:()=>!!diarioPendiente
 };
 let supabaseOperadoresCache=null; // null=sin cargar, []=cargado vacío, [...]= con datos
 let supabaseOperadoresCacheStoreId=null;
@@ -3019,6 +3143,7 @@ function save(){
   localStorage.setItem('gastos',  JSON.stringify(gastos));
   localStorage.setItem('operadores',JSON.stringify(operadores));
   turno?localStorage.setItem('turno',JSON.stringify(turno)):localStorage.removeItem('turno');
+  if(diarioPendiente)vaciarDiario();
 }
 function savePendingOutboxes(){
   sellarColas();
@@ -7811,8 +7936,15 @@ if(config.webappUrl){loadFromSheets();}
       supabaseStores=(stores||[]).map(s=>({ ...s, role: rolesByStore[s.id]||'' }));
       if(config.activeStoreId && !supabaseStores.some(s=>s.id===config.activeStoreId)) config.activeStoreId='';
       if(!config.activeStoreId && supabaseStores[0]) config.activeStoreId=supabaseStores[0].id;
+      if(config.activeStoreId&&supabaseStores.some(s=>s.id===config.activeStoreId)&&!aplicarContextoVerificado({user_id:supabaseUser.id,store_id:config.activeStoreId})){
+        // No se pudo preparar el dispositivo (sin espacio): no se muestra lo de otro contexto ni se pierde nada; se cierra la sesión.
+        config.activeStoreId=leerCtxVerificado()?.store_id||'';
+        supabaseContextLoading=false;
+        showToast('No se pudo preparar este dispositivo para la cuenta (sin espacio de almacenamiento). Se cerró la sesión; no se perdió ningún dato.');
+        setTimeout(()=>window.supabaseSignOut?.(),0);
+        return;
+      }
       saveConfig();
-      if(config.activeStoreId&&supabaseStores.some(s=>s.id===config.activeStoreId)) aplicarContextoVerificado({user_id:supabaseUser.id,store_id:config.activeStoreId});
       if(config.activeStoreId && typeof window.loadCatalogFromSupabase==='function'){
         await window.loadCatalogFromSupabase({silent:true,reason:'boot'});
       }
@@ -8000,16 +8132,14 @@ if(config.webappUrl){loadFromSheets();}
   };
 
   window.onSupabaseStoreChange=function(){
-    // Con un envío en curso no se cambia de local: su resultado tiene que volver a los datos de este local.
-    if(window.__escriturasEnVuelo?.()>0||window.__cajaSincronizandoMesas?.()){showToast('Se están enviando operaciones. Esperá unos segundos y volvé a elegir el local.');renderSupabaseStatus();return;}
     // Leer del selector activo según si el modal está visible
     const _sbm=document.getElementById('sb-modal');
     const _modalOpen=_sbm&&_sbm.style.display!=='none';
-    config.activeStoreId=_modalOpen
+    const destino=_modalOpen
       ? (document.getElementById('sb-store-sel-modal')?.value||'')
       : (document.getElementById('sb-store-sel')?.value||'');
+    if(!intentarCambioDeLocal(destino,supabaseUser,supabaseStores)){renderSupabaseStatus();return;}
     saveConfig();
-    if(supabaseUser&&supabaseStores.some(s=>s.id===config.activeStoreId)) aplicarContextoVerificado({user_id:supabaseUser.id,store_id:config.activeStoreId});
     updateCatalogBootState({state:'syncing',source:'pending',fallbackReason:''});
     supabaseOperadoresCache=null;
     supabaseOperadoresCacheStoreId=null;
@@ -8018,12 +8148,10 @@ if(config.webappUrl){loadFromSheets();}
   };
 
   window.onSupabaseStoreConfirm=async function(){
-    if(window.__escriturasEnVuelo?.()>0||window.__cajaSincronizandoMesas?.()){showToast('Se están enviando operaciones. Esperá unos segundos y volvé a elegir el local.');renderSupabaseStatus();return;}
     const sel=document.getElementById('sb-store-sel-modal');
     if(sel && sel.value){
-      config.activeStoreId=sel.value;
+      if(!intentarCambioDeLocal(sel.value,supabaseUser,supabaseStores)){renderSupabaseStatus();return;}
       saveConfig();
-      if(supabaseUser&&supabaseStores.some(s=>s.id===config.activeStoreId)) aplicarContextoVerificado({user_id:supabaseUser.id,store_id:config.activeStoreId});
       updateCatalogBootState({state:'syncing',source:'pending',fallbackReason:''});
       supabaseOperadoresCache=null;
       supabaseOperadoresCacheStoreId=null;
@@ -12880,6 +13008,9 @@ if(config.webappUrl){loadFromSheets();}
       const remoteRow=rows[0];
       if(turno&&turno.abierto&&String(turno._sb_id||'')!==String(remoteRow.id||'')){
         console.warn('[Shifts warning] Turno local abierto y turno remoto abierto distintos. Se prioriza remoto.',{local:turno,remote:remoteRow});
+      }
+      if(turno&&turnoPendiente(turno)&&String(turno._sb_id||'')!==String(remoteRow.id||'')&&!preservarTurnoLocal(turno,'turno_reemplazado_por_remoto')){
+        console.warn('[F0B] No se pudo preservar el turno local pendiente: no se aplica el turno remoto');return false;
       }
       turno=mapShiftFromSupabase(remoteRow,turno);
       save();
