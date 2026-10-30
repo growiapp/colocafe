@@ -2776,6 +2776,156 @@ let cajaPendingBannerTimer=null;
 if(!Array.isArray(pendingOpenOrderClosures))pendingOpenOrderClosures=[];
 if(!Array.isArray(pendingShiftClosures))pendingShiftClosures=[];
 if(!Array.isArray(pendingOpenOrderItemSyncs))pendingOpenOrderItemSyncs=[];
+// ── Origen de las operaciones (F0-B · aislamiento entre cuentas y locales) ─────────
+// Cada operación pendiente guarda en `_origin` la cuenta, el local y el turno verificados con que se creó o se
+// modificó por última vez. Solo se envía si la sesión y el local actuales verificados son los de ese origen; si no,
+// queda retenida: no se envía, no se borra y no se reasigna. Los pendientes que ya existían antes de esta versión
+// no tienen origen conocido y quedan en cuarentena (`_origin.legacy`). Al cambiar de local, lo del local anterior
+// se aparta (no se borra) y vuelve al regresar; al cambiar de cuenta en el mismo local, solo se aparta un turno
+// todavía no confirmado de la otra cuenta.
+const CTX_VERIFICADO_KEY='colocafe_ctx_verificado';
+const ORIGEN_MIGRADO_KEY='colocafe_origen_migrado_v1';
+const APARCADOS_KEY='colocafe_contextos_aparcados_v1';
+const leerCtxVerificado=()=>safeJsonParse(localStorage.getItem(CTX_VERIFICADO_KEY),null);
+function contextoVerificadoActual(){
+  const v=leerCtxVerificado(),uid=String(window.__sesionUserId?.()||''),store=String(config?.activeStoreId||'');
+  return v&&uid&&store&&v.user_id===uid&&v.store_id===store?{user_id:uid,store_id:store}:null;
+}
+const ventaFilaPendiente=r=>!!r&&!(r._sb_sale_id&&String(r._sb_sync_status||'')==='synced');
+const mesaPendiente=m=>!!m&&(!m._sb_id||!!m._syncing||!!m._close_pending||m.status==='close_pending'||m._sync_status==='partial_error');
+const turnoPendiente=t=>!!(t&&t.abierto&&(!t._sb_id||t._sync_status==='pending'||t._sync_status==='error'));
+const colaPendiente=x=>!!x&&x.status!=='synced';
+function registroPendiente(rec,tipo){
+  return tipo==='venta'?ventaFilaPendiente(rec):tipo==='mesa'?mesaPendiente(rec):tipo==='turno'?turnoPendiente(rec):tipo==='cola'?colaPendiente(rec):isLocalPersistencePending(rec);
+}
+// El turno de la operación se fija al crearla (N3): su id, o su clave local si todavía no llegó al servidor.
+function origenDelTurno(){
+  const t=(typeof turno==='object'&&turno&&turno.abierto)?turno:null;
+  return {shift_id:t?._sb_id||null,shift_key:t?String(t.legacy_id||t.apertura||''):null};
+}
+function sellarRegistro(rec,tipo,ctx){
+  if(!rec||typeof rec!=='object')return;
+  if(!registroPendiente(rec,tipo)){ if(rec._origin?.pendiente) rec._origin={...rec._origin,pendiente:false}; return; }
+  if(rec._origin?.pendiente) return; // la mutación pendiente ya tiene su origen
+  if(!window.__sesionLista) return; // arranque: todavía no se leyó la sesión guardada
+  const c=ctx===undefined?contextoVerificadoActual():ctx,ahora=getLocalTimestamp();
+  // Sin contexto verificado (por ejemplo, sin red desde que se actualizó la app) pero con sesión: queda con esa cuenta y
+  // el local activo, marcado no_verificado; solo se envía cuando esa misma cuenta y ese local se verifiquen. Sin sesión: retenido.
+  const uid=String(window.__sesionUserId?.()||''),store=String(config?.activeStoreId||'');
+  rec._origin=c?{store_id:c.store_id,user_id:c.user_id,...origenDelTurno(),created_at:ahora,pendiente:true}
+    :uid&&store?{store_id:store,user_id:uid,...origenDelTurno(),created_at:ahora,pendiente:true,no_verificado:true}
+    :{sin_contexto:true,store_hint:store,created_at:ahora,pendiente:true};
+}
+function sellarColas(ctx){[pendingOpenOrderClosures,pendingOpenOrderItemSyncs,pendingShiftClosures].forEach(l=>(l||[]).forEach(x=>sellarRegistro(x,'cola',ctx)));}
+function sellarOrigenes(ctx){
+  (ventas||[]).forEach(r=>sellarRegistro(r,'venta',ctx));
+  (mesas||[]).forEach(m=>sellarRegistro(m,'mesa',ctx));
+  [gastos,reservas,clientes].forEach(l=>(l||[]).forEach(r=>sellarRegistro(r,'registro',ctx)));
+  if(turno)sellarRegistro(turno,'turno',ctx);
+  sellarColas(ctx);
+}
+// Control común antes de cualquier envío (automático, manual o directo). Un registro confirmado solo se reenvía
+// en su propio local; uno pendiente, solo con la cuenta y el local de su origen.
+function origenPermite(rec,tipo){
+  if(!rec)return {ok:false,motivo:'sin_registro'};
+  const pend=registroPendiente(rec,tipo);
+  if(pend&&!rec._origin?.pendiente)sellarRegistro(rec,tipo);
+  const o=rec._origin;
+  if(!pend)return (!o?.store_id||o.store_id===String(config?.activeStoreId||''))?{ok:true,motivo:''}:{ok:false,motivo:'otro_local'};
+  if(!o)return {ok:false,motivo:'sin_origen'};
+  if(o.legacy)return {ok:false,motivo:'cuarentena'};
+  if(o.sin_contexto)return {ok:false,motivo:'sin_contexto'};
+  const ctx=contextoVerificadoActual();
+  if(!ctx)return {ok:false,motivo:'sin_sesion_verificada'};
+  if(o.store_id!==ctx.store_id)return {ok:false,motivo:'otro_local'};
+  if(o.user_id!==ctx.user_id)return {ok:false,motivo:'otra_cuenta'};
+  return {ok:true,motivo:''};
+}
+const origenEnviable=(rec,tipo)=>origenPermite(rec,tipo).ok;
+function operacionesRetenidas(){
+  const out=[],add=(tipo,rec,clave)=>{const r=origenPermite(rec,tipo);if(!r.ok)out.push({tipo,clave,motivo:r.motivo,origen:rec._origin||null});};
+  (window.findPendingSalesSyncGroups?.(ventas||[])||[]).forEach(g=>{const fila=(g.rows||[]).find(r=>!origenEnviable(r,'venta'));if(fila)add('venta',fila,fila.ticket_id||fila.id);});
+  (mesas||[]).filter(mesaPendiente).forEach(m=>add('mesa',m,m.legacy_local_id||m.id));
+  (gastos||[]).filter(isLocalPersistencePending).forEach(g=>add('gasto',g,g.id));
+  (reservas||[]).filter(isLocalPersistencePending).forEach(r=>add('reserva',r,r.id));
+  (clientes||[]).filter(isLocalPersistencePending).forEach(c=>add('cliente',c,c.id));
+  if(turnoPendiente(turno))add('turno',turno,turno.legacy_id||turno.apertura);
+  [['cierre_mesa',pendingOpenOrderClosures],['items_mesa',pendingOpenOrderItemSyncs],['cierre_turno',pendingShiftClosures]].forEach(([t,l])=>(l||[]).filter(colaPendiente).forEach(x=>add(t,x,x.idempotency_key||x.id)));
+  return out;
+}
+// Cuarentena preventiva, una sola vez por dispositivo: lo pendiente sin origen no se envía, no se reasigna ni se
+// borra. Conserva su contenido y sus claves de idempotencia; `F0B.inventarioCuarentena()` lo lista.
+(function cuarentenaPendientesHeredados(){
+  if(localStorage.getItem(ORIGEN_MIGRADO_KEY))return;
+  const detectado=new Date().toISOString(),activo=String(config?.activeStoreId||'');
+  const marcar=(rec,tipo)=>{if(rec&&typeof rec==='object'&&!rec._origin&&registroPendiente(rec,tipo))rec._origin={legacy:true,pendiente:true,detectado_at:detectado,local_activo_al_detectar:activo};};
+  (ventas||[]).forEach(r=>marcar(r,'venta'));(mesas||[]).forEach(m=>marcar(m,'mesa'));
+  [gastos,reservas,clientes].forEach(l=>(l||[]).forEach(r=>marcar(r,'registro')));
+  if(turno)marcar(turno,'turno');
+  [pendingOpenOrderClosures,pendingOpenOrderItemSyncs,pendingShiftClosures].forEach(l=>(l||[]).forEach(x=>marcar(x,'cola')));
+  [['ventas',ventas],['mesas',mesas],['gastos',gastos],['reservas',reservas],['clientes',clientes]].forEach(([k,v])=>localStorage.setItem(k,JSON.stringify(v||[])));
+  if(turno)localStorage.setItem('turno',JSON.stringify(turno));
+  localStorage.setItem(PENDING_OPEN_ORDER_CLOSURES_KEY,JSON.stringify(pendingOpenOrderClosures||[]));
+  localStorage.setItem(PENDING_SHIFT_CLOSURES_KEY,JSON.stringify(pendingShiftClosures||[]));
+  localStorage.setItem(PENDING_OPEN_ORDER_ITEM_SYNCS_KEY,JSON.stringify(pendingOpenOrderItemSyncs||[]));
+  localStorage.setItem(ORIGEN_MIGRADO_KEY,detectado);
+})();
+const LISTAS_POR_LOCAL={ventas:()=>ventas,mesas:()=>mesas,gastos:()=>gastos,reservas:()=>reservas,clientes:()=>clientes,
+  pendingOpenOrderClosures:()=>pendingOpenOrderClosures,pendingOpenOrderItemSyncs:()=>pendingOpenOrderItemSyncs,pendingShiftClosures:()=>pendingShiftClosures};
+function asignarListaLocal(n,v){
+  if(n==='ventas')ventas=v;else if(n==='mesas')mesas=v;else if(n==='gastos')gastos=v;else if(n==='reservas')reservas=v;else if(n==='clientes')clientes=v;
+  else if(n==='pendingOpenOrderClosures')pendingOpenOrderClosures=v;else if(n==='pendingOpenOrderItemSyncs')pendingOpenOrderItemSyncs=v;else if(n==='pendingShiftClosures')pendingShiftClosures=v;
+}
+// Cambio de local: lo de otro local se aparta en su propio espacio y lo del local nuevo vuelve. Lo heredado sin
+// origen (cuarentena) y lo creado sin contexto quedan donde están, siempre retenidos.
+function aislarEstadoPorLocal(prevStore,nuevoStore){
+  const aparcados=safeJsonParse(localStorage.getItem(APARCADOS_KEY),{})||{};
+  const espacio=id=>(aparcados[id]=aparcados[id]||{});
+  const localDe=rec=>rec?._origin?.legacy||rec?._origin?.sin_contexto?null:(rec?._origin?.store_id||prevStore);
+  Object.keys(LISTAS_POR_LOCAL).forEach(n=>{
+    const quedan=[];
+    (LISTAS_POR_LOCAL[n]()||[]).forEach(rec=>{const d=localDe(rec);if(d&&d!==nuevoStore)(espacio(d)[n]=espacio(d)[n]||[]).push(rec);else quedan.push(rec);});
+    asignarListaLocal(n,quedan);
+  });
+  if(turno){const d=turno._origin?.store_id||prevStore;if(d&&d!==nuevoStore){if(espacio(d).turno)(espacio(d).turnosExtra=espacio(d).turnosExtra||[]).push(turno);else espacio(d).turno=turno;turno=null;}}
+  const vuelve=aparcados[nuevoStore];
+  if(vuelve){
+    Object.keys(LISTAS_POR_LOCAL).forEach(n=>{
+      if(!vuelve[n]?.length)return;
+      const actuales=LISTAS_POR_LOCAL[n]()||[],ids=new Set(actuales.map(r=>String(r?.id||'')));
+      asignarListaLocal(n,[...actuales,...vuelve[n].filter(r=>!ids.has(String(r?.id||'')))]);
+      delete vuelve[n];
+    });
+    if(vuelve.turno&&!turno){turno=vuelve.turno;delete vuelve.turno;}
+    if(!Object.keys(vuelve).length)delete aparcados[nuevoStore];
+  }
+  localStorage.setItem(APARCADOS_KEY,JSON.stringify(aparcados));
+}
+// Cambio de cuenta en el mismo local: el turno confirmado es del local y se comparte; una apertura de turno que no
+// llegó al servidor es de la cuenta que la hizo y se aparta hasta que esa cuenta vuelva.
+function aislarTurnoPorCuenta(userId,storeId){
+  const aparcados=safeJsonParse(localStorage.getItem(APARCADOS_KEY),{})||{};
+  const esp=(aparcados[storeId]=aparcados[storeId]||{}),porCuenta=(esp.turnosPorCuenta=esp.turnosPorCuenta||{});
+  if(turnoPendiente(turno)&&turno._origin?.user_id&&turno._origin.user_id!==userId){porCuenta[turno._origin.user_id]=turno;turno=null;}
+  if(!turno&&porCuenta[userId]){turno=porCuenta[userId];delete porCuenta[userId];}
+  if(!Object.keys(porCuenta).length)delete esp.turnosPorCuenta;
+  if(!Object.keys(esp).length)delete aparcados[storeId];
+  localStorage.setItem(APARCADOS_KEY,JSON.stringify(aparcados));
+}
+function aplicarContextoVerificado(nuevo){
+  if(!nuevo?.user_id||!nuevo?.store_id)return;
+  const prev=leerCtxVerificado();
+  if(prev?.user_id&&prev.user_id===String(window.__sesionUserId?.()||''))sellarOrigenes(prev); // lo pendiente sin sellar es del contexto anterior
+  if(prev?.store_id&&prev.store_id!==nuevo.store_id)aislarEstadoPorLocal(prev.store_id,nuevo.store_id);
+  aislarTurnoPorCuenta(nuevo.user_id,nuevo.store_id);
+  localStorage.setItem(CTX_VERIFICADO_KEY,JSON.stringify({user_id:nuevo.user_id,store_id:nuevo.store_id,verified_at:new Date().toISOString()}));
+  save();savePendingOutboxes();
+}
+window.F0B={
+  contexto:contextoVerificadoActual,permite:origenPermite,retenidas:operacionesRetenidas,
+  inventarioCuarentena:()=>operacionesRetenidas().filter(x=>x.motivo==='cuarentena'||x.motivo==='sin_contexto'),
+  aparcados:()=>safeJsonParse(localStorage.getItem(APARCADOS_KEY),{})||{}
+};
 let supabaseOperadoresCache=null; // null=sin cargar, []=cargado vacío, [...]= con datos
 let supabaseOperadoresCacheStoreId=null;
 
@@ -2847,6 +2997,7 @@ let activeReservationReminder=null,reservationReminderTimer=null;
 window.__reservationChargeAfterSave=false;
 
 function save(){
+  sellarOrigenes();
   localStorage.setItem('cats',    JSON.stringify(cats));
   localStorage.setItem('menu',    JSON.stringify(menu));
   localStorage.setItem(APP_DATA_VERSION_KEY,APP_DATA_VERSION);
@@ -2859,6 +3010,7 @@ function save(){
   turno?localStorage.setItem('turno',JSON.stringify(turno)):localStorage.removeItem('turno');
 }
 function savePendingOutboxes(){
+  sellarColas();
   localStorage.setItem(PENDING_OPEN_ORDER_CLOSURES_KEY,JSON.stringify(pendingOpenOrderClosures||[]));
   localStorage.setItem(PENDING_SHIFT_CLOSURES_KEY,JSON.stringify(pendingShiftClosures||[]));
   localStorage.setItem(PENDING_OPEN_ORDER_ITEM_SYNCS_KEY,JSON.stringify(pendingOpenOrderItemSyncs||[]));
@@ -4411,6 +4563,8 @@ function renderCajaPendingBanner(){
   // Lo que pide una acción del operador va primero; después lo que se resuelve solo.
   state.conflicts.forEach(m=>lineas.push({cls:'accion',texto:`<strong>${escapeHtml(m.nombre||'Una mesa')} cambió en otro dispositivo.</strong> Entrá y elegí qué versión queda.`,
     boton:`<button class="btn-sm" type="button" onclick="abrirMesa('${escapeAttr(getMesaOpenOrderId(m))}')">Revisar mesa</button>`}));
+  const retenidas=operacionesRetenidas().length;
+  if(retenidas)lineas.push({cls:'espera',texto:`<strong>${n(retenidas,'operación retenida','operaciones retenidas')}.</strong> Es de otra cuenta, de otro local o de una versión anterior: no se envía desde esta sesión ni se borra.`});
   if(state.rejected.length)lineas.push({cls:'accion',texto:`<strong>El servidor rechazó ${n(state.rejected.length,'venta cobrada','ventas cobradas')}.</strong> Está guardada en este dispositivo: no la cobres de nuevo y avisá al administrador.`});
   if(state.errors.length)lineas.push({cls:'error',texto:`<strong>No pudimos sincronizar ${n(state.errors.length,'operación','operaciones')}.</strong> Se reintenta sola; podés reintentar ahora.`,reintentar:true});
   if(state.confirming.length)lineas.push({cls:'espera',texto:`<strong>${n(state.confirming.length,'venta cobrada','ventas cobradas')} esperando confirmación del servidor.</strong> Ya está${state.confirming.length===1?'':'n'} guardada${state.confirming.length===1?'':'s'} acá: no la${state.confirming.length===1?'':'s'} cobres de nuevo.`,reintentar:true});
@@ -7318,22 +7472,22 @@ if(config.webappUrl){loadFromSheets();}
   }
   function buildPendingOperationsOutbox(){
     const ops=[];
-    (window.findPendingSalesSyncGroups?.(ventas||[])||[]).forEach(group=>{
+    (window.findPendingSalesSyncGroups?.(ventas||[])||[]).filter(g=>(g.rows||[]).every(r=>origenEnviable(r,'venta'))).forEach(group=>{
       ops.push({type:'venta',operation:'save_sale',status:window.getGroupSyncMeta?.(group)?.status||'pending',label:getStableSaleLegacyId?.(group)||'Venta pendiente',idempotency_key:getStableSaleLegacyId?.(group)||'',attempts:Math.max(...(group.rows||[]).map(r=>Number(r._sb_retry_count)||0),0),last_error:(group.rows||[]).map(r=>r._sb_sync_error).filter(Boolean).join(' | '),error_code:(group.rows||[]).map(r=>r._sb_sync_error_code).find(Boolean)||'',payload:{rows:(group.rows||[]).length,total:money2(group.total)}});
     });
     const pendingMesaKeys=new Set();
-    (mesas||[]).filter(m=>m&&((!m._sb_id)||m._syncing||m._sync_status==='partial_error')).forEach(m=>{
+    (mesas||[]).filter(m=>m&&((!m._sb_id)||m._syncing||m._sync_status==='partial_error')&&origenEnviable(m,'mesa')).forEach(m=>{
       [m.id,m._sb_id,m.open_order_id,m.legacy_local_id].map(v=>String(v||'')).filter(Boolean).forEach(key=>pendingMesaKeys.add(key));
       ops.push({type:'mesa',operation:m._sb_id?'sync_open_order_items':'create_open_order',status:m._sync_status||'pending',created_at:m._sync_started_at||m.apertura||'',label:m.nombre||'Mesa',idempotency_key:`open_order:${m.legacy_local_id||m.id}`,attempts:0,last_error:m._sync_error||m._lastSyncError||'',payload:{id:m.id,_sb_id:m._sb_id,items:Object.keys(m.items||{}).length}});
     });
-    (pendingOpenOrderClosures||[]).filter(x=>x&&x.status!=='synced').forEach(x=>ops.push({type:'mesa',operation:'close_open_order',status:x.status||'pending',label:x.mesa_snapshot?.nombre||x.open_order_id,idempotency_key:x.idempotency_key||'',attempts:x.attempts||0,last_error:x.last_error||'',payload:x}));
-    (pendingOpenOrderItemSyncs||[]).filter(x=>x&&x.status!=='synced'&&!pendingMesaKeys.has(String(x.open_order_id||''))).forEach(x=>ops.push({type:'mesa',operation:'replace_open_order_items',status:x.status||'pending',created_at:x.created_at||'',label:x.open_order_id,idempotency_key:x.idempotency_key||'',attempts:x.attempts||0,last_error:x.last_error||'',payload:{open_order_id:x.open_order_id,rows:(x.payload||[]).length}}));
-    (reservas||[]).filter(r=>{const info=getPersistenceStatusInfo(r,{localWhenNoRemoteId:true});return info&&info.cls!=='ok';}).forEach(r=>ops.push({type:'reserva',operation:'save_reservation',status:r._sync_status||(!r._sb_id?'pending':'error'),label:r.nombre||'Reserva',idempotency_key:`reservation:${r.legacy_id||r.id}`,attempts:0,last_error:r._sync_error||'',payload:{id:r.id,_sb_id:r._sb_id,total:getReservationTotal?.(r.items||[])||0}}));
-    (gastos||[]).filter(g=>{const info=getPersistenceStatusInfo(g,{localWhenNoRemoteId:true});return info&&info.cls!=='ok';}).forEach(g=>ops.push({type:'gasto',operation:'save_expense',status:g._sync_status||(!g._sb_id?'pending':'error'),label:g.desc||'Gasto',idempotency_key:`expense:${g.legacy_id||g.id}`,attempts:0,last_error:g._sync_error||'',payload:{id:g.id,_sb_id:g._sb_id,monto:g.monto}}));
-    if(turno&&turno.abierto&&(!turno._sb_id||turno._sync_status==='pending'||turno._sync_status==='error')){
+    (pendingOpenOrderClosures||[]).filter(x=>x&&x.status!=='synced'&&origenEnviable(x,'cola')).forEach(x=>ops.push({type:'mesa',operation:'close_open_order',status:x.status||'pending',label:x.mesa_snapshot?.nombre||x.open_order_id,idempotency_key:x.idempotency_key||'',attempts:x.attempts||0,last_error:x.last_error||'',payload:x}));
+    (pendingOpenOrderItemSyncs||[]).filter(x=>x&&x.status!=='synced'&&origenEnviable(x,'cola')&&!pendingMesaKeys.has(String(x.open_order_id||''))).forEach(x=>ops.push({type:'mesa',operation:'replace_open_order_items',status:x.status||'pending',created_at:x.created_at||'',label:x.open_order_id,idempotency_key:x.idempotency_key||'',attempts:x.attempts||0,last_error:x.last_error||'',payload:{open_order_id:x.open_order_id,rows:(x.payload||[]).length}}));
+    (reservas||[]).filter(r=>{const info=getPersistenceStatusInfo(r,{localWhenNoRemoteId:true});return info&&info.cls!=='ok'&&origenEnviable(r,'registro');}).forEach(r=>ops.push({type:'reserva',operation:'save_reservation',status:r._sync_status||(!r._sb_id?'pending':'error'),label:r.nombre||'Reserva',idempotency_key:`reservation:${r.legacy_id||r.id}`,attempts:0,last_error:r._sync_error||'',payload:{id:r.id,_sb_id:r._sb_id,total:getReservationTotal?.(r.items||[])||0}}));
+    (gastos||[]).filter(g=>{const info=getPersistenceStatusInfo(g,{localWhenNoRemoteId:true});return info&&info.cls!=='ok'&&origenEnviable(g,'registro');}).forEach(g=>ops.push({type:'gasto',operation:'save_expense',status:g._sync_status||(!g._sb_id?'pending':'error'),label:g.desc||'Gasto',idempotency_key:`expense:${g.legacy_id||g.id}`,attempts:0,last_error:g._sync_error||'',payload:{id:g.id,_sb_id:g._sb_id,monto:g.monto}}));
+    if(turno&&turno.abierto&&(!turno._sb_id||turno._sync_status==='pending'||turno._sync_status==='error')&&origenEnviable(turno,'turno')){
       ops.push({type:'turno',operation:'save_shift_open',status:turno._sync_status||'pending',label:turno.operador||'Turno',idempotency_key:`shift_open:${turno.legacy_id||turno.apertura}`,attempts:0,last_error:turno._sync_error||'',payload:{apertura:turno.apertura,_sb_id:turno._sb_id}});
     }
-    (pendingShiftClosures||[]).filter(x=>x&&x.status!=='synced').forEach(x=>ops.push({type:'turno',operation:'close_shift',status:x.status||'pending',label:x.turno_snapshot?.operador||'Cierre de turno',idempotency_key:x.idempotency_key||'',attempts:x.attempts||0,last_error:x.last_error||'',payload:x}));
+    (pendingShiftClosures||[]).filter(x=>x&&x.status!=='synced'&&origenEnviable(x,'cola')).forEach(x=>ops.push({type:'turno',operation:'close_shift',status:x.status||'pending',label:x.turno_snapshot?.operador||'Cierre de turno',idempotency_key:x.idempotency_key||'',attempts:x.attempts||0,last_error:x.last_error||'',payload:x}));
     return ops;
   }
   window.getPendingOperationsOutbox=buildPendingOperationsOutbox;
@@ -7647,6 +7801,7 @@ if(config.webappUrl){loadFromSheets();}
       if(config.activeStoreId && !supabaseStores.some(s=>s.id===config.activeStoreId)) config.activeStoreId='';
       if(!config.activeStoreId && supabaseStores[0]) config.activeStoreId=supabaseStores[0].id;
       saveConfig();
+      if(config.activeStoreId&&supabaseStores.some(s=>s.id===config.activeStoreId)) aplicarContextoVerificado({user_id:supabaseUser.id,store_id:config.activeStoreId});
       if(config.activeStoreId && typeof window.loadCatalogFromSupabase==='function'){
         await window.loadCatalogFromSupabase({silent:true,reason:'boot'});
       }
@@ -7722,6 +7877,8 @@ if(config.webappUrl){loadFromSheets();}
       if(error) throw error;
       supabaseSession=data.session||null;
       supabaseUser=data.session?.user||null;
+      window.__sesionLista=true;
+      sellarOrigenes(); // lo guardado antes de leer la sesión queda con este contexto, no con el de una cuenta posterior
       if(supabaseUser) await loadSupabaseContext();
       else{
         updateCatalogBootState({state:'fallback',source:'local',fallbackReason:'no_session'});
@@ -7731,6 +7888,7 @@ if(config.webappUrl){loadFromSheets();}
       return true;
     }catch(err){
       console.error('Supabase init error', err);
+      window.__sesionLista=true;
       updateCatalogBootState({state:'fallback',source:'local',fallbackReason:err?.message||'supabase_init_error'});
       supabaseClient=null;
       clearSupabaseContext();
@@ -7838,6 +7996,7 @@ if(config.webappUrl){loadFromSheets();}
       ? (document.getElementById('sb-store-sel-modal')?.value||'')
       : (document.getElementById('sb-store-sel')?.value||'');
     saveConfig();
+    if(supabaseUser&&supabaseStores.some(s=>s.id===config.activeStoreId)) aplicarContextoVerificado({user_id:supabaseUser.id,store_id:config.activeStoreId});
     updateCatalogBootState({state:'syncing',source:'pending',fallbackReason:''});
     supabaseOperadoresCache=null;
     supabaseOperadoresCacheStoreId=null;
@@ -7850,6 +8009,7 @@ if(config.webappUrl){loadFromSheets();}
     if(sel && sel.value){
       config.activeStoreId=sel.value;
       saveConfig();
+      if(supabaseUser&&supabaseStores.some(s=>s.id===config.activeStoreId)) aplicarContextoVerificado({user_id:supabaseUser.id,store_id:config.activeStoreId});
       updateCatalogBootState({state:'syncing',source:'pending',fallbackReason:''});
       supabaseOperadoresCache=null;
       supabaseOperadoresCacheStoreId=null;
@@ -7882,6 +8042,7 @@ if(config.webappUrl){loadFromSheets();}
     if(store?.id) return String(store.id);
     return '—';
   };
+  window.__sesionUserId=()=>supabaseUser?.id||'';
   window.getActiveStoreRole=function(){
     const store=window.getActiveStore?.();
     return store?.role||'';
@@ -8694,6 +8855,7 @@ if(config.webappUrl){loadFromSheets();}
     return run;
   }
   async function syncMesaToSupabaseAhora(mesa,{cobroVivo=null}={}){
+    if(mesaPendiente(mesa)&&!origenEnviable(mesa,'mesa'))return false; // F0B: mesa de otra cuenta, de otro local o en cuarentena
     // Un cobro en curso (o ya confirmado) es dueño de su mesa: una sync tardía (volver a la lista, edición, reintento)
     // reescribiría ítems y metadata de una mesa ya cerrada. Si el cobro falla, la mesa queda pendiente y se reintenta.
     // La preparación del propio cobro sí corre aunque haya esperado en la cola a la creación inicial (reusa el
@@ -8747,7 +8909,7 @@ if(config.webappUrl){loadFromSheets();}
     return ok;
   }
   window.retryPendingOpenOrdersSync=async function({silent=false}={}){
-    const pending=(mesas||[]).filter(m=>m&&!m._items_conflict&&((!m._sb_id)||m._syncing));
+    const pending=(mesas||[]).filter(m=>m&&!m._items_conflict&&((!m._sb_id)||m._syncing)&&origenEnviable(m,'mesa'));
     if(!pending.length){
       if(!silent)showToast('No hay mesas pendientes.');
       return {ok:true,total:0,synced:0,failed:0};
@@ -9146,7 +9308,7 @@ if(config.webappUrl){loadFromSheets();}
   startOOInterval();
 
   window.retryPendingOpenOrderClosures=async function({silent=false}={}){
-    const pending=(pendingOpenOrderClosures||[]).filter(entry=>entry&&entry.status!=='synced');
+    const pending=(pendingOpenOrderClosures||[]).filter(entry=>entry&&entry.status!=='synced'&&origenEnviable(entry,'cola'));
     if(!pending.length){
       if(!silent)showToast('No hay cierres de mesa pendientes.');
       return {ok:true,total:0,synced:0,failed:0};
@@ -9182,7 +9344,7 @@ if(config.webappUrl){loadFromSheets();}
     return summary;
   };
   window.retryPendingOpenOrderItemSyncs=async function({silent=false}={}){
-    const pending=(pendingOpenOrderItemSyncs||[]).filter(entry=>entry&&entry.status!=='synced');
+    const pending=(pendingOpenOrderItemSyncs||[]).filter(entry=>entry&&entry.status!=='synced'&&origenEnviable(entry,'cola'));
     if(!pending.length){
       if(!silent)showToast('No hay ítems de mesa pendientes.');
       return {ok:true,total:0,synced:0,failed:0};
@@ -10952,6 +11114,7 @@ if(config.webappUrl){loadFromSheets();}
   }
   window.saveCustomerToSupabase=async function(customer,opts={}){
     if(!hasCrSupabaseReady()||!customer) return null;
+    if(!origenEnviable(customer,'registro')){console.warn('[F0B] Cliente retenido',{id:customer.id,motivo:origenPermite(customer,'registro').motivo});return null;}
     const client=window.getSupabaseClient?.();
     const storeId=getCrStoreId();
     const session=await getCrSession(client);
@@ -10996,7 +11159,7 @@ if(config.webappUrl){loadFromSheets();}
       const storeId=getCrStoreId();
       const existingRows=await queryStoreCustomers(client,storeId);
       const summary={local:clientes.length,inserted:0,updated:0,errors:[]};
-      for(const customer of clientes){
+      for(const customer of clientes.filter(c=>isLocalPersistencePending(c)&&origenEnviable(c,'registro'))){
         try{
           const existing=await findExistingCustomerRow(client,storeId,customer,existingRows);
           const row=await saveCustomerToSupabase(customer,{customerRows:existingRows});
@@ -11019,6 +11182,7 @@ if(config.webappUrl){loadFromSheets();}
   };
   window.saveReservationToSupabase=async function(reservation,opts={}){
     if(!reservation) return null;
+    if(!origenEnviable(reservation,'registro')){console.warn('[F0B] Reserva retenida',{id:reservation.id,motivo:origenPermite(reservation,'registro').motivo});return null;}
     if(!hasCrSupabaseReady()){
       console.warn('[Reservations save skipped] Supabase no configurado o sin store activa',{reservation});
       return null;
@@ -11097,7 +11261,7 @@ if(config.webappUrl){loadFromSheets();}
       const existingCustomerRows=await queryStoreCustomers(client,storeId);
       const existingReservationRows=await queryStoreReservations(client,storeId);
       const summary={local:reservas.length,inserted:0,updated:0,errors:[]};
-      for(const reservation of reservas){
+      for(const reservation of reservas.filter(r=>isLocalPersistencePending(r)&&origenEnviable(r,'registro'))){
         try{
           const existing=await findExistingReservationRow(client,storeId,reservation,existingReservationRows);
           const row=await saveReservationToSupabase(reservation,{reservationRows:existingReservationRows,customerRows:existingCustomerRows.map(mapCustomerFromSupabase)});
@@ -11200,6 +11364,7 @@ if(config.webappUrl){loadFromSheets();}
   };
   window.saveCustomerToSupabase=async function(customer,opts={}){
     if(!customer) return null;
+    if(!origenEnviable(customer,'registro')){console.warn('[F0B] Cliente retenido',{id:customer.id,motivo:origenPermite(customer,'registro').motivo});return null;}
     if(!hasCrSupabaseReady()){
       console.warn('[Customers save skipped] Supabase no configurado o sin store activa',{customer});
       return null;
@@ -11913,6 +12078,7 @@ if(config.webappUrl){loadFromSheets();}
   };
   window.saveExpenseToSupabase=async function(expense,opts={}){
     if(!expense) return null;
+    if(!origenEnviable(expense,'registro')){console.warn('[F0B] Gasto retenido',{id:expense.id,motivo:origenPermite(expense,'registro').motivo});return null;}
     if(!hasExpensesSupabaseReady()){
       console.warn('[Expenses save skipped] Supabase no configurado o sin store activa',{expense});
       return null;
@@ -11985,7 +12151,7 @@ if(config.webappUrl){loadFromSheets();}
       const storeId=getExpensesStoreId();
       const existingRows=await queryStoreExpenses(client,storeId);
       const summary={local:gastos.length,inserted:0,updated:0,errors:[]};
-      for(const expense of gastos){
+      for(const expense of gastos.filter(g=>isLocalPersistencePending(g)&&origenEnviable(g,'registro'))){
         try{
           const existing=await findExistingExpenseRow(client,storeId,expense,existingRows);
           const row=await saveExpenseToSupabase(expense,{expenseRows:existingRows});
@@ -12716,6 +12882,7 @@ if(config.webappUrl){loadFromSheets();}
   };
   window.saveShiftToSupabase=async function(turnoLocal){
     if(!turnoLocal?.abierto) return null;
+    if(turnoPendiente(turnoLocal)&&!origenEnviable(turnoLocal,'turno')){console.warn('[F0B] Turno retenido',{motivo:origenPermite(turnoLocal,'turno').motivo});return null;}
     const ctxTurno=contextoTurnoConsulta();
     if(!hasShiftsSupabaseReady()){
       console.warn('[Shifts save skipped] Supabase no configurado o sin store activa',{turno:turnoLocal});
@@ -12813,6 +12980,7 @@ if(config.webappUrl){loadFromSheets();}
   };
   window.syncLocalShiftToSupabase=async function(){
     if(!(turno&&turno.abierto)){showToast('No hay turno local abierto para subir');return false;}
+    if(turnoPendiente(turno)&&!origenEnviable(turno,'turno')){showToast('Este turno es de otra cuenta, de otro local o de una versión anterior: no se envía desde esta sesión.');return false;}
     if(!hasShiftsSupabaseReady()){showToast('Configurá tu conexión y seleccioná una tienda primero');return false;}
     try{
       setShiftsState('syncing');
@@ -12835,7 +13003,7 @@ if(config.webappUrl){loadFromSheets();}
     }
   };
   window.retryPendingShiftClosures=async function({silent=false}={}){
-    const pending=(pendingShiftClosures||[]).filter(entry=>entry&&entry.status!=='synced');
+    const pending=(pendingShiftClosures||[]).filter(entry=>entry&&entry.status!=='synced'&&origenEnviable(entry,'cola'));
     if(!pending.length){
       if(!silent)showToast('No hay cierres de turno pendientes.');
       return {ok:true,total:0,synced:0,failed:0};
@@ -14559,7 +14727,9 @@ if(config.webappUrl){loadFromSheets();}
     const storeId=ctx.storeId||getSalesStoreId();
     const client=ctx.client||getSalesSupabaseClient();
     const relationCache=ctx.cache||{};
-    const shiftRef=ref._shift_sb_id||((typeof turno==='object'&&turno)?turno._sb_id:'')||'';
+    // N3: el turno es el de la operación (al crearla), no el que esté abierto al enviarla.
+    const o=ref._origin||null,turnoMismo=o?.shift_key&&typeof turno==='object'&&turno&&String(turno.legacy_id||turno.apertura||'')===String(o.shift_key);
+    const shiftRef=ref._shift_sb_id||o?.shift_id||(turnoMismo?turno._sb_id:'')||'';
     const shiftId=isValidUuid(String(shiftRef))?String(shiftRef):null;
     const reservationId=await resolveSaleReservationId(group,client,storeId,relationCache).catch(err=>{console.warn('[Sales reservation resolve failed]',err);return null;});
     const customerId=await resolveSaleCustomerId(group,client,storeId,relationCache).catch(err=>{console.warn('[Sales customer resolve failed]',err);return null;});
@@ -14665,6 +14835,8 @@ if(config.webappUrl){loadFromSheets();}
   }
 
   window.saveSaleGroupToSupabase=async function(group){
+    const retenida=(group?.rows||[]).map(r=>origenPermite(r,'venta')).find(x=>!x.ok);
+    if(retenida){const e=new Error(`Venta retenida (${retenida.motivo}): no se envía desde esta sesión`);e.code='F0B_RETENIDA';throw e;}
     if(!hasSalesSupabaseReady()) throw new Error('Supabase no configurado para ventas');
     const storeId=getSalesStoreId();
     if(!storeId) throw new Error('No hay tienda activa');
@@ -15162,6 +15334,8 @@ if(config.webappUrl){loadFromSheets();}
     };
   }
   async function saveMissingSaleGroupToSupabaseStrict(group,entryLocal){
+    const retenida=(group?.rows||[]).map(r=>origenPermite(r,'venta')).find(x=>!x.ok);
+    if(retenida){const e=new Error(`Venta retenida (${retenida.motivo}): no se envía desde esta sesión`);e.code='F0B_RETENIDA';throw e;}
     if(saleGroupsInFlight.has(getStableSaleLegacyId(group))) throw new Error('La venta se está enviando. Reintentá en unos segundos.');
     if(!hasSalesSupabaseReady()) throw new Error('Supabase no configurado para ventas');
     const storeId=getSalesStoreId();
