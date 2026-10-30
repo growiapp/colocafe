@@ -2907,7 +2907,24 @@ function vaciarDiario(){
     try{val===null?localStorage.removeItem(k):localStorage.setItem(k,val);}catch(_){ok=false;}
   }
   if(ok){try{localStorage.removeItem(DIARIO_CTX_KEY);diarioPendiente=null;}catch(_){ok=false;}}
+  if(!ok)refrescarDiario();
   return ok;
+}
+// N-01: mientras el diario no se completa, lo que manda al arrancar es el diario. Por eso se actualiza con lo que hay en
+// memoria antes de escribir las claves: una foto anterior nunca pisa lo que se guardó después. Si ni eso se puede, no se
+// aceptan operaciones nuevas (operacionesBloqueadasPorDiario) hasta que haya espacio.
+function refrescarDiario(){
+  if(!diarioPendiente)return true;
+  const valores={};let cambia=false;
+  for(const [k,v] of Object.entries(diarioPendiente.valores)){const mem=valorEnMemoria(k),val=mem!==undefined?mem:v;if(val!==v)cambia=true;valores[k]=val;}
+  if(!cambia)return true;
+  try{localStorage.setItem(DIARIO_CTX_KEY,JSON.stringify({at:new Date().toISOString(),valores}));diarioPendiente={valores};return true;}
+  catch(err){console.error('[F0B] No se pudo actualizar el diario pendiente',err);return false;}
+}
+const MSG_DIARIO_PENDIENTE='No se puede registrar: un cambio de cuenta o de local no terminó de guardarse porque falta espacio en este dispositivo. Liberá espacio y recargá; no se perdió nada.';
+function operacionesBloqueadasPorDiario(){
+  if(!diarioPendiente||vaciarDiario())return false;
+  showToast(MSG_DIARIO_PENDIENTE,7000);return true;
 }
 // cambios: {listas:{nombre:array}, turno?, aparcados?, cuarentena?, ctx?, config?, marca?:[clave,valor]}
 function confirmarTransicion(cambios){
@@ -2927,7 +2944,11 @@ function confirmarTransicion(cambios){
   if('turno' in cambios)turno=cambios.turno||null;
   if('config' in cambios&&cambios.config)config.activeStoreId=String(cambios.config.activeStoreId||'');
   diarioPendiente={valores};
-  if(!vaciarDiario())console.warn('[F0B] Cambio decidido; se completa en el próximo guardado o arranque');
+  if(!vaciarDiario()){
+    // Decidido pero sin completar: queda el diario (manda al arrancar) y no se aceptan operaciones nuevas hasta completarlo.
+    console.warn('[F0B] Cambio decidido; se completa en el próximo guardado o arranque');
+    setTimeout(()=>{if(diarioPendiente)showToast(MSG_DIARIO_PENDIENTE,7000);},0);
+  }
   return true;
 }
 
@@ -3133,6 +3154,7 @@ window.__reservationChargeAfterSave=false;
 
 function save(){
   sellarOrigenes();
+  if(diarioPendiente)vaciarDiario(); // primero el diario: si queda pendiente, ya tiene lo que está en memoria
   localStorage.setItem('cats',    JSON.stringify(cats));
   localStorage.setItem('menu',    JSON.stringify(menu));
   localStorage.setItem(APP_DATA_VERSION_KEY,APP_DATA_VERSION);
@@ -3147,6 +3169,7 @@ function save(){
 }
 function savePendingOutboxes(){
   sellarColas();
+  if(diarioPendiente)vaciarDiario();
   localStorage.setItem(PENDING_OPEN_ORDER_CLOSURES_KEY,JSON.stringify(pendingOpenOrderClosures||[]));
   localStorage.setItem(PENDING_SHIFT_CLOSURES_KEY,JSON.stringify(pendingShiftClosures||[]));
   localStorage.setItem(PENDING_OPEN_ORDER_ITEM_SYNCS_KEY,JSON.stringify(pendingOpenOrderItemSyncs||[]));
@@ -4322,6 +4345,7 @@ function onTurnoOperadorChange(){
   $('turno-nuevo-op-wrap').style.display=sel?.value==='__nuevo__'?'block':'none';
 }
 async function abrirTurno(){
+  if(operacionesBloqueadasPorDiario())return;
   const sel=$('turno-operador-sel');
   let op='';
   let operatorId=sel?.selectedOptions?.[0]?.dataset?.operatorId||'';
@@ -4394,6 +4418,7 @@ function pedirCerrarTurno(ef,mp,tr,otro,tot,cafe,cocina,delTurno){
   pedirConfirm(`Cerrar turno de ${turno.operador} — ${total}`,()=>cerrarTurno(ef,mp,tr,otro,tot,cafe,cocina),'Cerrar turno','var(--green)','🏁');
 }
 async function cerrarTurno(ef,mp,tr,otro,tot,cafe,cocina){
+  if(operacionesBloqueadasPorDiario())return;
   if(!(turno&&turno.abierto)){showToast('No hay turno abierto');return;}
   const turnoCerrado={...turno,ventasIds:[...(turno.ventasIds||[])]};
   const cierre=new Date();
@@ -4536,6 +4561,7 @@ function onGastoOperadorChange(){
 }
 function cerrarModalGastoOperador(){ $('modal-gasto-operador').classList.remove('open'); }
 async function confirmarGastoOperador(){
+  if(operacionesBloqueadasPorDiario())return;
   const sel=$('gasto-operador-sel');
   let op='';
   let operatorId=sel?.selectedOptions?.[0]?.dataset?.operatorId||'';
@@ -4970,6 +4996,7 @@ function renderMesaSetupCarrito(){
   updateMesaSetupTotals();
 }
 async function confirmarNuevaMesa(){
+  if(operacionesBloqueadasPorDiario())return;
   const nombre=$('nueva-mesa-input').value.trim();if(!nombre){showToast('Agregá un nombre o identificación.');return;}
   const localId='m_'+Date.now();
   const m={id:localId,legacy_local_id:localId,nombre,tipo:tipoNuevaMesa,items:{...mesaSetupCarrito},nota:($('mesa-nota')?.value||'').trim(),pago:'ef',payment_mode:'single',pagos:[],apertura:nowISO(),_sb_id:null,open_order_id:null,status:'open',_syncing:true,_sync_started_at:new Date().toISOString()};
@@ -6037,6 +6064,7 @@ function renderReservaCarrito(){
 function cerrarModalReserva(){$('modal-reserva').classList.remove('open');}
 function closeModalReserva(e){if(e.target===$('modal-reserva'))cerrarModalReserva();}
 function guardarReserva(action='save'){
+  if(operacionesBloqueadasPorDiario())return;
   window.__reservationChargeAfterSave=action==='charge';
   const nombre=($('res-nombre')?.value||'').trim();if(!nombre){window.__reservationChargeAfterSave=false;showToast('Ingresá un nombre');return;}
   const fecha=$('res-fecha')?.value||'';
@@ -6641,6 +6669,7 @@ pedirEliminarCliente.__remoteFirst=true;
 function cerrarModalCliente(){$('modal-cliente').classList.remove('open');clienteModalRetorno=null;}
 function closeModalCliente(e){if(e.target===$('modal-cliente'))cerrarModalCliente();}
 function guardarCliente(){
+  if(operacionesBloqueadasPorDiario())return;
   const nombre=($('cli-nombre')?.value||'').trim();if(!nombre){showToast('Ingresá el nombre');return;}
   const data={nombre,telefono:$('cli-tel').value.trim(),email:$('cli-email').value.trim(),alergias:$('cli-alergias').value.trim(),preferencias:$('cli-prefs').value.trim()};
   let newId=null;
