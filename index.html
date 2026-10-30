@@ -7482,7 +7482,7 @@ if(config.webappUrl){loadFromSheets();}
     });
     (pendingOpenOrderClosures||[]).filter(x=>x&&x.status!=='synced'&&origenEnviable(x,'cola')).forEach(x=>ops.push({type:'mesa',operation:'close_open_order',status:x.status||'pending',label:x.mesa_snapshot?.nombre||x.open_order_id,idempotency_key:x.idempotency_key||'',attempts:x.attempts||0,last_error:x.last_error||'',payload:x}));
     (pendingOpenOrderItemSyncs||[]).filter(x=>x&&x.status!=='synced'&&origenEnviable(x,'cola')&&!pendingMesaKeys.has(String(x.open_order_id||''))).forEach(x=>ops.push({type:'mesa',operation:'replace_open_order_items',status:x.status||'pending',created_at:x.created_at||'',label:x.open_order_id,idempotency_key:x.idempotency_key||'',attempts:x.attempts||0,last_error:x.last_error||'',payload:{open_order_id:x.open_order_id,rows:(x.payload||[]).length}}));
-    (reservas||[]).filter(r=>{const info=getPersistenceStatusInfo(r,{localWhenNoRemoteId:true});return info&&info.cls!=='ok'&&origenEnviable(r,'registro');}).forEach(r=>ops.push({type:'reserva',operation:'save_reservation',status:r._sync_status||(!r._sb_id?'pending':'error'),label:r.nombre||'Reserva',idempotency_key:`reservation:${r.legacy_id||r.id}`,attempts:0,last_error:r._sync_error||'',payload:{id:r.id,_sb_id:r._sb_id,total:getReservationTotal?.(r.items||[])||0}}));
+    (reservas||[]).filter(r=>{const info=getPersistenceStatusInfo(r,{localWhenNoRemoteId:true});return info&&info.cls!=='ok'&&origenEnviable(r,'registro');}).forEach(r=>ops.push({type:'reserva',operation:'save_reservation',status:r._sync_status||(!r._sb_id?'pending':'error'),label:r.nombre||'Reserva',idempotency_key:`reservation:${r.legacy_id||r.id}`,attempts:0,last_error:r._sync_error||'',payload:{id:r.id,_sb_id:r._sb_id,total:window.getReservationTotal?.(r.items||[])||0}}));
     (gastos||[]).filter(g=>{const info=getPersistenceStatusInfo(g,{localWhenNoRemoteId:true});return info&&info.cls!=='ok'&&origenEnviable(g,'registro');}).forEach(g=>ops.push({type:'gasto',operation:'save_expense',status:g._sync_status||(!g._sb_id?'pending':'error'),label:g.desc||'Gasto',idempotency_key:`expense:${g.legacy_id||g.id}`,attempts:0,last_error:g._sync_error||'',payload:{id:g.id,_sb_id:g._sb_id,monto:g.monto}}));
     if(turno&&turno.abierto&&(!turno._sb_id||turno._sync_status==='pending'||turno._sync_status==='error')&&origenEnviable(turno,'turno')){
       ops.push({type:'turno',operation:'save_shift_open',status:turno._sync_status||'pending',label:turno.operador||'Turno',idempotency_key:`shift_open:${turno.legacy_id||turno.apertura}`,attempts:0,last_error:turno._sync_error||'',payload:{apertura:turno.apertura,_sb_id:turno._sb_id}});
@@ -10846,6 +10846,7 @@ if(config.webappUrl){loadFromSheets();}
   function getReservationTotal(items){
     return money2((Array.isArray(items)?items:[]).reduce((sum,item)=>sum+((Number(item.precio)||0)*(Number(item.qty)||0)),0));
   }
+  window.getReservationTotal=getReservationTotal; // la bandeja de pendientes (otro bloque) lo usa para el total de la reserva
   function mapReservationFromSupabase(row,customerRows){
     const raw=row.legacy_raw||{};
     const items=Array.isArray(raw.items)?raw.items:[];
