@@ -7172,7 +7172,8 @@ if(config.webappUrl){loadFromSheets();}
     const existing=window.__coloSupabaseClient;
     if(!forceRefresh && existing && existing.__coloSig===sig) return existing;
     const client=lib.createClient(config.supabaseUrl, config.supabaseAnonKey, {
-      auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }
+      auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true },
+      global:{ fetch:(...a)=>fetchConControlDeOrigen(...a) }
     });
     client.__coloSig=sig;
     window.__coloSupabaseClient=client;
@@ -9000,7 +9001,8 @@ if(config.webappUrl){loadFromSheets();}
     tail.then(()=>{if(ooSyncsEnCola.get(key)===tail)ooSyncsEnCola.delete(key);});
     return run;
   }
-  async function syncMesaToSupabaseAhora(mesa,{cobroVivo=null}={}){
+  function syncMesaToSupabaseAhora(...a){return conEnvio(()=>syncMesaToSupabaseAhoraSinRegistro(...a));}
+  async function syncMesaToSupabaseAhoraSinRegistro(mesa,{cobroVivo=null}={}){
     if(mesaPendiente(mesa)&&!origenEnviable(mesa,'mesa'))return false; // F0B: mesa de otra cuenta, de otro local o en cuarentena
     // Un cobro en curso (o ya confirmado) es dueño de su mesa: una sync tardía (volver a la lista, edición, reintento)
     // reescribiría ítems y metadata de una mesa ya cerrada. Si el cobro falla, la mesa queda pendiente y se reintenta.
@@ -9103,7 +9105,8 @@ if(config.webappUrl){loadFromSheets();}
     }
   }
 
-  async function closeOpenOrderInSupabase(sbId,opts={}){
+  function closeOpenOrderInSupabase(...a){return conEnvio(()=>closeOpenOrderInSupabaseSinRegistro(...a));}
+  async function closeOpenOrderInSupabaseSinRegistro(sbId,opts={}){
     const client=ooClient(),storeId=ooStoreId();
     if(!client||!storeId||!sbId)return false;
     const closedAt=opts.closedAt||getLocalTimestamp();
@@ -15489,7 +15492,8 @@ if(config.webappUrl){loadFromSheets();}
       requiresReview:(classified.requiresReview||[]).length
     };
   }
-  async function saveMissingSaleGroupToSupabaseStrict(group,entryLocal){
+  function saveMissingSaleGroupToSupabaseStrict(...a){return conEnvio(()=>saveMissingSaleGroupToSupabaseStrictSinRegistro(...a));}
+  async function saveMissingSaleGroupToSupabaseStrictSinRegistro(group,entryLocal){
     const retenida=(group?.rows||[]).map(r=>origenPermite(r,'venta')).find(x=>!x.ok);
     if(retenida){const e=new Error(`Venta retenida (${retenida.motivo}): no se envía desde esta sesión`);e.code='F0B_RETENIDA';throw e;}
     if(saleGroupsInFlight.has(getStableSaleLegacyId(group))) throw new Error('La venta se está enviando. Reintentá en unos segundos.');
