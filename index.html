@@ -5265,6 +5265,8 @@ async function confirmarOperadorCobroUnaVez(){
 }
 const cobrosEnCurso=new Set();
 async function ejecutarCobro(operadorCobro,operatorIdCobro){
+  // El cobro corre después de elegir el operador: se vuelve a verificar el diario y la sesión del detalle antes de registrar la venta.
+  if(operacionesBloqueadasPorDiario()||!edicionDelDetallePermitida())return;
   const esReserva=mesaActivaId&&mesaActivaId.startsWith('reserva_');
   // mesaActivaId cambia si el cajero abre otra mesa mientras este cobro espera la red: el cobro usa su propia copia.
   let mesaId=mesaActivaId;
