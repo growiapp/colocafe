@@ -2868,10 +2868,13 @@ function mesaRetenidaDeOtraCuenta(m){
 }
 // N-03: el detalle de una mesa o reserva pertenece a la cuenta que lo abrió. Al cerrar sesión se cierra, y si la cuenta
 // cambió sin cerrarlo, la próxima edición lo cierra sin guardar nada. Cada edición del detalle pasa por edicionDelDetallePermitida.
-let cuentaDelDetalle=null;
+let cuentaDelDetalle=null,generacionDetalle=0;
 const MSG_DETALLE_CERRADO='La mesa que estaba abierta era de otra sesión y se cerró sin cambios. Volvé a abrirla desde la lista.';
 function marcarDetalleAbierto(){cuentaDelDetalle=String(window.__sesionUserId?.()||'');}
+// Firma del contexto en que empezó una apertura: si cambia mientras se espera la red, la apertura ya no aplica.
+function firmaDelContexto(){return `${generacionDetalle}|${String(window.__sesionUserId?.()||'')}|${String(config?.activeStoreId||'')}`;}
 function invalidarDetalle(){
+  generacionDetalle++; // también descarta las aperturas en espera
   if(typeof mesaActivaId==='undefined'||!mesaActivaId)return;
   mesaActivaId=null;carrito={};cuentaDelDetalle=null;
   try{renderVentas();}catch(_){}
@@ -5080,9 +5083,11 @@ function pedirEliminarMesa(id){
   });
 }
 async function abrirMesa(id){
+  const firma=firmaDelContexto(),vigente=()=>firmaDelContexto()===firma;
   let m=findMesaByAnyId(id);
   if(!m&&window.loadSingleOpenOrderFromSupabase){
     m=await window.loadSingleOpenOrderFromSupabase(id).catch(()=>null);
+    if(!vigente())return; // la sesión o el local cambiaron mientras se cargaba
   }
   if(!m){showToast('No pudimos cargar esta mesa. Reintentá.');return;}
   if(mesaRetenidaDeOtraCuenta(m)){showToast(MSG_MESA_DE_OTRA_CUENTA);return;}
@@ -5095,6 +5100,8 @@ async function abrirMesa(id){
   const openId=getMesaOpenOrderId(m);
   if(m._sb_id&&window.checkOpenOrderStillOpen){
     const stillOpen=await window.checkOpenOrderStillOpen(m._sb_id).catch(()=>null);
+    if(!vigente())return; // respuesta de una apertura de otra sesión o de otro local: no toca el detalle
+    if(mesaRetenidaDeOtraCuenta(m)){showToast(MSG_MESA_DE_OTRA_CUENTA);return;}
     if(stillOpen===false){
       removeMesaByAnyId(openId);save();renderMesasSection();
       showToast('Esta mesa ya fue cerrada o no está disponible.');
