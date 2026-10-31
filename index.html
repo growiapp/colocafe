@@ -5282,6 +5282,10 @@ let ultimoOperadorCobro=null; // N-01: al reintentar un cobro que no quedó regi
 async function ejecutarCobro(operadorCobro,operatorIdCobro){
   // El cobro corre después de elegir el operador: se vuelve a verificar el diario y la sesión del detalle antes de registrar la venta.
   if(operacionesBloqueadasPorDiario()||!edicionDelDetallePermitida())return;
+  // B2: después de cada espera de red se verifica que siga la misma sesión, cuenta y local. Si no, el cobro se descarta sin
+  // registrar venta ni tocar turno, stock, mesa o pantalla: la mesa queda como estaba para que su cuenta la retome.
+  const sigueElContexto=mientrasSigaElContexto();
+  const otroContexto=()=>{if(sigueElContexto())return false;console.warn('[F0B] El cobro empezó en otra sesión o local: se descarta sin registrar nada');return true;};
   const esReserva=mesaActivaId&&mesaActivaId.startsWith('reserva_');
   // mesaActivaId cambia si el cajero abre otra mesa mientras este cobro espera la red: el cobro usa su propia copia.
   let mesaId=mesaActivaId;
@@ -5332,6 +5336,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           });
           // La sync ya asignó el id remoto: se suma al candado antes del próximo await.
           bloquear(idsDeMesa(mesaChk));
+          if(otroContexto())return;
           if(synced&&mesaChk._sb_id){
             const openOrderId=getMesaOpenOrderId(mesaChk);
             // Solo se renombra el detalle de este cobro si sigue abierto: tras un cambio de sesión (detalle cerrado) no se reabre.
@@ -5350,6 +5355,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           // y se ofrece resolver el conflicto (nunca se cobra una versión vieja de la mesa).
           mesaChk.items={...carrito};
           const guardada=await cajaWithTimeout(window.syncMesaToSupabase(mesaChk,{cobroVivo:()=>!cobroTerminado}),'sync_items_before_payment',12000).catch(()=>false);
+          if(otroContexto())return;
           if(!guardada){
             if(mesaChk._items_conflict){showToast('La mesa cambió en otro dispositivo. Revisala antes de cobrar.');window.mostrarConflictoMesa?.(mesaChk);}
             else showToast('No pudimos verificar esta mesa. Reintentá antes de cobrar.');
@@ -5364,6 +5370,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
             if(window.canShowClientTechnicalUi?.())console.warn('[Caja] check open_order failed before payment',err);
             stillOpen=null;
           }
+          if(otroContexto())return;
           if(stillOpen===false){
             showToast(findMesaSaleRows(mesaChk._sb_id).length?'Este cobro ya quedó registrado.':'Esta mesa ya fue cerrada desde otro dispositivo.');
             removeMesaByAnyId(mesaId);save();volverALista();return;
@@ -5399,6 +5406,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           return;
         }
         const remoteReservationSale=confirmedLocalReservationSale?true:await reservationHasRemoteSale(r);
+        if(otroContexto())return;
         if(remoteReservationSale===null){
           showToast('No pudimos verificar esta reserva. Reintentá antes de cobrar.');
           return;
@@ -5488,8 +5496,10 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
       try{
         if(!window.saveSaleRowsToSupabase) throw new Error('No hay guardado de ventas disponible');
         salesSync=await cajaWithTimeout(window.saveSaleRowsToSupabase(nuevas),'save_sale_supabase_readback',22000);
+        if(otroContexto())return; // la venta ya es de la cuenta que cobró (guardada con su origen): se retoma desde esa cuenta
         if(!salesSync?.ok) throw new Error('No pudimos confirmar la venta guardada');
       }catch(err){
+        if(otroContexto())return;
         console.error('[Caja] venta no confirmada en base',{
           code:err?.code||'',
           message:err?.message||String(err)||'',
@@ -5531,6 +5541,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
             if(window.canShowClientTechnicalUi?.())console.warn('[Caja] venta guardada pero mesa no se cerró en base',err);
             return false;
           });
+          if(otroContexto())return; // la mesa vendida se concilia en la próxima lectura
           if(closeOk===false){
             const pendingClosure=upsertPendingOpenOrderClosure({
               type:'open_order_closure',
@@ -5569,10 +5580,12 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
       if(esReserva&&reservaActiva&&window.saveReservationToSupabase){
         try{
           const reservationSync=await cajaWithTimeout(window.saveReservationToSupabase(reservaActiva),'close_reservation_supabase',10000);
+          if(otroContexto())return;
           if(!reservationSync?.id)throw new Error('No se confirmó el estado remoto de la reserva');
           showToast('Reserva cobrada.');
           window.reloadCustomersReservationsFromSupabase?.(true).then(()=>renderReservasSection()).catch(()=>{});
         }catch(err){
+          if(otroContexto())return;
           if(window.canShowClientTechnicalUi?.())console.warn('[Caja] venta creada pero reserva no se actualizó en Supabase',err);
           reservaActiva._sync_status='error';
           reservaActiva._sync_error=err?.message||String(err);
@@ -5597,6 +5610,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
     await cajaWithTimeout(cobro,'ejecutar_cobro',30000);
   }catch(err){
     if(window.canShowClientTechnicalUi?.())console.error('[Caja] ejecutarCobro failed',err);
+    if(!sigueElContexto())return;
     if(!cobroTerminado){
       showToast('El cobro sigue procesándose. No lo cobres de nuevo: te avisamos cuando se confirme.');
       return;
