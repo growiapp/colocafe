@@ -5328,7 +5328,8 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           bloquear(idsDeMesa(mesaChk));
           if(synced&&mesaChk._sb_id){
             const openOrderId=getMesaOpenOrderId(mesaChk);
-            if(sigueEnEsteCobro())mesaActivaId=openOrderId;
+            // Solo se renombra el detalle de este cobro si sigue abierto: tras un cambio de sesión (detalle cerrado) no se reabre.
+            if(mesaActivaId&&String(mesaActivaId)===String(mesaId))mesaActivaId=openOrderId;
             mesaId=openOrderId;
           }else{
             if(window.canShowClientTechnicalUi?.()){
