@@ -4588,6 +4588,17 @@ function onGastoOperadorChange(){
   $('gasto-nuevo-op-wrap').style.display=sel?.value==='__nuevo__'?'block':'none';
 }
 function cerrarModalGastoOperador(){ $('modal-gasto-operador').classList.remove('open'); }
+function nuevoUuidV4Gasto(){
+  const secureCrypto=globalThis.crypto;
+  if(typeof secureCrypto?.randomUUID==='function')return secureCrypto.randomUUID();
+  if(typeof secureCrypto?.getRandomValues!=='function')throw new Error('No hay una fuente criptográfica segura para identificar el gasto');
+  const bytes=new Uint8Array(16);
+  secureCrypto.getRandomValues(bytes);
+  bytes[6]=(bytes[6]&0x0f)|0x40;
+  bytes[8]=(bytes[8]&0x3f)|0x80;
+  const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
 async function confirmarGastoOperador(){
   if(operacionesBloqueadasPorDiario())return;
   const sel=$('gasto-operador-sel');
@@ -4616,10 +4627,12 @@ async function confirmarGastoOperador(){
     operatorId=getOperatorByName(op)?.id||'';
   }
   const pending=JSON.parse($('modal-gasto-operador').dataset.pending||'{}');
-  const g={id:'g_'+Date.now(),...pending,operador:op,_operator_id:operatorId||null,_sync_status:'pending',_sync_error:'',metadata:{operator_id:operatorId||null,expense_category:pending.categoria||'otros',persistence_status:'pending_local'}};
+  const g={id:nuevoUuidV4Gasto(),...pending,operador:op,_operator_id:operatorId||null,_sync_status:'pending',_sync_error:'',metadata:{operator_id:operatorId||null,expense_category:pending.categoria||'otros',persistence_status:'pending_local'}};
+  let persisted=false;
   try{
-    gastos.push(g); save(); cerrarModalGastoOperador(); renderGastos(); syncGastosSheets();
+    gastos.push(g); save(); persisted=true; cerrarModalGastoOperador(); renderGastos(); syncGastosSheets();
   }catch(err){
+    if(!persisted){const idx=gastos.indexOf(g);if(idx>=0)gastos.splice(idx,1);}
     console.error('[confirmarGastoOperador -> local preserve failed]',{
       expense:{...g},
       message:err?.message||String(err),
@@ -12279,6 +12292,16 @@ if(config.webappUrl){loadFromSheets();}
     const refLegacy=expense.legacy_id || (!window.isValidUuid?.(String(expense.id||'')) ? String(expense.id) : '');
     return rows.find(r=>String(r.id||'')===String(expense._sb_id||'') || String(r.id||'')===String(expense.id||'') || (refLegacy && String(r.legacy_id||'')===String(refLegacy))) || null;
   }
+  function isPendingUuidExpenseCreate(expense){
+    return !!expense && !expense.legacy_id && !!window.isValidUuid?.(String(expense.id||'')) && isLocalPersistencePending(expense);
+  }
+  async function findExpenseRowById(client,storeId,id){
+    const {data,error}=await client.from('expenses')
+      .select('id,store_id,legacy_id,business_date,spent_at,description,amount,payment_method,operator_name,notes,metadata')
+      .eq('id',id).eq('store_id',storeId).maybeSingle();
+    if(error) throw error;
+    return data||null;
+  }
   function logExpenseWriteError(meta,err){
     console.error('[Expenses write failed]',{
       operation:meta.operation,
@@ -12372,6 +12395,34 @@ if(config.webappUrl){loadFromSheets();}
     if(!window.isValidUuid?.(storeId)) throw new Error('Store ID inválido');
     const session=await getExpensesSession(client);
     if(!session) throw new Error('No hay sesión activa');
+    if(isPendingUuidExpenseCreate(expense)){
+      const confirmCreate=(row,outcome)=>{
+        if(String(row?.id||'')!==String(expense.id) || String(row?.store_id||'')!==String(storeId)) throw new Error('No se pudo confirmar la identidad del gasto');
+        const id=expense.id;
+        Object.assign(expense,mapExpenseFromSupabase(row),{id});
+        expense.metadata={...(expense.metadata||{}),persistence_status:'remote_confirmed'};
+        save();
+        expensesLastSyncAt=stampExpensesMoment();
+        setExpensesState('supabase');
+        opts.onCreateOutcome?.(outcome);
+        return row;
+      };
+      const existing=await findExpenseRowById(client,storeId,expense.id);
+      if(existing) return confirmCreate(existing,'recovered');
+      const payload=mapExpenseToSupabase(expense,storeId,null);
+      try{
+        const {data,error}=await client.from('expenses').insert(payload)
+          .select('id,store_id,legacy_id,business_date,spent_at,description,amount,payment_method,operator_name,notes,metadata').single();
+        if(error) throw error;
+        return confirmCreate(data,'inserted');
+      }catch(err){
+        if(err?.code==='23505'){
+          const recovered=await findExpenseRowById(client,storeId,expense.id);
+          if(recovered) return confirmCreate(recovered,'recovered');
+        }
+        throw err;
+      }
+    }
     const existingRow=await findExistingExpenseRow(client,storeId,expense,opts.expenseRows);
     const payload=mapExpenseToSupabase(expense,storeId,existingRow);
     const operation=existingRow ? 'update' : 'insert';
@@ -12431,10 +12482,17 @@ if(config.webappUrl){loadFromSheets();}
       setExpensesState('syncing');
       const client=window.getSupabaseClient?.();
       const storeId=getExpensesStoreId();
-      const existingRows=await queryStoreExpenses(client,storeId);
-      const summary={local:gastos.length,inserted:0,updated:0,errors:[]};
-      for(const expense of gastos.filter(g=>isLocalPersistencePending(g)&&origenEnviable(g,'registro'))){
+      const pending=gastos.filter(g=>isLocalPersistencePending(g)&&origenEnviable(g,'registro'));
+      const existingRows=pending.some(g=>!isPendingUuidExpenseCreate(g))?await queryStoreExpenses(client,storeId):[];
+      const summary={local:gastos.length,inserted:0,recovered:0,updated:0,errors:[]};
+      for(const expense of pending){
         try{
+          if(isPendingUuidExpenseCreate(expense)){
+            let outcome='';
+            const row=await saveExpenseToSupabase(expense,{onCreateOutcome:value=>outcome=value});
+            if(row) summary[outcome==='recovered'?'recovered':'inserted']++;
+            continue;
+          }
           const existing=await findExistingExpenseRow(client,storeId,expense,existingRows);
           const row=await saveExpenseToSupabase(expense,{expenseRows:existingRows});
           if(row){
@@ -12453,12 +12511,13 @@ if(config.webappUrl){loadFromSheets();}
       setExpensesState('supabase');
       renderExpensesSupabaseUi();
       console.log('[Expenses sync summary]',summary);
+      const synced=summary.inserted+summary.recovered+summary.updated;
       if(summary.errors.length){
-        showToast(`Se actualizaron ${summary.inserted+summary.updated} gasto(s). Quedan ${summary.errors.length} pendiente(s).`);
+        showToast(`Se sincronizaron ${synced} gasto(s). Quedan ${summary.errors.length} pendiente(s).`);
       }else{
-        showToast(`Gastos actualizados · ${summary.inserted} nuevos · ${summary.updated} actualizados`);
+        showToast(`Gastos sincronizados · ${summary.inserted} nuevos · ${summary.recovered} recuperados · ${summary.updated} actualizados`);
       }
-      return {ok:!summary.errors.length,total:summary.local,synced:summary.inserted+summary.updated,failed:summary.errors.length,errors:summary.errors};
+      return {ok:!summary.errors.length,total:summary.local,synced,failed:summary.errors.length,errors:summary.errors};
     }catch(err){
       console.error('[Expenses sync failed]',err);
       setExpensesState('error',err?.message||String(err));
