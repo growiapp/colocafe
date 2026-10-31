@@ -5445,13 +5445,11 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
         showToast('Esta mesa tiene un cobro anterior pendiente con otros productos o forma de pago. Revisalo en Operaciones pendientes antes de cobrar.');
         return;
       }
-      const stockAntes=new Map(items.map(i=>{const p=findProductById(i.prodId);return [p,p?.stock];}).filter(([p])=>p));
       const nuevas=ventaPendiente.length?ventaPendiente:items.map((item,n)=>{
         const p=findProductById(item.prodId),l=resumen.lineas[n];
         const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
         const ventaId='v_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
         ventaIds.push(ventaId);
-        if(p&&!p.ilimitado)p.stock=Math.max(0,(p.stock||0)-item.qty);
         return{id:ventaId,fecha,hora,timestamp:ts,operador,mesa:nombreMesa,tipo:tipoVenta,
           ticket_id:ticketId,payment_mode:paymentState.payment_mode,pagos:paymentState.pagos,
           producto:p?p.name:'?',variantes:(item.vars||[]).map(v=>v.nombre).join(', '),
@@ -5483,7 +5481,6 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           const ids=new Set(nuevas.map(v=>v.id));
           for(let i=ventas.length-1;i>=0;i--)if(ids.has(ventas[i]?.id))ventas.splice(i,1);
           if(turnoActivo)turnoActivo.ventasIds=ventasIdsAntes;
-          stockAntes.forEach((v,prod)=>{prod.stock=v;});
         }
         if(esReserva&&reservaOptimisticHidden&&reservasBeforeCobro){reservas=reservasBeforeCobro;clearReservationHidden(reservaOptimisticHidden);renderReservasSection();}
         try{save();}catch(_){}
@@ -5492,6 +5489,20 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
         return;
       }
       ventaLocalCreada=true;
+      // B3: el stock se descuenta recién con la venta guardada; así, si la venta no se guardó, el almacenamiento nunca tuvo el stock
+      // descontado y no hay nada que restaurar. Si lo que falla es guardar el stock, la venta vale y se avisa: no se da por guardado.
+      let avisoStock='';
+      if(!ventaPendiente.length){
+        const descontados=[];
+        items.forEach(item=>{const p=findProductById(item.prodId);if(p&&!p.ilimitado){p.stock=Math.max(0,(p.stock||0)-item.qty);if(!descontados.includes(p))descontados.push(p);}});
+        if(descontados.length){
+          try{save();}catch(err){console.error('[Caja] no se pudo guardar el stock en el dispositivo',err);}
+          const menuGuardado=safeJsonParse(leerLS('menu'),[])||[];
+          const sinGuardar=descontados.filter(p=>!menuGuardado.some(x=>sameId(x.id,p.id)&&Number(x.stock)===Number(p.stock)));
+          if(sinGuardar.length)avisoStock=`Ojo: el stock de ${sinGuardar.map(p=>p.name).join(', ')} no se pudo guardar en este dispositivo (sin espacio). Revisalo en Menú.`;
+        }
+      }
+      const avisar=(t,ms)=>avisoStock?showToast(`${t} ${avisoStock}`,9000):showToast(t,ms);
       let salesSync=null;
       try{
         if(!window.saveSaleRowsToSupabase) throw new Error('No hay guardado de ventas disponible');
@@ -5518,7 +5529,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
         // Con código de PostgREST el servidor la rechazó; sin código (red, timeout, read-back) no sabemos si llegó.
         // 23505 (unique) significa que la venta ya existe en el servidor: no es un rechazo.
         const rechazada=!!err?.code&&!String(err.code).startsWith('READ_BACK')&&String(err.code)!=='23505';
-        showToast(rechazada
+        avisar(rechazada
           ?'El servidor no aceptó la venta. Quedó guardada en este dispositivo como pendiente: avisá al administrador y no la cobres de nuevo.'
           :'No pudimos confirmar la venta con el servidor. Quedó guardada en este dispositivo y se va a reintentar sola. No la cobres de nuevo.');
         volverALista();
@@ -5566,7 +5577,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
             window.reconcileSoldOpenOrders?.([mesaCobrada._sb_id],{reason:'post_sale_fallback'}).catch(err=>{
               if(window.canShowClientTechnicalUi?.())console.warn('[Caja] fallback reconciliation failed',err);
             });
-            showToast('Venta cobrada. Cierre de mesa pendiente.');
+            avisar('Venta cobrada. Cierre de mesa pendiente.');
           }else{
             removeMesaByAnyId(mesaId);
           }
@@ -5582,7 +5593,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           const reservationSync=await cajaWithTimeout(window.saveReservationToSupabase(reservaActiva),'close_reservation_supabase',10000);
           if(otroContexto())return;
           if(!reservationSync?.id)throw new Error('No se confirmó el estado remoto de la reserva');
-          showToast('Reserva cobrada.');
+          avisar('Reserva cobrada.');
           window.reloadCustomersReservationsFromSupabase?.(true).then(()=>renderReservasSection()).catch(()=>{});
         }catch(err){
           if(otroContexto())return;
@@ -5590,10 +5601,10 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           reservaActiva._sync_status='error';
           reservaActiva._sync_error=err?.message||String(err);
           save();renderReservasSection();renderCajaPendingBanner();
-          showToast('Venta cobrada. Estado de reserva pendiente de sincronizar.');
+          avisar('Venta cobrada. Estado de reserva pendiente de sincronizar.');
         }
       }else{
-        if(!mesaClosePending)showToast('✓ Venta guardada');
+        if(!mesaClosePending)avisar('✓ Venta guardada');
       }
       volverALista();
   }finally{
