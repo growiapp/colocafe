@@ -5217,6 +5217,7 @@ async function cerrarMesaOReserva(){
     // Ask which operator served this table
     const sel=$('cobro-operador-sel');if(!sel)return;
     renderOperatorSelect(sel,true);
+    if(ultimoOperadorCobro&&ultimoOperadorCobro.mesa===String(mesaActivaId)&&[...sel.options].some(o=>o.value===ultimoOperadorCobro.op))sel.value=ultimoOperadorCobro.op;
     $('cobro-nuevo-op-wrap').style.display='none';
     // Store pending data and show operator modal
     pendingCobroCallback=()=>ejecutarCobro();
@@ -5264,6 +5265,7 @@ async function confirmarOperadorCobroUnaVez(){
   ejecutarCobro(op,operatorId);
 }
 const cobrosEnCurso=new Set();
+let ultimoOperadorCobro=null; // N-01: al reintentar un cobro que no quedó registrado se ofrece el mismo operador
 async function ejecutarCobro(operadorCobro,operatorIdCobro){
   // El cobro corre después de elegir el operador: se vuelve a verificar el diario y la sesión del detalle antes de registrar la venta.
   if(operacionesBloqueadasPorDiario()||!edicionDelDetallePermitida())return;
@@ -5421,6 +5423,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
         showToast('Esta mesa tiene un cobro anterior pendiente con otros productos o forma de pago. Revisalo en Operaciones pendientes antes de cobrar.');
         return;
       }
+      const stockAntes=new Map(items.map(i=>{const p=findProductById(i.prodId);return [p,p?.stock];}).filter(([p])=>p));
       const nuevas=ventaPendiente.length?ventaPendiente:items.map((item,n)=>{
         const p=findProductById(item.prodId),l=resumen.lineas[n];
         const varsExtra=(item.vars||[]).reduce((s,v)=>s+v.precio,0);
@@ -5444,12 +5447,29 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           _sb_sync_status:'pending',_sb_sync_error:'',_sb_synced_at:'',_sb_retry_count:0,
           _open_order_sb_id:_openOrderSbId};
       });
+      const ventasIdsAntes=turnoActivo?turnoActivo.ventasIds:null;
       if(!ventaPendiente.length){
         ventas.push(...nuevas);
         if(turnoActivo)turnoActivo.ventasIds=[...(turnoActivo.ventasIds||[]),...ventaIds];
       }
+      // N-01: la venta queda registrada recién cuando está en el almacenamiento del dispositivo (o en el diario, que manda al
+      // arrancar). Si no, se deshace lo que el cobro cambió en memoria, la mesa y el pedido quedan como estaban y se avisa.
+      try{save();}catch(err){console.error('[Caja] no se pudo guardar la venta en el dispositivo',err);}
+      const guardadas=leerLS('ventas')||'';
+      if(!nuevas.every(v=>guardadas.includes(`"id":"${v.id}"`))){
+        if(!ventaPendiente.length){
+          const ids=new Set(nuevas.map(v=>v.id));
+          for(let i=ventas.length-1;i>=0;i--)if(ids.has(ventas[i]?.id))ventas.splice(i,1);
+          if(turnoActivo)turnoActivo.ventasIds=ventasIdsAntes;
+          stockAntes.forEach((v,prod)=>{prod.stock=v;});
+        }
+        if(esReserva&&reservaOptimisticHidden&&reservasBeforeCobro){reservas=reservasBeforeCobro;clearReservationHidden(reservaOptimisticHidden);renderReservasSection();}
+        try{save();}catch(_){}
+        ultimoOperadorCobro={mesa:String(mesaId),op:operadorCobro||''};
+        showToast('El cobro NO quedó registrado: no hay espacio en este dispositivo para guardarlo. La mesa y el pedido siguen igual; liberá espacio y volvé a cobrar.',8000);
+        return;
+      }
       ventaLocalCreada=true;
-      save();
       let salesSync=null;
       try{
         if(!window.saveSaleRowsToSupabase) throw new Error('No hay guardado de ventas disponible');
