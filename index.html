@@ -3026,6 +3026,7 @@ function aplicarContextoVerificado(nuevo){
   apartarTurnoPorCuenta(est,nuevo.user_id,nuevo.store_id);
   const sinCambios=prev&&prev.user_id===nuevo.user_id&&!cambiaLocal&&!movidos&&est.turno===turnoAntes&&String(config?.activeStoreId||'')===nuevo.store_id;
   if(sinCambios)return true;
+  generacionContexto++; // descarta las lecturas y cobros en vuelo del contexto anterior
   return confirmarTransicion({listas:est.listas,turno:est.turno,aparcados:est.aparcados,cuarentena:est.cuarentena,
     ctx:{user_id:nuevo.user_id,store_id:nuevo.store_id,verified_at:new Date().toISOString()},config:{...config,activeStoreId:nuevo.store_id}});
 }
@@ -3040,6 +3041,11 @@ function preservarTurnoLocal(t,motivo,reemplazo){
 // ── Envíos en curso (M-02) ──
 // Cada envío guarda el contexto con que empezó; justo antes de cada escritura, si el contexto ya no es ese, se corta.
 const enviosActivos=new Set();
+// Lecturas y cobros que esperan la red guardan la firma del contexto con que empezaron. Cada cierre de sesión y cada cambio de
+// cuenta o de local la cambia: una respuesta que vuelve después no toca memoria, almacenamiento ni pantalla del contexto nuevo.
+let generacionContexto=0;
+const firmaOperativa=()=>`${generacionContexto}|${String(window.__sesionUserId?.()||'')}|${String(config?.activeStoreId||'')}`;
+function mientrasSigaElContexto(){const f=firmaOperativa();return()=>firmaOperativa()===f;}
 const claveContexto=()=>{const c=contextoVerificadoActual();return c?`${c.user_id}|${c.store_id}`:'';};
 async function conEnvio(fn){const t={clave:claveContexto()};enviosActivos.add(t);try{return await fn();}finally{enviosActivos.delete(t);}}
 function fetchConControlDeOrigen(input,init){
@@ -7994,6 +8000,7 @@ if(config.webappUrl){loadFromSheets();}
 
   function clearSupabaseContext(render=true){
     if(typeof invalidarDetalle==='function')invalidarDetalle(); // N-03: el detalle abierto era de la sesión que termina
+    if(typeof generacionContexto!=='undefined')generacionContexto++; // B1/B2: lo que está en vuelo era de la sesión que termina
     supabaseSession=null;
     supabaseUser=null;
     supabaseProfile=null;
@@ -8359,6 +8366,7 @@ if(config.webappUrl){loadFromSheets();}
   let ooRecentLocalCreateUntil=0;
   let ooLastUserErrorToast=0;
   let ooRefreshPromise=null;
+  let ooRefreshFirma='';
   let ooLoadingStartedAt=0;
   let ooLastRefreshReason='';
   let ooLastRefreshStartedAt='';
@@ -8580,9 +8588,12 @@ if(config.webappUrl){loadFromSheets();}
   function loadOpenOrdersFromSupabase(options={}){
     const reason=options.reason||'direct';
     if(ooRefreshPromise){
+      // La lectura en curso es de otra sesión o de otro local: se descarta sola; al terminar se lee para el contexto actual.
+      if(ooRefreshFirma!==firmaOperativa())return ooRefreshPromise.then(()=>loadOpenOrdersFromSupabase(options));
       ooTechLog('refresh skipped concurrent',{reason,activeReason:ooLastRefreshReason});
       return ooRefreshPromise;
     }
+    ooRefreshFirma=firmaOperativa();
     ooLastRefreshReason=reason;
     ooLastRefreshStartedAt=new Date().toISOString();
     ooTechLog('refresh start',{reason});
@@ -8614,6 +8625,9 @@ if(config.webappUrl){loadFromSheets();}
     return ooRefreshPromise;
   }
   async function loadOpenOrdersFromSupabaseInner({force=false,silent=true,reason='direct'}={}){
+    const vigente=mientrasSigaElContexto();
+    // Antes de cada escritura (mesas, guardado, conciliación, estado, avisos): si el contexto cambió, la respuesta se descarta.
+    const descartada=()=>{if(vigente())return false;ooLastFetch=0;ooTechLog('refresh discarded context_changed',{reason});return true;};
     const now=Date.now();
     const minCooldown=force?OO_FORCE_COOLDOWN:OO_COOLDOWN;
     // Cooldown: evitar spam
@@ -8678,6 +8692,7 @@ if(config.webappUrl){loadFromSheets();}
           .eq('status','open'),'open_orders_retry'));
         if(ordersErr)throw ordersErr;
       }
+      if(descartada())return{ok:false,reason:'context_changed'};
 
       if(!orders||!orders.length){
         if(Date.now()<ooRecentLocalCreateUntil&&ooLocalMesaCount()){
@@ -8697,6 +8712,7 @@ if(config.webappUrl){loadFromSheets();}
       }
 
       const soldRows=await findSoldOpenOrderRows(orders.map(o=>o.id),storeId);
+      if(descartada())return{ok:false,reason:'context_changed'};
       const soldOrderIds=new Set((soldRows||[]).map(row=>String(row.open_order_id||'')).filter(Boolean));
       if(soldOrderIds.size){
         reconcileSoldOpenOrders(Array.from(soldOrderIds),{rows:soldRows,reason:'load'}).catch(err=>{
@@ -8719,6 +8735,7 @@ if(config.webappUrl){loadFromSheets();}
         .select('id,open_order_id,product_id,product_name,quantity,unit_price,variants,note,sort_order,metadata')
         .eq('store_id',storeId)
         .in('open_order_id',orderIds),'open_order_items');
+      if(descartada())return{ok:false,reason:'context_changed'};
       if(itemsErr)throw itemsErr;
 
       // Agrupar items por pedido
@@ -8769,6 +8786,7 @@ if(config.webappUrl){loadFromSheets();}
       ooRenderVisible();
       return{ok:true,count:orders.length};
     }catch(err){
+      if(descartada())return{ok:false,reason:'context_changed'};
       const msg=err?.message||String(err)||'Error desconocido';
       ooRememberError(err);
       ooSetState('error',msg);
@@ -8793,6 +8811,7 @@ if(config.webappUrl){loadFromSheets();}
   }
 
   async function loadSingleOpenOrderFromSupabase(id){
+    const vigente=mientrasSigaElContexto(); // la respuesta solo se aplica en el contexto que la pidió
     if(!ooReady()){
       const ready=await waitForOOReady(3000);
       if(!ready)return null;
@@ -8823,6 +8842,7 @@ if(config.webappUrl){loadFromSheets();}
       }
       if(!order||order.status!=='open')return null;
       const soldRows=await findSoldOpenOrderRows([order.id],storeId);
+      if(!vigente())return null;
       if((soldRows||[]).length){
         reconcileSoldOpenOrders([order.id],{rows:soldRows,reason:'load_single'}).catch(err=>{
           if(window.canShowClientTechnicalUi?.())console.warn('[open_orders] single sold order reconciliation failed',err);
@@ -8835,6 +8855,7 @@ if(config.webappUrl){loadFromSheets();}
         .select('id,open_order_id,product_id,product_name,quantity,unit_price,variants,note,sort_order,metadata')
         .eq('store_id',storeId)
         .eq('open_order_id',order.id),'single_open_order_items');
+      if(!vigente())return null;
       if(itemsErr)throw itemsErr;
       const itemMap=ooItemsDesdeFilas(items);
       const meta=order.metadata||{};
@@ -8852,6 +8873,7 @@ if(config.webappUrl){loadFromSheets();}
       ooSetState('supabase','');ooLastRead=ooStamp();ooUpdateDiag();
       return mesa;
     }catch(err){
+      if(!vigente())return null;
       ooRememberError(err);
       ooSetState('error',err?.message||String(err));
       ooUpdateDiag();
