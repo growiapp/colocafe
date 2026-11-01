@@ -3735,7 +3735,59 @@ function resumenCobro(items,descTicket){
 function totalCobroActual(){return resumenCobro(Object.values(carrito),descuentoTicket).total;}
 function getCartItemVariantsText(item){return(item.vars||[]).map(v=>v.nombre+(v.precio?` +${fmt(v.precio)}`:'')).join(' · ');}
 function carritoTotalFn(c){return Object.values(c).reduce((s,i)=>s+carritoItemTotal(i),0);}
-function stockStatus(p){if(p.ilimitado)return'ok';return p.stock<=0?'out':p.stock<=5?'low':'ok';}
+// ── Inventario (Stock Durability) ──
+// p.stock es el saldo teórico confirmado: lo último que se leyó del servidor, positivo, cero o negativo. El servidor lo descuenta al
+// insertar cada ítem de venta; acá nunca se muta por una venta. Solo se resta, como estimación, lo que no se observó en esa lectura.
+// _stock_pending lo apaga únicamente una lectura que vio el ítem en el mismo snapshot que el saldo; el estado de sincronización
+// de la fila no alcanza, porque una venta parcial o con la respuesta perdida puede estar ya descontada en el servidor.
+const STOCK_OBS_MAX=100; // ponytail: tope por largo de URL; lo que excede queda como estimado hasta la lectura siguiente
+let stockRev=0,stockFotoFirma='',stockFotoEstimada=false,stockPendCache=null;
+function filaCuentaParaStock(r){
+  if(!r||r._stock_pending===false)return false;
+  if(r._stock_pending===undefined&&!ventaFilaPendiente(r))return false;
+  // F0-B: lo retenido de otra cuenta o de otro local no se muestra ni se toca desde este contexto.
+  const store=String(config?.activeStoreId||''),uid=String(window.__sesionUserId?.()||''),o=r._origin;
+  if(!store)return !o||!!o.sin_contexto; // sin Supabase: el stock vive en el dispositivo
+  return !!o&&!o.legacy&&!o.sin_contexto&&o.store_id===store&&o.user_id===uid;
+}
+function stockPendientes(){
+  const firma=firmaOperativa();
+  if(stockPendCache&&stockPendCache.ventas===ventas&&stockPendCache.largo===ventas?.length&&stockPendCache.rev===stockRev&&stockPendCache.firma===firma)return stockPendCache.mapa;
+  const mapa=new Map();
+  (ventas||[]).forEach(r=>{
+    if(!filaCuentaParaStock(r))return;
+    const p=findProductById(r.prodId);
+    if(p){const k=getProductFrontId(p);mapa.set(k,(mapa.get(k)||0)+(Number(r.cantidad)||0));}
+  });
+  stockPendCache={ventas,largo:ventas?.length,rev:stockRev,firma,mapa};
+  return mapa;
+}
+function stockInfo(p){
+  const confirmado=Number(p?.stock)||0,ilimitado=!!p?.ilimitado;
+  const pendiente=ilimitado?0:(stockPendientes().get(getProductFrontId(p))||0),teorico=confirmado-pendiente;
+  const fotoVigente=!config?.activeStoreId||(stockFotoFirma===firmaOperativa()&&!stockFotoEstimada);
+  return {ilimitado,confirmado,pendiente,teorico,disponible:Math.max(0,teorico),discrepancia:teorico<0?-teorico:0,estimado:!ilimitado&&(pendiente>0||!fotoVigente)};
+}
+function stockFilasPorObservar(){
+  const ids=[...new Set((ventas||[]).filter(filaCuentaParaStock).map(r=>String(r.id||'')).filter(Boolean))];
+  return {ids:ids.slice(0,STOCK_OBS_MAX),truncada:ids.length>STOCK_OBS_MAX};
+}
+function stockAplicarFoto(consultadas,observadas,{estimada=false}={}){
+  const preguntadas=new Set(consultadas),vistas=new Set(observadas);
+  (ventas||[]).forEach(r=>{
+    const id=String(r?.id||'');
+    if(preguntadas.has(id)&&filaCuentaParaStock(r))r._stock_pending=!vistas.has(id);
+  });
+  stockFotoFirma=firmaOperativa();stockFotoEstimada=!!estimada;stockRev++;
+  try{save();}catch(err){console.error('[Stock] no se pudo guardar la lectura en el dispositivo',err);} // se vuelve a observar en la próxima
+}
+function stockEtiqueta(p){
+  if(p?.ilimitado)return'';
+  const i=stockInfo(p);
+  return `<span class="prod-adm-stock-info" style="font-size:11px;color:var(--ink2)">Disp. ${i.disponible}${i.discrepancia?` · <b style="color:var(--red)">Discrepancia ${i.discrepancia}: conciliar</b>`:''}${i.estimado?' · estimado':' · confirmado'}</span>`;
+}
+function stockStatus(p){if(p.ilimitado)return'ok';const d=stockInfo(p).disponible;return d<=0?'out':d<=5?'low':'ok';}
+// fin modelo stock
 function productRefs(product){
   return [product?.id,product?._sb_id,product?.legacy_id].filter(v=>v!==undefined&&v!==null&&String(v)!=='').map(v=>String(v));
 }
@@ -4540,9 +4592,12 @@ function limpiarVentas(){
 }
 function renderStockAlerts(){
   const el=$('stock-alerts');if(!el)return;
-  const out=menu.filter(p=>!p.ilimitado&&p.stock<=0),low=menu.filter(p=>!p.ilimitado&&p.stock>0&&p.stock<=5);
-  el.innerHTML=(out.length?`<div class="alert-banner crit">⛔ Sin stock: ${out.map(p=>p.name).join(', ')}</div>`:'')
-    +(low.length?`<div class="alert-banner">⚠️ Stock bajo: ${low.map(p=>`${p.name} (${p.stock})`).join(', ')}</div>`:'');
+  const lista=menu.filter(p=>!p.ilimitado).map(p=>({p,i:stockInfo(p)}));
+  const out=lista.filter(x=>x.i.disponible<=0),low=lista.filter(x=>x.i.disponible>0&&x.i.disponible<=5),disc=lista.filter(x=>x.i.discrepancia>0);
+  const est=x=>x.i.estimado?' (estimado)':'';
+  el.innerHTML=(out.length?`<div class="alert-banner crit">⛔ Sin stock: ${out.map(x=>`${x.p.name}${est(x)}`).join(', ')}</div>`:'')
+    +(low.length?`<div class="alert-banner">⚠️ Stock bajo: ${low.map(x=>`${x.p.name} (${x.i.disponible}${est(x)})`).join(', ')}</div>`:'')
+    +(disc.length?`<div class="alert-banner crit">⚠️ Discrepancia de stock, hay que conciliar: ${disc.map(x=>`${x.p.name} (faltan ${x.i.discrepancia}${est(x)})`).join(', ')}</div>`:'');
 }
 
 // ══════════════════════════════════════════════════
@@ -5477,7 +5532,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           _reservation_local_id:reservaActiva?.id||null,_reservation_sb_id:reservaActiva?._sb_id||null,
           _customer_local_id:reservaActiva?.clienteId||null,_customer_sb_id:clienteReserva?._sb_id||null,
           _source_kind:esReserva?'reserva':'mesa',
-          _sb_sync_status:'pending',_sb_sync_error:'',_sb_synced_at:'',_sb_retry_count:0,
+          _sb_sync_status:'pending',_sb_sync_error:'',_sb_synced_at:'',_sb_retry_count:0,_stock_pending:true,
           _open_order_sb_id:_openOrderSbId};
       });
       const ventasIdsAntes=turnoActivo?turnoActivo.ventasIds:null;
@@ -5502,20 +5557,9 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
         return;
       }
       ventaLocalCreada=true;
-      // B3: el stock se descuenta recién con la venta guardada; así, si la venta no se guardó, el almacenamiento nunca tuvo el stock
-      // descontado y no hay nada que restaurar. Si lo que falla es guardar el stock, la venta vale y se avisa: no se da por guardado.
-      let avisoStock='';
-      if(!ventaPendiente.length){
-        const descontados=[];
-        items.forEach(item=>{const p=findProductById(item.prodId);if(p&&!p.ilimitado){p.stock=Math.max(0,(p.stock||0)-item.qty);if(!descontados.includes(p))descontados.push(p);}});
-        if(descontados.length){
-          try{save();}catch(err){console.error('[Caja] no se pudo guardar el stock en el dispositivo',err);}
-          const menuGuardado=safeJsonParse(leerLS('menu'),[])||[];
-          const sinGuardar=descontados.filter(p=>!menuGuardado.some(x=>sameId(x.id,p.id)&&Number(x.stock)===Number(p.stock)));
-          if(sinGuardar.length)avisoStock=`Ojo: el stock de ${sinGuardar.map(p=>p.name).join(', ')} no se pudo guardar en este dispositivo (sin espacio). Revisalo en Menú.`;
-        }
-      }
-      const avisar=(t,ms)=>avisoStock?showToast(`${t} ${avisoStock}`,9000):showToast(t,ms);
+      // B3: el stock no se muta acá. La fila guardada con _stock_pending ya lo descuenta en la estimación; si la venta no se guardó,
+      // no hay fila y no hay nada que restaurar. El descuento real lo hace el servidor al insertar el ítem.
+      const avisar=(t,ms)=>showToast(t,ms);
       let salesSync=null;
       try{
         if(!window.saveSaleRowsToSupabase) throw new Error('No hay guardado de ventas disponible');
@@ -5779,7 +5823,7 @@ function renderProdGrid(){
       <div class="cat-dot" style="background:${cat.color}"></div>
       <div class="prod-name">${escapeHtml(p.name)}</div>
       <div class="prod-price">${fmt(safeProductPrice(p))}</div>
-      ${!p.ilimitado&&st==='low'?`<div class="prod-low-txt">⚠ ${p.stock} restantes</div>`:''}
+      ${!p.ilimitado&&st==='low'?`<div class="prod-low-txt">⚠ ${stockInfo(p).disponible} restantes${stockInfo(p).estimado?' (est.)':''}</div>`:''}
       ${!p.ilimitado&&st==='out'?'<div class="out-lbl">Stock 0</div>':''}
       ${hasVars?`<div class="prod-mods-hint">🔧 Variantes</div>`:''}
       ${qty>0?`<div class="prod-badge">${qty}</div>`:''}
@@ -6863,8 +6907,8 @@ function addCat(){
 function addCatFromModal(){ abrirNuevaCatDesdeProducto('ajustes'); }
 function populateCatSelect(){const el=$('m-cat');if(el)el.innerHTML=cats.sort((a,b)=>a.name.localeCompare(b.name,'es')).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');}
 function toggleIlimitado(){const ilim=$('m-ilimitado')?.checked;$('m-stock-wrap').style.display=ilim?'none':'block';}
-function adjProdStock(id,d){const p=menu.find(x=>sameId(x.id,id));if(!p||p.ilimitado)return;p.stock=Math.max(0,(p.stock||0)+d);save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
-function setProdStock(id,val){const p=menu.find(x=>sameId(x.id,id));if(!p||p.ilimitado)return;const parsed=parseInt(val,10);p.stock=Math.max(0,isNaN(parsed)?0:parsed);save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
+function adjProdStock(id,d){const p=menu.find(x=>sameId(x.id,id));if(!p||p.ilimitado)return;p.stock=(Number(p.stock)||0)+d;save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
+function setProdStock(id,val){const p=menu.find(x=>sameId(x.id,id));if(!p||p.ilimitado)return;const parsed=parseInt(val,10),info=stockInfo(p);if(isNaN(parsed)||parsed===info.teorico){renderMenuAdm();return;}p.stock=Math.max(0,parsed)+info.pendiente;save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
 function toggleProdIlimitado(id,checked){const p=menu.find(x=>sameId(x.id,id));if(!p)return;p.ilimitado=checked;save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
 
 function renderMenuAdm(){
@@ -6884,11 +6928,12 @@ function renderMenuAdm(){
     <span class="prod-adm-precio">${fmt(p.price)}</span>
     <div class="prod-adm-stock-ctrl" style="${p.ilimitado?'display:none':''}">
       <button class="qty-btn" type="button" onclick="adjProdStock('${p.id}',-1)">−</button>
-      <input class="prod-adm-stock-num" type="number" value="${p.ilimitado?0:(p.stock||0)}" min="0"
+      <input class="prod-adm-stock-num" type="number" value="${p.ilimitado?0:stockInfo(p).teorico}" min="0"
         onchange="setProdStock('${p.id}',this.value)"
         onblur="setProdStock('${p.id}',this.value)"
         onkeydown="if(event.key==='Enter'){setProdStock('${p.id}',this.value);this.blur();}">
       <button class="qty-btn" type="button" onclick="adjProdStock('${p.id}',1)">+</button>
+      ${stockEtiqueta(p)}
     </div>
     <label class="ilim-toggle"><input type="checkbox" ${p.ilimitado?'checked':''} onchange="toggleProdIlimitado('${p.id}',this.checked)"> ∞</label>
     <div class="icon-btn" onclick="openProdModal('${p.id}')" title="Editar">
@@ -6905,7 +6950,7 @@ function openProdModal(id){
     const p=menu.find(x=>sameId(x.id,id));if(!p)return;
     $('prod-modal-title').textContent='Editar producto';
     $('m-nombre').value=p.name||'';$('m-precio').value=p.price;$('m-cat').value=p.cat;
-    $('m-stock').value=p.stock||0;$('m-ilimitado').checked=!!p.ilimitado;
+    $('m-stock').value=stockInfo(p).teorico;$('m-ilimitado').checked=!!p.ilimitado;
     $('m-stock-wrap').style.display=p.ilimitado?'none':'block';
     _variantesEdit=JSON.parse(JSON.stringify(p.variantes||[]));
     const safeId=String(id).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
@@ -6946,13 +6991,18 @@ async function guardarProducto(){
   if(!name||!price){showToast('Completá nombre y precio');return;}
   const ilimitado=!!$('m-ilimitado')?.checked;
   // No resetear stock a 0 al marcar ilimitado — conservar el valor para cuando se desactive
-  const stock=Math.max(0,parseInt($('m-stock')?.value)||0);
   const existing=editId?menu.find(x=>sameId(x.id,editId)):null;
+  // Editar nombre, precio o categoría no escribe stock. Solo un cambio real del campo es un ajuste, y va con compare-and-set.
+  const stockIngresado=parseInt($('m-stock')?.value),infoStock=existing?stockInfo(existing):null;
+  const stockCambiado=!!existing&&!ilimitado&&!isNaN(stockIngresado)&&stockIngresado!==infoStock.teorico;
+  const stockAntes=existing?infoStock.confirmado:null;
+  const stock=!existing?Math.max(0,stockIngresado||0):stockCambiado?Math.max(0,stockIngresado)+infoStock.pendiente:stockAntes;
   const product={...(existing||{}),id:existing?.id||`prod_${Date.now()}`,name,price,cat,stock,ilimitado,variantes:_variantesEdit,active:true};
   const btn=$('prod-modal-actions')?.querySelector('.btn-save');
   if(btn){btn.disabled=true;btn.textContent='Guardando…';}
   try{
     await window.saveProductToSupabase(product,{categoryRows:cats});
+    if(stockCambiado)await window.saveProductStockToSupabase(product,{expected:stockAntes});
     if(existing) Object.assign(existing,product);
     else menu.push(product);
     localStorage.setItem('menu',JSON.stringify(menu));
@@ -10090,6 +10140,7 @@ if(config.webappUrl){loadFromSheets();}
 (()=>{
   let catalogSbClient=null;
   let catalogLoadState='local';
+  let catalogLoadSeq=0;
   let catalogLoadError='';
   let catalogLastSyncAt='';
   let catalogLastProbeAt='';
@@ -10136,6 +10187,8 @@ if(config.webappUrl){loadFromSheets();}
     showToast('No tenés permisos para editar el menú. Pedile a un administrador que revise tu acceso.',4200);
   }
   window.handleCatalogWriteError=function(err,kind='producto'){
+    if(err?.code==='STOCK_CONFLICT'){showToast('El stock cambió mientras lo editabas: no se guardó tu ajuste. Revisá el saldo actual y volvé a intentar.',6000);return;}
+    if(err?.code==='STOCK_NOT_UPDATED'){showCatalogPermissionMessage();return;}
     setCatalogLoadState('error',err?.message||String(err));
     if(catalogCanTechLog()) console.error('[Catalog write UI error]',{kind,error:err});
     if(isCatalogPermissionError(err)){
@@ -10361,7 +10414,82 @@ if(config.webappUrl){loadFromSheets();}
     if(error) throw error;
     return data||[];
   }
-  async function fetchCatalogSupabaseDiagnostics({includeRows=false}={}){
+  // Una sola sentencia lee el saldo y qué ítems pendientes ya existen: el snapshot es el mismo y una venta no se descuenta dos veces.
+  async function readStockPhoto(client,storeId,columns){
+    const {ids,truncada}=stockFilasPorObservar();
+    const leer=conObservacion=>{
+      let q=client.from('products').select(conObservacion?`${columns},sale_items(legacy_id)`:columns).eq('store_id',storeId);
+      if(conObservacion)q=q.in('sale_items.legacy_id',ids);
+      return q.order('name');
+    };
+    let res=await leer(ids.length>0),sinRelacion=false;
+    if(res.error&&ids.length&&res.error.code==='PGRST200'){sinRelacion=true;res=await leer(false);}
+    if(res.error)throw res.error;
+    const rows=res.data||[],observadas=new Set();
+    rows.forEach(r=>(r.sale_items||[]).forEach(i=>observadas.add(String(i.legacy_id))));
+    let consultadas=sinRelacion?[]:ids;
+    const resto=consultadas.filter(id=>!observadas.has(id));
+    if(resto.length){
+      // Un ítem sin producto de este local nunca movió este stock. Esta segunda lectura no comparte snapshot, y por eso
+      // solo puede dar por vistos esos ítems: uno con producto del local se resuelve en una lectura futura.
+      const {data,error}=await client.from('sale_items').select('legacy_id,product_id').eq('store_id',storeId).in('legacy_id',resto);
+      if(!error){
+        const delLocal=new Set(rows.map(r=>String(r.id)));
+        (data||[]).filter(i=>!i.product_id||!delLocal.has(String(i.product_id))).forEach(i=>observadas.add(String(i.legacy_id)));
+      }
+    }
+    return {rows,consultadas,observadas:[...observadas],estimada:truncada||sinRelacion};
+  }
+  async function leerYAplicarStock(){
+    if(!hasCatalogSupabaseReady())return false;
+    const storeId=getCatalogStoreId(),client=getCatalogSupabaseClient();
+    if(!client||!storeId||!isValidUuid(storeId))return false;
+    const sigue=mientrasSigaElContexto();
+    try{
+      if(!await getCatalogSession(client))return false;
+      const foto=await readStockPhoto(client,storeId,'id,stock,unlimited');
+      if(!sigue())return false; // M-02: una respuesta de otro contexto no toca memoria, almacenamiento ni pantalla
+      foto.rows.forEach(row=>{
+        const p=menu.find(x=>String(x._sb_id||'')===String(row.id));
+        if(p){p.stock=Number(row.stock)||0;p.ilimitado=!!row.unlimited;}
+      });
+      stockAplicarFoto(foto.consultadas,foto.observadas,{estimada:foto.estimada});
+      try{renderProdGrid();}catch(_){}
+      try{renderStockAlerts();}catch(_){}
+      if(!document.activeElement?.classList?.contains('prod-adm-stock-num')){try{renderMenuAdm();}catch(_){}}
+      return true;
+    }catch(err){
+      if(sigue())stockFotoFirma='';
+      if(catalogCanTechLog())console.warn('[Stock] no se pudo leer el saldo',err);
+      return false;
+    }
+  }
+  let stockRefreshEnCurso=null,stockRefreshOtra=false;
+  window.refreshStockFromSupabase=function(){
+    if(stockRefreshEnCurso){stockRefreshOtra=true;return stockRefreshEnCurso;}
+    stockRefreshEnCurso=(async()=>{let ok=false;do{stockRefreshOtra=false;ok=await leerYAplicarStock();}while(stockRefreshOtra);return ok;})()
+      .finally(()=>{stockRefreshEnCurso=null;});
+    return stockRefreshEnCurso;
+  };
+  // Los ajustes de un mismo producto salen en orden: cada uno compara contra el saldo que dejó el anterior.
+  const stockAjustesEnCola=new Map();
+  function persistirAjusteStock(product,antes){
+    if(!product||Number(product.stock)===antes||!hasCatalogSupabaseReady())return;
+    const clave=String(product._sb_id||product.id),sigue=mientrasSigaElContexto();
+    const envio=(stockAjustesEnCola.get(clave)||Promise.resolve())
+      .then(()=>sigue()?window.saveProductStockToSupabase(product,{expected:antes}):null)
+      .catch(err=>{
+        if(!sigue())return;
+        product.stock=err?.code==='STOCK_CONFLICT'?Number(err.currentStock)||0:antes; // no quedan a la vista unidades sin confirmar
+        try{save();}catch(_){}
+        try{renderMenuAdm();}catch(_){}
+        try{renderStockAlerts();}catch(_){}
+        warnSupabaseCatalogFailure('stock',err);
+      });
+    stockAjustesEnCola.set(clave,envio);
+  }
+  // fin foto stock
+  async function fetchCatalogSupabaseDiagnostics({includeRows=false,stockPhoto=false}={}){
     const cfg=getCatalogConfig();
     const base={
       source: catalogLoadState,
@@ -10382,14 +10510,17 @@ if(config.webappUrl){loadFromSheets();}
     try{
       const session=await getCatalogSession(client);
       if(!session) return {...base,error:'No hay sesión activa'};
-      const [{data:storeRow,error:storeErr},{data:roleRow,error:roleErr},categoryRows,productRows]=await Promise.all([
+      const [{data:storeRow,error:storeErr},{data:roleRow,error:roleErr},categoryRows,productPhoto]=await Promise.all([
         client.from('stores').select('id,name').eq('id',cfg.activeStoreId).maybeSingle(),
         client.from('store_users').select('role').eq('store_id',cfg.activeStoreId).eq('user_id',session.user.id).maybeSingle(),
         queryStoreCategories(client,cfg.activeStoreId,false),
-        queryStoreProducts(client,cfg.activeStoreId,false)
+        stockPhoto
+          ?readStockPhoto(client,cfg.activeStoreId,'id,store_id,category_id,legacy_id,name,price,stock,unlimited,active,variants,metadata,created_at,updated_at')
+          :queryStoreProducts(client,cfg.activeStoreId,false).then(rows=>({rows}))
       ]);
       if(storeErr) throw storeErr;
       if(roleErr) throw roleErr;
+      const productRows=productPhoto.rows;
       const activeCategories=(categoryRows||[]).filter(r=>r.active!==false);
       const activeProducts=(productRows||[]).filter(r=>r.active!==false);
       const maps=buildCategoryMaps(activeCategories);
@@ -10403,7 +10534,8 @@ if(config.webappUrl){loadFromSheets();}
         productRows: includeRows?productRows:[],
         supabaseCounts:{categories:activeCategories.length,products:activeProducts.length},
         warnings,
-        session
+        session,
+        stockPhoto:stockPhoto?productPhoto:null
       };
     }catch(err){
       return {...base,error:err.message||String(err)};
@@ -10437,11 +10569,18 @@ if(config.webappUrl){loadFromSheets();}
       updateCatalogBootState({state:'fallback',source:'local',fallbackReason:'store_missing'});
       return false;
     }
+    const sigue=mientrasSigaElContexto(),cargaId=++catalogLoadSeq;
+    const retenida=()=>{ // M-02: la respuesta es de otro contexto. Solo se libera el estado, si no hay una carga más nueva.
+      if(cargaId===catalogLoadSeq){setCatalogLoadState('local');updateCatalogBootState({state:'fallback',source:'local',fallbackReason:'context_changed'});}
+      return false;
+    };
+    stockFotoFirma=''; // hasta tener lectura nueva, el saldo es estimado
     setCatalogLoadState('syncing');
     updateCatalogBootState({state:'syncing',source:'pending',fallbackReason:''});
     refreshCatalogUi();
     try{
-      const diag=await withCatalogTimeout(fetchCatalogSupabaseDiagnostics({includeRows:true}));
+      const diag=await withCatalogTimeout(fetchCatalogSupabaseDiagnostics({includeRows:true,stockPhoto:true}));
+      if(!sigue())return retenida();
       catalogCurrentStoreName=diag.storeName||catalogCurrentStoreName;
       catalogCurrentRole=diag.role||catalogCurrentRole;
       catalogSupabaseCounts=diag.supabaseCounts||catalogSupabaseCounts;
@@ -10475,6 +10614,7 @@ if(config.webappUrl){loadFromSheets();}
       localStorage.setItem('menu',JSON.stringify(menu));
       localStorage.setItem(APP_DATA_VERSION_KEY,APP_DATA_VERSION);
       localStorage.setItem(CATALOG_BACKUP_KEY,JSON.stringify({version:APP_DATA_VERSION,appVersion:APP_VERSION,storeId,readAt:new Date().toISOString(),cats,menu}));
+      if(diag.stockPhoto)stockAplicarFoto(diag.stockPhoto.consultadas,diag.stockPhoto.observadas,{estimada:diag.stockPhoto.estimada});
       setCatalogLoadState('supabase');
       updateCatalogBootState({state:'ready',source:'supabase',fallbackReason:'',localCategories:cats.length,localProducts:menu.length,supabaseCategories:catalogSupabaseCounts.categories,supabaseProducts:catalogSupabaseCounts.products,lastSupabaseReadAt:catalogLastProbeAt});
       refreshCatalogUi();
@@ -10482,6 +10622,7 @@ if(config.webappUrl){loadFromSheets();}
       console.info('[Colo Café]',{APP_VERSION,APP_DATA_VERSION,catalogSource:'supabase',products:menu.length,categories:cats.length,storeId});
       return true;
     }catch(err){
+      if(!sigue())return retenida();
       console.error('[Catalog Supabase load failed]', err);
       setCatalogLoadState('error', err.message||String(err));
       updateCatalogBootState({state:'fallback',source:'local',fallbackReason:err.message||String(err),lastSupabaseReadAt:catalogLastProbeAt});
@@ -10591,6 +10732,7 @@ if(config.webappUrl){loadFromSheets();}
     }
     const existingRow=await findExistingProductRow(client,storeId,product,opts.productRows);
     const payload=mapProductToSupabase(product,storeId,existingRow,{categoryRows});
+    if(existingRow)delete payload.stock; // el stock local puede estar viejo: en una fila existente solo lo cambia un ajuste con compare-and-set
     let res;
     try{
       if(catalogCanTechLog()) console.log('[Catalog product -> Supabase]',{operation:existingRow?'update':'insert',role,storeId,category_id:payload.category_id,payload,existingRow});
@@ -10633,22 +10775,36 @@ if(config.webappUrl){loadFromSheets();}
     if(error) throw error;
     return data;
   };
-  // Actualización rápida y segura de stock/unlimited — sin tocar category_id
-  window.saveProductStockToSupabase=async function(product){
+  // Ajuste deliberado de stock o de unlimited, sin tocar category_id. El saldo nunca se escribe a ciegas: solo si sigue siendo el
+  // leído (expected). Así una venta que entró en el medio no se pisa; RLS filtra sin error, por eso se pide la fila de vuelta.
+  window.saveProductStockToSupabase=async function(product,{expected}={}){
     if(!product) return null;
     const {client,storeId}=await getCatalogWriteContext();
+    const compararYGuardar=async sbId=>{
+      const {data,error}=await client.from('products').update({stock:Number(product.stock)||0})
+        .eq('id',sbId).eq('store_id',storeId).eq('stock',expected).select('id');
+      if(error) throw error;
+      if(data?.length) return true;
+      const actual=await client.from('products').select('stock').eq('id',sbId).eq('store_id',storeId).maybeSingle();
+      if(actual.error) throw actual.error;
+      const conflicto=!!actual.data&&Number(actual.data.stock)!==Number(expected);
+      const err=new Error(conflicto?'El stock cambió en el servidor':'El servidor no aplicó el ajuste de stock');
+      err.code=conflicto?'STOCK_CONFLICT':'STOCK_NOT_UPDATED';
+      if(conflicto)err.currentStock=Number(actual.data.stock);
+      throw err;
+    };
     const sbId=product._sb_id||(isValidUuid(String(product.id||''))?String(product.id):'');
     if(sbId){
-      // UPDATE directo con sólo los campos de stock — sin FK de category_id
-      const {error}=await client.from('products')
-        .update({stock:Math.max(0,Number(product.stock)||0),unlimited:!!product.ilimitado})
-        .eq('id',sbId)
-        .eq('store_id',storeId);
+      if(expected!==undefined) return compararYGuardar(sbId);
+      const {data,error}=await client.from('products').update({unlimited:!!product.ilimitado}).eq('id',sbId).eq('store_id',storeId).select('id');
       if(error) throw error;
+      if(!data?.length){const err=new Error('El servidor no aplicó el cambio');err.code='STOCK_NOT_UPDATED';throw err;}
       return true;
     }
-    // Sin _sb_id: caer al save completo (INSERT o búsqueda por legacy_id)
-    return window.saveProductToSupabase(product,{categoryRows:cats});
+    // Sin _sb_id: INSERT o búsqueda por legacy_id. Si la fila ya existía, ese guardado no toca stock y el ajuste sigue con compare-and-set.
+    const row=await window.saveProductToSupabase(product,{categoryRows:cats});
+    if(expected!==undefined&&row?.id&&Number(row.stock)!==Number(product.stock)) return compararYGuardar(row.id);
+    return row;
   };
 
   window.syncLocalCatalogToSupabase=async function(){
@@ -10784,7 +10940,7 @@ if(config.webappUrl){loadFromSheets();}
       result.productSelect={ok:true,count:productRows.length};
       const firstProduct=productRows[0];
       if(firstProduct){
-        const productPayload={name:firstProduct.name,price:firstProduct.price,stock:firstProduct.stock,unlimited:firstProduct.unlimited,active:firstProduct.active,category_id:firstProduct.category_id,variants:firstProduct.variants};
+        const productPayload={name:firstProduct.name,price:firstProduct.price,unlimited:firstProduct.unlimited,active:firstProduct.active,category_id:firstProduct.category_id,variants:firstProduct.variants};
         const {error:updateProductError}=await client.from('products').update(productPayload).eq('id',firstProduct.id).eq('store_id',storeId);
         result.productUpdate=updateProductError?{ok:false,message:updateProductError.message,code:updateProductError.code,details:updateProductError.details,hint:updateProductError.hint}:{ok:true};
       }
@@ -10932,18 +11088,18 @@ if(config.webappUrl){loadFromSheets();}
   const _setProdStock=window.setProdStock;
   if(typeof _setProdStock==='function'){
     window.setProdStock=function(id,val,...args){
+      const product=menu.find(p=>String(p.id)===String(id)),antes=Number(product?.stock)||0;
       const res=_setProdStock.call(this,id,val,...args);
-      const product=menu.find(p=>String(p.id)===String(id));
-      if(product) window.saveProductStockToSupabase(product).catch(err=>warnSupabaseCatalogFailure('stock',err));
+      persistirAjusteStock(product,antes);
       return res;
     };
   }
   const _adjProdStock=window.adjProdStock;
   if(typeof _adjProdStock==='function'){
     window.adjProdStock=function(id,d,...args){
+      const product=menu.find(p=>String(p.id)===String(id)),antes=Number(product?.stock)||0;
       const res=_adjProdStock.call(this,id,d,...args);
-      const product=menu.find(p=>String(p.id)===String(id));
-      if(product) window.saveProductStockToSupabase(product).catch(err=>warnSupabaseCatalogFailure('stock',err));
+      persistirAjusteStock(product,antes);
       return res;
     };
   }
@@ -15362,6 +15518,7 @@ if(config.webappUrl){loadFromSheets();}
       if(window.reloadDashboardFromSupabase){
         setTimeout(()=>window.reloadDashboardFromSupabase({silent:true,forceRefresh:true}),0);
       }
+      setTimeout(()=>window.refreshStockFromSupabase?.(),0);
       return{ok:true,saleId,legacyId:saleData.legacy_id||salesLastTicket,readBack};
     }catch(err){
       // El estado local es de otra cuenta o local: no se marca acá, lo retoma la que la registró.
