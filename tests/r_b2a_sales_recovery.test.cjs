@@ -392,3 +392,104 @@ test('G · varias líneas con centavos y pago mixto cierran; un centavo de más 
   assert.equal(r.outcome,'READ_BACK_LINE_MISMATCH');
   assert.deepEqual(r.writes,[]);
 });
+
+// S7 (staging fe6525f3): el logout ocurrió con la conciliación esperando la red; la lectura siguiente salió como anon y volvió 42501,
+// y el catch marcó partial_error en el contexto nuevo. Estas regresiones fijan F0-B también en el camino de error.
+const partialRows=()=>{const rows=completeRows();rows.sale_items=[];rows.sale_payments=[];return rows;};
+// La lectura de `table` responde 42501; si `flip`, el contexto cambia mientras esa lectura está en vuelo (logout).
+function denyRead(db,table,onDeny=()=>{}){
+  const from=db.client.from.bind(db.client);
+  db.client.from=t=>{
+    if(t!==table)return from(t);
+    const q={select(){return q;},eq(){return q;},maybeSingle(){return q;},
+      then(resolve,reject){db.calls.push({table:t,op:'select',denied:true});onDeny();
+        return Promise.resolve({data:null,error:{code:'42501',message:`permission denied for table ${t}`}}).then(resolve,reject);}};
+    return q;
+  };
+  return db;
+}
+function observed(ctx){const states=[];ctx.setSalesWriteState=state=>states.push(state);return states;}
+const selects=db=>db.calls.filter(call=>call.op==='select').map(call=>call.table+(call.denied?':42501':''));
+
+test('S7-A: cambio de contexto seguido de lectura exitosa retiene sin marcas ni estado de error',async()=>{
+  let vigente=true;
+  const db=createDb(partialRows(),{afterSelect:table=>{if(table==='sale_items')vigente=false;}});
+  const {ctx,marks}=harness(current,db,{context:()=>vigente});
+  const states=observed(ctx);
+  await assert.rejects(ctx.saveSaleGroupToSupabase(group),err=>err.code==='F0B_RETENIDA');
+  assert.equal(marks.length,0);
+  assert.deepEqual(writes(db),[]);
+  assert.deepEqual(states,['syncing','ready']);
+});
+
+test('S7-B: cambio de contexto con 42501 en vuelo retiene sin marcas, sin reintento y sin estado de error',async()=>{
+  let vigente=true;
+  const db=denyRead(createDb(partialRows()),'sale_payments',()=>{vigente=false;});
+  const {ctx,marks}=harness(current,db,{context:()=>vigente});
+  const states=observed(ctx);
+  await assert.rejects(ctx.saveSaleGroupToSupabase(group),err=>err.code==='F0B_RETENIDA'&&err.cause?.code==='42501');
+  assert.equal(marks.length,0,'ni partial_error ni incremento de _sb_retry_count');
+  assert.deepEqual(writes(db),[]);
+  assert.deepEqual(states,['syncing','ready']);
+  assert.deepEqual(selects(db),['sales','sales','sale_items','sale_payments:42501']);
+});
+
+test('S7-B baseline: a9a706b marcaba partial_error tras el cambio de contexto',async()=>{
+  const frozen=execFileSync('git',['show','a9a706b:index.html'],{cwd:repo,encoding:'utf8'});
+  let vigente=true;
+  const db=denyRead(createDb(partialRows()),'sale_payments',()=>{vigente=false;});
+  const {ctx,marks}=harness(frozen,db,{context:()=>vigente});
+  await assert.rejects(ctx.saveSaleGroupToSupabase(group),err=>err.code==='42501');
+  assert.equal(marks.at(-1).status,'partial_error');
+});
+
+test('S7-C: 42501 con el contexto vigente conserva el tratamiento normal del error',async()=>{
+  const db=denyRead(createDb(partialRows()),'sale_payments');
+  const {ctx,marks}=harness(current,db);
+  const states=observed(ctx);
+  await assert.rejects(ctx.saveSaleGroupToSupabase(group),err=>err.code==='42501');
+  assert.equal(marks.length,1);
+  assert.equal(marks[0].status,'partial_error');
+  assert.equal(marks[0].code,'42501');
+  assert.equal(marks[0].saleId,saleId);
+  assert.deepEqual(states,['syncing','error']);
+  assert.deepEqual(writes(db),[]);
+});
+
+test('S7-D: tras un await con el contexto cambiado no se inicia otra lectura ni escritura comercial',async()=>{
+  const cases={sales:['sales'],sale_items:['sales','sales','sale_items']};
+  for(const [flipAfter,expected] of Object.entries(cases)){
+    let vigente=true;
+    const db=createDb(partialRows(),{afterSelect:table=>{if(table===flipAfter)vigente=false;}});
+    const {ctx,marks}=harness(current,db,{context:()=>vigente});
+    await assert.rejects(ctx.saveSaleGroupToSupabase(group),err=>err.code==='F0B_RETENIDA');
+    assert.deepEqual(selects(db),expected,`tras ${flipAfter}`);
+    assert.deepEqual(writes(db),[]);
+    assert.equal(marks.length,0);
+  }
+  // También tras getSalesSession: ni siquiera la primera lectura.
+  let vigente=true;
+  const db=createDb(partialRows());
+  const {ctx}=harness(current,db,{context:()=>vigente});
+  ctx.getSalesSession=async()=>{vigente=false;return {user:{id:'user_a'}};};
+  await assert.rejects(ctx.saveSaleGroupToSupabase(group),err=>err.code==='F0B_RETENIDA');
+  assert.equal(db.calls.length,0);
+});
+
+test('S7-E: la venta remota parcial retenida se completa después con una sesión válida',async()=>{
+  let vigente=true, denied=true;
+  const db=createDb(partialRows());
+  const from=db.client.from.bind(db.client);
+  denyRead(db,'sale_payments',()=>{vigente=false;});
+  const deniedFrom=db.client.from;
+  db.client.from=t=>denied?deniedFrom(t):from(t);
+  await assert.rejects(harness(current,db,{context:()=>vigente}).ctx.saveSaleGroupToSupabase(group),err=>err.code==='F0B_RETENIDA');
+  denied=false;
+  const {ctx,marks}=harness(current,db);
+  const result=await ctx.saveSaleGroupToSupabase(group);
+  assert.equal(result.ok,true);
+  assert.equal(result.saleId,saleId);
+  assert.deepEqual(writeLog(db),['insert:sale_items','insert:sale_payments']);
+  assert.equal(db.rows.sales.length,1,'no se duplica la cabecera');
+  assert.equal(marks.at(-1).status,'synced');
+});

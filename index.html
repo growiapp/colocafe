@@ -14426,9 +14426,11 @@ if(config.webappUrl){loadFromSheets();}
     }
     return tickets===0||salesSameAmount(tickets,descuentoSobre(netos,reglaTicket));
   }
-  async function verifySaleGroupReadBack(client,storeId,group,saleId){
+  // guard: F0-B la llama antes de cada lectura, para no consultar en un contexto que ya terminó.
+  async function verifySaleGroupReadBack(client,storeId,group,saleId,guard=()=>{}){
     const legacyId=getStableSaleLegacyId(group);
     const saleCols='id,store_id,legacy_id,metadata,subtotal_amount,total_amount';
+    guard();
     const saleQuery=saleId
       ? client.from('sales').select(saleCols).eq('id',saleId).eq('store_id',storeId).maybeSingle()
       : client.from('sales').select(saleCols).eq('store_id',storeId).eq('legacy_id',legacyId).maybeSingle();
@@ -14444,8 +14446,10 @@ if(config.webappUrl){loadFromSheets();}
     const expectedPaymentIds=payments.map((payment,index)=>getStableSalePaymentLegacyId(group,payment,index));
     const exactIds=(actual,expected)=>expected.length>0 && expected.every(Boolean) && new Set(expected).size===expected.length
       && actual.length===expected.length && actual.every(id=>expected.includes(id)) && new Set(actual).size===actual.length;
+    guard();
     const itemsRes=await client.from('sale_items').select('store_id,sale_id,legacy_id,quantity,unit_price,variants_price,line_total,metadata').eq('store_id',storeId).eq('sale_id',confirmedSaleId);
     if(itemsRes.error) throw Object.assign(itemsRes.error,{_salesOp:'read_back_items',_salesTable:'sale_items'});
+    guard();
     const paymentsRes=await client.from('sale_payments').select('store_id,sale_id,legacy_id,method,amount').eq('store_id',storeId).eq('sale_id',confirmedSaleId);
     if(paymentsRes.error) throw Object.assign(paymentsRes.error,{_salesOp:'read_back_payments',_salesTable:'sale_payments'});
     const itemRows=itemsRes.data||[], paymentRows=paymentsRes.data||[];
@@ -15113,14 +15117,16 @@ if(config.webappUrl){loadFromSheets();}
     }
     return null;
   }
-  async function findExistingSaleRow(client,storeId,group){
+  async function findExistingSaleRow(client,storeId,group,guard=()=>{}){
     const sbId=(group?.rows||[]).map(r=>r?._sb_sale_id).find(v=>isValidUuid(String(v||'')));
     if(sbId){
+      guard();
       const {data,error}=await client.from('sales').select('id,legacy_id').eq('id',sbId).eq('store_id',storeId).maybeSingle();
       if(error) throw error;
       if(data) return data;
     }
     const legacyId=getStableSaleLegacyId(group);
+    guard();
     const {data,error}=await client.from('sales').select('id,legacy_id').eq('store_id',storeId).eq('legacy_id',legacyId).maybeSingle();
     if(error) throw error;
     return data||null;
@@ -15257,6 +15263,7 @@ if(config.webappUrl){loadFromSheets();}
     if(!client) throw new Error('Cliente Supabase no disponible');
     const session=await getSalesSession(client);
     if(!session) throw new Error('No hay sesión activa');
+    enContexto();
     const relationCache={products:{},customers:{},reservations:{}};
     salesCurrentStoreName=getSalesStoreName();
     salesLastTicket=getStableSaleLegacyId(group);
@@ -15270,7 +15277,8 @@ if(config.webappUrl){loadFromSheets();}
     let paymentsData=[];
     let readBack=null;
     try{
-      const existingRow=await findExistingSaleRow(client,storeId,group);
+      const existingRow=await findExistingSaleRow(client,storeId,group,enContexto);
+      enContexto();
       salePayload=await mapSaleGroupToSupabaseSale(group,{client,storeId,cache:relationCache});
       logSalesWriteAttempt('start',{operation:salePayload?.metadata?.source_kind||'venta',storeId,session,salePayload,legacyId:salesLastTicket});
       if(existingRow){
@@ -15286,20 +15294,21 @@ if(config.webappUrl){loadFromSheets();}
           const sameIdentity=err?.code==='23505'&&err?._salesTable==='sales'&&err?._salesOp==='insert'
             &&/unique constraint "sales_store_legacy_unique_idx"/i.test(String(err?.message||''));
           if(!sameIdentity)throw err;
-          const recovered=await findExistingSaleRow(client,storeId,group);
+          const recovered=await findExistingSaleRow(client,storeId,group,enContexto);
           if(!recovered)throw err;
           saleData=recovered;
         }
       }
       saleId=saleData.id;
       try{
-        readBack=await verifySaleGroupReadBack(client,storeId,group,saleId);
+        readBack=await verifySaleGroupReadBack(client,storeId,group,saleId,enContexto);
       }catch(err){
         // R-B2a: con la venta ya guardada, solo se insertan los ítems y pagos que faltan, por su legacy_id estable.
         // Nada existente se actualiza; el índice único (store_id, legacy_id) frena un duplicado concurrente con 23505.
         if(err?.code!=='READ_BACK_INCOMPLETE_SALE'||!err.readBack?.completable)throw err;
         const partial=err.readBack;
         const missingItems=new Set(partial.missingItemIds), missingPayments=new Set(partial.missingPaymentIds);
+        enContexto();
         const localItems=await Promise.all((group.rows||[]).map(row=>mapSaleItemToSupabaseItem(row,saleId,{client,storeId,cache:relationCache})));
         const localPayments=(group.payments&&group.payments.length?group.payments:getTicketPayments(group))
           .map((payment,index)=>mapSalePaymentToSupabasePayment(payment,saleId,group,index));
@@ -15328,7 +15337,7 @@ if(config.webappUrl){loadFromSheets();}
           enContexto();
           paymentsData.push(await saveSalesRowManual(client,'sale_payments',storeId,paymentPayload,'id,legacy_id',true));
         }
-        readBack=await verifySaleGroupReadBack(client,storeId,group,saleId);
+        readBack=await verifySaleGroupReadBack(client,storeId,group,saleId,enContexto);
       }
       enContexto();
       logSalesWriteAttempt('read_back_ok',{operation:salePayload?.metadata?.source_kind||'venta',storeId,session,salePayload,itemsPayload,paymentsPayload,saleResult:saleData,itemsResult:itemsData,paymentsResult:paymentsData,readBack});
@@ -15356,6 +15365,9 @@ if(config.webappUrl){loadFromSheets();}
       return{ok:true,saleId,legacyId:saleData.legacy_id||salesLastTicket,readBack};
     }catch(err){
       // El estado local es de otra cuenta o local: no se marca acá, lo retoma la que la registró.
+      // Un error que llega con el contexto ya cambiado (p. ej. 42501 tras cerrar sesión) también es de la sesión que terminó:
+      // se retiene sin tocar filas, reintentos ni estado; la venta remota parcial queda para la cuenta que la registró.
+      if(err?.code!=='F0B_RETENIDA'){try{enContexto();}catch(retenida){retenida.cause=err;err=retenida;}}
       if(err?.code==='F0B_RETENIDA'){setSalesWriteState('ready');throw err;}
       err._sb_sync_status=saleId?'partial_error':'error';
       logSalesWriteAttempt('error',{operation:salePayload?.metadata?.source_kind||'venta',storeId,session,salePayload,itemsPayload,paymentsPayload,saleResult:saleData,itemsResult:itemsData,paymentsResult:paymentsData,readBack:err?.readBack||null,error:err});
