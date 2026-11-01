@@ -14,7 +14,8 @@
 --   * B. Un producto ilimitado no recibe UPDATE: ni saldo ni updated_at cambian. Las fixtures técnicas de R-B2a usan ilimitados o nada.
 --   * C. Un DELETE devuelve stock_applied_qty solo si el movimiento es posterior al corte. Siempre deja registro en stock_ledger.
 --   * D. Conteo (fija el saldo y mueve el corte) y ajuste ± (relativo, no lo mueve) van por stock_apply_adjustment, solo owner/admin.
---   * E. Lo que no descuenta queda con motivo en el ítem; unresolved, store_mismatch, count_review y no_identity se muestran como incidencia.
+--   * E. Lo que no descuenta queda con motivo en el ítem. Las incidencias no caducan ni se cierran solas: el motivo vive en la fila del ítem, sobrevive a
+--     desactivar y a revertir, y se consulta paginado con sale_items_stock_incidents_idx.
 --   * F. El ajuste compara contra el saldo leído bajo lock y devuelve conflict. En un local activado no hay otra vía de escritura.
 --   * G. Activado el local, un cliente viejo ya no puede escribir stock: su UPDATE directo falla con STOCK_DIRECT_WRITE.
 --   * Ningún cliente puede cambiar products.store_id, en ningún estado: esa era la forma de salir de un local activado.
@@ -64,6 +65,9 @@ alter table public.sale_items drop constraint if exists sale_items_stock_applied
 alter table public.sale_items add constraint sale_items_stock_applied_reason_check
   check (stock_applied_reason is null
          or stock_applied_reason in ('applied', 'inactive', 'unlimited', 'unresolved', 'store_mismatch', 'no_identity', 'before_count', 'count_review'));
+
+create index if not exists sale_items_stock_incidents_idx on public.sale_items (store_id, stock_applied_at desc, id desc)
+  where stock_applied_reason in ('unresolved', 'store_mismatch', 'no_identity', 'count_review');
 
 -- Una fila = el local usa este modelo. Solo se escribe desde el SQL Editor: ningún cliente puede encenderlo ni apagarlo.
 create table public.stock_store_activation (
