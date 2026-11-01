@@ -4,8 +4,12 @@
 -- Las columnas nuevas y stock_ledger se conservan como registro inerte. Un ítem insertado sin los triggers queda con stock_applied_* en
 -- NULL, que significa que no movió stock. Reactivar el modelo requiere una nueva activación y un conteo (stock_activation.sql).
 --
--- Clientes: al desaparecer stock_store_activation, el cliente v0.2 vuelve solo al modo local en la lectura siguiente. Los clientes viejos
--- vuelven a poder escribir stock.
+-- Requisito, no atajo: todo local tiene que estar en 'deactivated' (stock_activation.sql). Con un local activo o en pausa este archivo aborta sin tocar nada:
+-- quitar los triggers con clientes en modo servidor dejaría ventas sin descuento en ningún lado.
+--
+-- Clientes: stock_store_activation se conserva, con las filas en 'deactivated': el cliente v0.2 sigue en modo local y sigue pudiendo consultar incidencias.
+-- Los clientes viejos vuelven a poder escribir stock. Sin triggers ya no se clasifica: una venta de un cliente que seguía en modo servidor queda con
+-- stock_applied_at NULL y metadata.stock_client_mode = 'server'. La consulta está en el paso CONCILIAR de stock_activation.sql.
 --
 -- Saldos negativos: no se recortan, porque eso cambiaría el saldo. Tampoco vuelve products_stock_check NOT VALID: NOT VALID solo perdona a
 -- las filas viejas mientras nadie las toca, y cualquier UPDATE de esa fila, aunque sea del nombre, volvería a evaluar el CHECK y fallaría.
@@ -14,20 +18,31 @@
 
 begin;
 
+do $$
+begin
+  if to_regclass('public.stock_store_activation') is not null
+     and exists (select 1 from public.stock_store_activation where status <> 'deactivated') then
+    raise exception 'STOCK_ROLLBACK: hay locales sin desactivar; primero sales_paused y deactivated (stock_activation.sql)';
+  end if;
+end;
+$$;
+
 drop trigger if exists sale_items_stock_prepare on public.sale_items;
 drop trigger if exists sale_items_stock_apply on public.sale_items;
 drop trigger if exists sale_items_stock_compensate on public.sale_items;
 drop trigger if exists sale_items_stock_guard on public.sale_items;
 drop trigger if exists products_stock_guard on public.products;
+drop trigger if exists sales_stock_guard on public.sales;
+drop trigger if exists stock_store_activation_guard on public.stock_store_activation;
 
 drop function if exists public.sale_items_stock_prepare();
 drop function if exists public.sale_items_stock_apply();
 drop function if exists public.sale_items_stock_compensate();
 drop function if exists public.sale_items_stock_guard();
 drop function if exists public.products_stock_guard();
+drop function if exists public.sales_stock_guard();
+drop function if exists public.stock_store_activation_guard();
 drop function if exists public.stock_apply_adjustment(uuid, uuid, text, numeric, numeric);
-
-drop table if exists public.stock_store_activation;
 
 -- Sin escrituras concurrentes entre contar y validar.
 lock table public.products in share row exclusive mode;

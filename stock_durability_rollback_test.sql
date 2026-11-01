@@ -1,5 +1,6 @@
 -- Prueba de stock_durability_rollback.sql. NO EJECUTADA. Solo en un entorno de pruebas, inmediatamente después del rollback y con al menos
 -- un saldo negativo para cubrir el caso que importa. Termina en ROLLBACK.
+-- Antes, con un local todavía activo: correr el rollback tiene que abortar con STOCK_ROLLBACK y dejar triggers y saldos intactos.
 
 begin;
 
@@ -8,11 +9,12 @@ declare
   v_p uuid;
   n int;
 begin
-  assert to_regclass('public.stock_store_activation') is null, 'la activación se fue: el cliente vuelve a modo local';
+  assert to_regclass('public.stock_store_activation') is not null, 'el estado se conserva: el cliente sigue viendo sus incidencias';
+  assert not exists (select 1 from public.stock_store_activation where status <> 'deactivated'), 'el rollback exige locales desactivados';
   assert to_regclass('public.stock_ledger') is not null, 'el registro se conserva';
   assert to_regprocedure('public.stock_apply_adjustment(uuid,uuid,text,numeric,numeric)') is null, 'la función de ajuste se fue';
   assert not exists (select 1 from pg_trigger where not tgisinternal and tgname like '%stock%'
-                      and tgrelid in ('public.products'::regclass, 'public.sale_items'::regclass)), 'sin triggers de stock';
+                      and tgrelid in ('public.products'::regclass, 'public.sale_items'::regclass, 'public.sales'::regclass, 'public.stock_store_activation'::regclass)), 'sin triggers de stock';
 
   select id into v_p from public.products where stock < 0 limit 1;
   if v_p is null then

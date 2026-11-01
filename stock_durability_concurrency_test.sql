@@ -55,6 +55,19 @@
 --   Sesión A: commit;
 --   Esperado: el ítem queda 'inactive' y no descuenta: es anterior al corte y el conteo inicial lo refleja. Sin doble descuento.
 
+-- Caso 8b: la pausa contra una venta en vuelo. Lo que entró antes del commit de la pausa queda bajo el régimen activo.
+--   Sesión A: begin; insert ... legacy_id 'c8b', quantity 1;     -- leyó 'active' y descontó
+--   Sesión D: update public.stock_store_activation set status = 'sales_paused' where store_id = :store; -- commit, sin esperar a A
+--   Sesión A: commit;
+--   Esperado: 'c8b' aplicado y descontado una vez. Un ítem nuevo ya recibe 55000 STOCK_SALES_PAUSED, y un reintento posterior a la pausa no queda a medias.
+
+-- Caso 8c: desactivar contra una venta en vuelo.
+--   Sesión D: begin; update public.stock_store_activation set status = 'deactivated' where store_id = :store;  -- en sales_paused
+--   Sesión A: insert ... legacy_id 'c8c', metadata {"stock_client_mode":"server"};   -- rechazada: todavía lee sales_paused
+--   Sesión D: commit;
+--   Sesión A: reintento del mismo legacy_id.
+--   Esperado: 'transition_review', applied 0. La venta no se perdió, no descontó dos veces y queda a conciliar.
+
 -- Caso 9: un cliente viejo en un local activado. Rol authenticated, owner del local.
 --   update public.products set stock = 999 where id = :product;
 --   Esperado: STOCK_DIRECT_WRITE, stock sin cambios. El mismo UPDATE con el mismo saldo, o de name, sí pasa.

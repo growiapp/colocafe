@@ -2,6 +2,7 @@
 -- PREPARADA, NO APLICADA. Parte del esquema observado en staging (evidencia 20261101T201021Z) y aborta si no lo encuentra.
 --
 -- Aplicarla NO cambia ningún saldo: el modelo se enciende por local, con una fila en stock_store_activation (stock_activation.sql).
+-- Apagarlo tiene un solo camino: active -> sales_paused -> deactivated. En la pausa el servidor rechaza las ventas de ese local y R-B2a las conserva.
 -- Mientras un local no esté activado, sus ítems quedan con motivo 'inactive' y sus clientes, viejos o nuevos, siguen como hasta hoy.
 --
 -- Contrato:
@@ -64,23 +65,71 @@ alter table public.sale_items
 alter table public.sale_items drop constraint if exists sale_items_stock_applied_reason_check;
 alter table public.sale_items add constraint sale_items_stock_applied_reason_check
   check (stock_applied_reason is null
-         or stock_applied_reason in ('applied', 'inactive', 'unlimited', 'unresolved', 'store_mismatch', 'no_identity', 'before_count', 'count_review'));
+         or stock_applied_reason in ('applied', 'inactive', 'unlimited', 'unresolved', 'store_mismatch', 'no_identity', 'before_count', 'count_review', 'transition_review'));
 
 create index if not exists sale_items_stock_incidents_idx on public.sale_items (store_id, stock_applied_at desc, id desc)
-  where stock_applied_reason in ('unresolved', 'store_mismatch', 'no_identity', 'count_review');
+  where stock_applied_reason in ('unresolved', 'store_mismatch', 'no_identity', 'count_review', 'transition_review');
 
--- Una fila = el local usa este modelo. Solo se escribe desde el SQL Editor: ningún cliente puede encenderlo ni apagarlo.
-create table public.stock_store_activation (
+-- Una fila = el local usó o usa este modelo. Solo se escribe desde el SQL Editor: ningún cliente puede encenderlo ni apagarlo.
+-- La fila no se borra al desactivar: sigue diciendo que ese local tiene incidencias que consultar. Sobrevive al rollback por lo mismo.
+create table if not exists public.stock_store_activation (
   store_id uuid primary key references public.stores(id) on delete cascade,
+  status text not null default 'active' check (status in ('active', 'sales_paused', 'deactivated')),
   activated_at timestamptz not null default clock_timestamp(),
-  activated_by text
+  activated_by text,
+  paused_at timestamptz,
+  deactivated_at timestamptz
 );
 alter table public.stock_store_activation enable row level security;
 alter table public.stock_store_activation force row level security;
+drop policy if exists stock_store_activation_select_members on public.stock_store_activation;
 create policy stock_store_activation_select_members on public.stock_store_activation for select
   using (public.is_store_member(store_id));
 revoke all on table public.stock_store_activation from public, anon, authenticated;
 grant select on table public.stock_store_activation to authenticated;
+
+-- Un cliente en modo servidor no descuenta en su dispositivo: si el servidor deja de descontar sin que él lo sepa, esa venta no descuenta en ningún lado.
+-- Por eso nada salta de active a deactivated, ni con un DELETE: la pausa es obligatoria. Una cascada desde stores llega con profundidad > 1.
+create or replace function public.stock_store_activation_guard()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if tg_op = 'DELETE' then
+    if pg_trigger_depth() > 1 then return old; end if;
+    raise exception 'STOCK_TRANSITION: un local no se desactiva borrando la fila; usar sales_paused y después deactivated';
+  end if;
+  if tg_op = 'INSERT' then
+    new.status := 'active';
+    new.activated_at := clock_timestamp();
+    new.paused_at := null;
+    new.deactivated_at := null;
+    return new;
+  end if;
+  if new.store_id is distinct from old.store_id then
+    raise exception 'STOCK_TRANSITION: la fila no cambia de local';
+  end if;
+  new.activated_at := old.activated_at;
+  new.paused_at := old.paused_at;
+  new.deactivated_at := old.deactivated_at;
+  if new.status = old.status then return new; end if;
+  if old.status = 'active' and new.status = 'sales_paused' then
+    new.paused_at := clock_timestamp();
+  elsif old.status = 'sales_paused' and new.status = 'deactivated' then
+    new.deactivated_at := clock_timestamp();
+  elsif old.status = 'sales_paused' and new.status = 'active' then
+    new.paused_at := null; -- pausa abortada: el régimen no cambió y el corte tampoco
+  elsif old.status = 'deactivated' and new.status = 'active' then
+    new.activated_at := clock_timestamp(); -- corte nuevo: lo anterior ya no descontó acá
+    new.paused_at := null;
+    new.deactivated_at := null;
+  else
+    raise exception 'STOCK_TRANSITION: de % a % no está permitido', old.status, new.status;
+  end if;
+  return new;
+end;
+$$;
 
 -- Registro de conteos, ajustes y borrados: al borrar un ítem su fila desaparece, y esto es lo que queda. Sin FK: tiene que
 -- poder escribirse durante la cascada de un local o producto que se está borrando, y sobrevivirle. Sobrevive también al rollback.
@@ -114,6 +163,10 @@ as $$
 declare
   v_ref text;
 begin
+  -- Fail-closed: durante el corte no entra nada. El error deja la venta en error o partial_error en el dispositivo, y R-B2a la reintenta.
+  if exists (select 1 from public.stock_store_activation a where a.store_id = new.store_id and a.status = 'sales_paused') then
+    raise exception 'STOCK_SALES_PAUSED: ventas en pausa por mantenimiento de stock; quedan guardadas en el dispositivo' using errcode = '55000';
+  end if;
   new.stock_applied_qty := null;
   new.stock_applied_reason := null;
   new.stock_applied_at := null;
@@ -157,16 +210,25 @@ as $$
 declare
   v_qty numeric := 0;
   v_reason text;
+  v_status text;
   v_activated timestamptz;
+  v_deactivated timestamptz;
   v_counted timestamptz;
   v_unlimited boolean;
   v_cut timestamptz;
   v_created timestamptz;
   v_sold timestamptz;
 begin
-  select a.activated_at into v_activated from public.stock_store_activation a where a.store_id = new.store_id;
-  if v_activated is null then
+  select a.status, a.activated_at, a.deactivated_at into v_status, v_activated, v_deactivated
+    from public.stock_store_activation a where a.store_id = new.store_id;
+  if v_status is null then
     v_reason := 'inactive';
+  elsif v_status = 'deactivated' then
+    -- G. Modo local: el dispositivo descuenta y el servidor no. Salvo una venta del régimen anterior o de un cliente que todavía se cree en modo servidor,
+    -- que no descontó en ningún lado: queda como incidencia. La metadata solo puede sumar revisión, nunca evitar ni aplicar un descuento.
+    select s.created_at, s.sold_at into v_created, v_sold from public.sales s where s.id = new.sale_id;
+    v_reason := case when new.metadata->>'stock_client_mode' = 'server' or v_created < v_deactivated or v_sold < v_deactivated
+                     then 'transition_review' else 'inactive' end;
   elsif nullif(btrim(new.legacy_id), '') is null then
     v_reason := 'no_identity'; -- sin identidad, un reintento no se puede reconocer: no se descuenta
   elsif new.product_id is null then
@@ -213,15 +275,16 @@ set search_path = public
 set lock_timeout = '3s'
 as $$
 declare
+  v_status text;
   v_activated timestamptz;
   v_counted timestamptz;
   v_balance numeric;
 begin
   if coalesce(old.stock_applied_qty, 0) = 0 then return null; end if; -- no movió nada: sin UPDATE y sin registro
-  select a.activated_at into v_activated from public.stock_store_activation a where a.store_id = old.store_id;
+  select a.status, a.activated_at into v_status, v_activated from public.stock_store_activation a where a.store_id = old.store_id;
   select p.stock_counted_at into v_counted from public.products p
    where p.id = old.product_id and p.store_id = old.store_id for update;
-  if not found or v_activated is null or old.stock_applied_at <= greatest(v_counted, v_activated) then
+  if not found or v_status is distinct from 'active' or old.stock_applied_at <= greatest(v_counted, v_activated) then
     insert into public.stock_ledger (store_id, product_id, kind, delta, sale_item_legacy_id, actor)
       values (old.store_id, old.product_id, 'delete_no_compensation', 0, old.legacy_id, auth.uid());
     return null;
@@ -273,6 +336,9 @@ language plpgsql
 set search_path = public
 as $$
 begin
+  if tg_op = 'INSERT' and exists (select 1 from public.stock_store_activation a where a.store_id = new.store_id and a.status = 'sales_paused') then
+    raise exception 'STOCK_SALES_PAUSED: ventas en pausa por mantenimiento de stock; quedan guardadas en el dispositivo' using errcode = '55000';
+  end if;
   if current_user in ('anon', 'authenticated') then
     if tg_op = 'INSERT' then
       new.created_at := clock_timestamp();
@@ -305,7 +371,7 @@ begin
     raise exception 'STOCK_DIRECT_WRITE: stock_counted_at lo escribe solo el servidor';
   end if;
   if new.stock is distinct from old.stock
-     and exists (select 1 from public.stock_store_activation a where a.store_id = old.store_id) then
+     and exists (select 1 from public.stock_store_activation a where a.store_id = old.store_id and a.status <> 'deactivated') then
     raise exception 'STOCK_DIRECT_WRITE: el stock de este local lo gestiona el servidor; actualizá la app';
   end if;
   return new;
@@ -335,7 +401,7 @@ begin
   if not public.has_store_role(p_store, array['owner', 'admin']::public.store_user_role[]) then
     raise exception 'STOCK_FORBIDDEN' using errcode = '42501'; -- SECURITY DEFINER saltea RLS: el rol se comprueba acá
   end if;
-  if not exists (select 1 from public.stock_store_activation a where a.store_id = p_store) then
+  if not exists (select 1 from public.stock_store_activation a where a.store_id = p_store and a.status = 'active') then
     return jsonb_build_object('ok', false, 'code', 'inactive');
   end if;
   select p.stock, p.unlimited into v_stock, v_unlimited from public.products p
@@ -360,6 +426,7 @@ revoke all on function public.sale_items_stock_compensate() from public, anon, a
 revoke all on function public.sale_items_stock_guard() from public, anon, authenticated;
 revoke all on function public.products_stock_guard() from public, anon, authenticated;
 revoke all on function public.sales_stock_guard() from public, anon, authenticated;
+revoke all on function public.stock_store_activation_guard() from public, anon, authenticated;
 revoke all on function public.stock_apply_adjustment(uuid, uuid, text, numeric, numeric) from public, anon;
 grant execute on function public.stock_apply_adjustment(uuid, uuid, text, numeric, numeric) to authenticated;
 
@@ -371,6 +438,8 @@ create trigger sale_items_stock_compensate after delete on public.sale_items
   for each row execute function public.sale_items_stock_compensate();
 create trigger sale_items_stock_guard before update on public.sale_items
   for each row execute function public.sale_items_stock_guard();
+create trigger stock_store_activation_guard before insert or update or delete on public.stock_store_activation
+  for each row execute function public.stock_store_activation_guard();
 create trigger sales_stock_guard before insert or update on public.sales
   for each row execute function public.sales_stock_guard();
 create trigger products_stock_guard before insert or update on public.products

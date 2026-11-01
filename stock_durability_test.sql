@@ -7,7 +7,7 @@ begin;
 do $$
 declare
   v_user uuid;
-  v_a uuid; v_b uuid; v_c uuid;
+  v_a uuid; v_b uuid; v_c uuid; v_d uuid; v_pd uuid; v_sd uuid; v_item_d uuid;
   v_sale uuid; v_sale_b uuid;
   v_p uuid; v_otro uuid; v_ilim uuid; v_leg uuid; v_borrar uuid; v_pb uuid;
   v_item uuid; v_hist uuid;
@@ -384,7 +384,6 @@ begin
   -- Evasión: owner de los dos locales intenta sacar el producto del activado, escribir el saldo y devolverlo.
   perform set_config('request.jwt.claims', jsonb_build_object('sub', v_user, 'role', 'authenticated')::text, true);
   execute 'set local role authenticated';
-  v_ts := (select updated_at from public.products where id = v_otro);
   n := (select stock from public.products where id = v_otro);
   bloqueado := false;
   begin update public.products set store_id = v_c where id = v_otro;
@@ -406,6 +405,96 @@ begin
   -- Una operación interna legítima no es un cliente.
   update public.products set store_id = v_c where id = v_otro;
   update public.products set store_id = v_a where id = v_otro;
+
+  -- G. Transición. Local propio, con el usuario como owner.
+  insert into public.stores (name, slug) values ('Stock D', 'stock-d-' || gen_random_uuid()) returning id into v_d;
+  insert into public.store_users (store_id, user_id, role, active) values (v_d, v_user, 'owner', true);
+  insert into public.stock_store_activation (store_id) values (v_d);
+  insert into public.products (store_id, name, stock) values (v_d, 'D', 10) returning id into v_pd;
+  select activated_at into v_ts from public.stock_store_activation where store_id = v_d;
+  -- Una venta aplicada, anterior a la transición: la cabecera 10 minutos después de la activación para que descuente.
+  insert into public.sales (store_id, business_date, sold_at, created_at)
+    values (v_d, current_date, clock_timestamp() + interval '10 minutes', clock_timestamp() + interval '10 minutes') returning id into v_sd;
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_d, v_sd, 'd1', v_pd, 'D', 1) returning id into v_item_d;
+  assert (select stock from public.products where id = v_pd) = 9, 'activo: descuenta';
+  -- No hay atajo para apagar el modelo.
+  bloqueado := false;
+  begin update public.stock_store_activation set status = 'deactivated' where store_id = v_d;
+  exception when raise_exception then bloqueado := sqlerrm like 'STOCK_TRANSITION%'; end;
+  assert bloqueado, 'de active a deactivated no se puede';
+  bloqueado := false;
+  begin delete from public.stock_store_activation where store_id = v_d;
+  exception when raise_exception then bloqueado := sqlerrm like 'STOCK_TRANSITION%'; end;
+  assert bloqueado, 'borrar la fila no desactiva';
+  -- Pausa: nada entra, y sigue sin haber escrituras de stock.
+  update public.stock_store_activation set status = 'sales_paused' where store_id = v_d;
+  assert (select paused_at is not null from public.stock_store_activation where store_id = v_d), 'pausa sellada';
+  bloqueado := false;
+  begin insert into public.sales (store_id, business_date, sold_at) values (v_d, current_date, now());
+  exception when object_not_in_prerequisite_state then bloqueado := sqlerrm like 'STOCK_SALES_PAUSED%'; end;
+  assert bloqueado, 'pausa: una cabecera nueva se rechaza';
+  bloqueado := false;
+  begin insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+          values (v_d, v_sd, 'd2', v_pd, 'D', 1);
+  exception when object_not_in_prerequisite_state then bloqueado := sqlerrm like 'STOCK_SALES_PAUSED%'; end;
+  assert bloqueado, 'pausa: el ítem de una venta parcial se rechaza';
+  assert not exists (select 1 from public.sale_items where store_id = v_d and legacy_id = 'd2'), 'pausa: sin ítem';
+  assert (select stock from public.products where id = v_pd) = 9, 'pausa: sin movimiento';
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', v_user, 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+  assert public.stock_apply_adjustment(v_d, v_pd, 'adjust', 9, 1)->>'code' = 'inactive', 'pausa: sin ajustes';
+  bloqueado := false;
+  begin update public.products set stock = 1 where id = v_pd;
+  exception when raise_exception then bloqueado := sqlerrm like 'STOCK_DIRECT_WRITE%'; end;
+  assert bloqueado, 'pausa: sin escritura directa';
+  execute 'reset role';
+  -- Abortar la pausa no mueve el corte.
+  update public.stock_store_activation set status = 'active' where store_id = v_d;
+  assert (select status = 'active' and paused_at is null and activated_at = v_ts from public.stock_store_activation where store_id = v_d), 'pausa abortada';
+  update public.stock_store_activation set status = 'sales_paused' where store_id = v_d;
+  update public.stock_store_activation set status = 'deactivated' where store_id = v_d;
+  select deactivated_at into v_ts from public.stock_store_activation where store_id = v_d;
+  assert v_ts is not null, 'desactivación sellada';
+  -- Desactivado: un cliente que se cree en modo servidor deja incidencia, nunca un descuento perdido en silencio.
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity, metadata)
+    values (v_d, v_sd, 'd3', v_pd, 'D', 1, '{"stock_client_mode":"server"}');
+  assert (select stock_applied_reason = 'transition_review' and stock_applied_qty = 0 from public.sale_items
+           where store_id = v_d and legacy_id = 'd3'), 'cliente en modo anterior: a conciliar';
+  -- Venta del régimen anterior que llega después, aunque no declare nada.
+  insert into public.sales (store_id, business_date, sold_at, created_at) values (v_d, current_date, now() - interval '1 hour', now() - interval '1 hour') returning id into v_sd;
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_d, v_sd, 'd4', v_pd, 'D', 1);
+  assert (select stock_applied_reason from public.sale_items where store_id = v_d and legacy_id = 'd4') = 'transition_review', 'venta anterior: a conciliar';
+  -- Venta de modo local, posterior: el dispositivo descontó. Sin incidencia.
+  insert into public.sales (store_id, business_date, sold_at, created_at) values (v_d, current_date, v_ts + interval '1 minute', v_ts + interval '1 minute') returning id into v_sd;
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_d, v_sd, 'd5', v_pd, 'D', 1);
+  assert (select stock_applied_reason from public.sale_items where store_id = v_d and legacy_id = 'd5') = 'inactive', 'modo local: sin incidencia';
+  assert (select stock from public.products where id = v_pd) = 9, 'desactivado: el servidor no mueve el saldo';
+  -- Desactivado: borrar no compensa, pero queda en el registro. Las escrituras directas vuelven a estar permitidas.
+  delete from public.sale_items where id = v_item_d;
+  assert (select stock from public.products where id = v_pd) = 9 and (select kind = 'delete_no_compensation' from public.stock_ledger
+           where store_id = v_d and sale_item_legacy_id = 'd1'), 'desactivado: sin compensación y con registro';
+  execute 'set local role authenticated';
+  update public.products set stock = 8 where id = v_pd;
+  get diagnostics n = row_count;
+  assert n = 1, 'desactivado: el cliente en modo local escribe';
+  assert exists (select 1 from public.stock_store_activation where store_id = v_d and status = 'deactivated'), 'un miembro ve el estado';
+  -- E. Las incidencias siguen consultables después de desactivar, sin importar su antigüedad.
+  assert (select count(*) from public.sale_items where store_id = v_d and stock_applied_reason = 'transition_review') = 2, 'incidencias tras desactivar';
+  bloqueado := false;
+  begin update public.stock_store_activation set status = 'active' where store_id = v_d;
+  exception when insufficient_privilege then bloqueado := true; end;
+  assert bloqueado, 'un cliente no cambia el estado';
+  execute 'reset role';
+  -- Reactivar marca un corte nuevo.
+  update public.stock_store_activation set status = 'active' where store_id = v_d;
+  assert (select status = 'active' and deactivated_at is null and activated_at > v_ts from public.stock_store_activation where store_id = v_d), 'reactivación con corte nuevo';
+  -- Una cascada desde stores sí puede llevarse la fila.
+  update public.stock_store_activation set activated_by = 'prueba' where store_id = v_d;
+  delete from public.stores where id = v_d;
+  assert not exists (select 1 from public.stock_store_activation where store_id = v_d), 'cascada permitida';
 
   raise notice 'stock_durability_test: OK';
 end;
