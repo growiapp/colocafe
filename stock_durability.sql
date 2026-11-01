@@ -10,7 +10,7 @@
 --   * BEFORE INSERT no tiene efectos fuera de la fila: un INSERT omitido por ON CONFLICT no descuenta nada.
 --   * AFTER INSERT solo corre si la fila se insertó: descuenta y registra lo aplicado, en la misma transacción.
 --   * Cualquier error aborta el INSERT completo: no quedan ni ítem ni descuento, y R-B2a reintenta.
---   * A. Venta tardía: el corte es el último conteo o la activación. Ver la clasificación en sale_items_stock_apply.
+--   * A. Venta tardía: el corte es el último conteo o la activación. Sin evidencia temporal fiable no se decide: count_review. Ver sale_items_stock_apply.
 --   * B. Un producto ilimitado no recibe UPDATE: ni saldo ni updated_at cambian. Las fixtures técnicas de R-B2a usan ilimitados o nada.
 --   * C. Un DELETE devuelve stock_applied_qty solo si el movimiento es posterior al corte. Siempre deja registro en stock_ledger.
 --   * D. Conteo (fija el saldo y mueve el corte) y ajuste ± (relativo, no lo mueve) van por stock_apply_adjustment, solo owner/admin.
@@ -134,13 +134,15 @@ $$;
 -- Corre solo si la fila existe. El lock de la fila del producto serializa ventas y conteos: el corte se lee ya bajo ese lock.
 -- lock_timeout: si el producto está bloqueado demasiado tiempo, el INSERT falla entero y R-B2a lo reintenta.
 --
--- A. Corte = último conteo o activación, el más reciente. ¿La venta es anterior? De más fuerte a más débil:
---   1. La cabecera ya estaba en el servidor antes del corte (reloj del servidor): anterior, no descuenta.
---   2. El dispositivo ya había visto ese corte al vender (metadata.stock_cut_seen, un valor que emitió el servidor): posterior, descuenta.
---      Ni un reloj atrasado ni uno adelantado cambian este caso.
---   3. Dispositivo que no vio el corte: solo queda sold_at, su reloj. Con un margen de 5 minutos a cada lado decide; dentro del margen
---      no descuenta y queda count_review, visible como incidencia. El conteo es la última verdad física y un ajuste ± lo corrige.
--- ponytail: margen fijo. Con un reloj desviado más de 5 min y sin haber visto el corte, el caso 3 puede errar; subir el margen si pasa.
+-- A. Corte = último conteo o activación, el más reciente. El servidor solo conoce un hecho propio: cuándo recibió la cabecera. sold_at viene del
+-- reloj del dispositivo y la metadata la escribe el cliente, así que ninguno prueba nada por sí solo. Pero si sold_at coincide con la recepción
+-- (±5 min), la venta se registró en línea y con el reloj sano, y entonces la recepción fecha la venta:
+--   recepción antes del corte                 -> before_count: ya estaba vendida. No descuenta.
+--   recepción 5 min o más después del corte   -> applied.
+--   recepción en los 5 min que siguen al corte -> count_review.
+--   sold_at no coincide con la recepción      -> count_review, sea venta sin conexión o reloj desviado, adelantado o atrasado. Una cabecera vieja
+--                                                con un reloj que no coincide tampoco se da por anterior.
+-- count_review no descuenta y queda como incidencia, sin cerrarse sola: la decide una persona, y un ajuste ± aplica lo que corresponda.
 create or replace function public.sale_items_stock_apply()
 returns trigger
 language plpgsql
@@ -155,7 +157,6 @@ declare
   v_counted timestamptz;
   v_unlimited boolean;
   v_cut timestamptz;
-  v_seen timestamptz;
   v_created timestamptz;
   v_sold timestamptz;
 begin
@@ -176,18 +177,11 @@ begin
     else
       v_cut := greatest(v_counted, v_activated);
       select s.created_at, s.sold_at into v_created, v_sold from public.sales s where s.id = new.sale_id;
-      begin
-        v_seen := (new.metadata->>'stock_cut_seen')::timestamptz;
-      exception when others then
-        v_seen := null; -- un valor ilegible no puede hacer fallar una venta
-      end;
-      if v_created < v_cut then
+      if v_sold not between v_created - interval '5 minutes' and v_created + interval '5 minutes' then
+        v_reason := 'count_review';
+      elsif v_created < v_cut then
         v_reason := 'before_count';
-      elsif v_seen >= v_cut then
-        v_reason := 'applied';
-      elsif v_sold < v_cut - interval '5 minutes' then
-        v_reason := 'before_count';
-      elsif v_sold > v_cut + interval '5 minutes' then
+      elsif v_created >= v_cut + interval '5 minutes' then
         v_reason := 'applied';
       else
         v_reason := 'count_review';
@@ -262,6 +256,25 @@ begin
   -- Un ítem anterior al modelo no movió stock: se mantiene como estaba.
   if old.stock_applied_at is not null and not (v_commercial_same and v_product_same) then
     raise exception 'STOCK_ITEM_IMMUTABLE: el ítem % ya movió stock', old.id;
+  end if;
+  return new;
+end;
+$$;
+
+-- A. La recepción de la cabecera es la única hora del servidor que usa la clasificación: un cliente no la elige ni la cambia.
+-- Sin SECURITY DEFINER por la misma razón que products_stock_guard. No toca sold_at ni ningún dato comercial.
+create or replace function public.sales_stock_guard()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if current_user in ('anon', 'authenticated') then
+    if tg_op = 'INSERT' then
+      new.created_at := clock_timestamp();
+    else
+      new.created_at := old.created_at;
+    end if;
   end if;
   return new;
 end;
@@ -342,6 +355,7 @@ revoke all on function public.sale_items_stock_apply() from public, anon, authen
 revoke all on function public.sale_items_stock_compensate() from public, anon, authenticated;
 revoke all on function public.sale_items_stock_guard() from public, anon, authenticated;
 revoke all on function public.products_stock_guard() from public, anon, authenticated;
+revoke all on function public.sales_stock_guard() from public, anon, authenticated;
 revoke all on function public.stock_apply_adjustment(uuid, uuid, text, numeric, numeric) from public, anon;
 grant execute on function public.stock_apply_adjustment(uuid, uuid, text, numeric, numeric) to authenticated;
 
@@ -353,6 +367,8 @@ create trigger sale_items_stock_compensate after delete on public.sale_items
   for each row execute function public.sale_items_stock_compensate();
 create trigger sale_items_stock_guard before update on public.sale_items
   for each row execute function public.sale_items_stock_guard();
+create trigger sales_stock_guard before insert or update on public.sales
+  for each row execute function public.sales_stock_guard();
 create trigger products_stock_guard before insert or update on public.products
   for each row execute function public.products_stock_guard();
 

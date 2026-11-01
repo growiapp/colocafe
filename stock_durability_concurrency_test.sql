@@ -3,6 +3,8 @@
 -- el local activado en stock_store_activation y :sale creada después de la activación. Sesión C = dos ventanas como rol authenticated
 -- con request.jwt.claims de un owner del local, para poder llamar a stock_apply_adjustment.
 
+-- :sale tiene created_at = sold_at = clock_timestamp() + '10 min' como postgres, para clasificar 'applied' sin esperar el margen.
+
 -- Caso 1: dos ventas simultáneas se suman.
 --   Sesión A: begin;
 --   Sesión A: insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
@@ -37,7 +39,7 @@
 
 -- Caso 6: venta tardía esperando detrás de un conteo. Lee el corte ya bajo el lock.
 --   Sesión C: begin; select public.stock_apply_adjustment(:store, :product, 'count', <saldo>, 50);
---   Sesión A: insert ... sale_id de una cabecera creada ANTES del conteo, legacy_id 'c6', quantity 1;   -- espera
+--   Sesión A: insert ... sale_id de una cabecera con created_at y sold_at anteriores al conteo, legacy_id 'c6', quantity 1;   -- espera
 --   Sesión C: commit;
 --   Esperado: 'c6' queda before_count con applied 0 y stock = 50.
 

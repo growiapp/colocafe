@@ -204,46 +204,71 @@ begin
   delete from public.sale_items where id = v_hist;
   assert not exists (select 1 from public.stock_ledger where sale_item_legacy_id = 'b2'), 'fixture sin producto: sin registro';
 
-  -- A. Venta tardía respecto del conteo. Corte: hace una hora.
+  -- A. Venta tardía respecto del conteo. Corte: hace una hora. Como postgres, created_at se puede fijar; un cliente no (ver abajo).
   update public.products set stock = 100, stock_counted_at = now() - interval '1 hour' where id = v_otro;
   select stock_counted_at into v_ts from public.products where id = v_otro;
-  -- 1. Cabecera anterior al corte: anterior aunque el reloj del dispositivo y su testigo digan otra cosa.
-  insert into public.sales (store_id, business_date, sold_at, created_at)
-    values (v_a, current_date, now(), now() - interval '2 hours') returning id into v_old_sale;
-  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity, metadata)
-    values (v_a, v_old_sale, 'a1', v_otro, 'Otro', 1, jsonb_build_object('stock_cut_seen', v_ts));
-  assert (select stock_applied_reason = 'before_count' and stock_applied_qty = 0 from public.sale_items
-           where store_id = v_a and legacy_id = 'a1'), 'cabecera anterior al corte: no descuenta';
-  -- 2. El dispositivo vio el corte: descuenta aunque su reloj esté atrasado.
-  insert into public.sales (store_id, business_date, sold_at) values (v_a, current_date, now() - interval '3 hours') returning id into v_old_sale;
-  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity, metadata)
-    values (v_a, v_old_sale, 'a2', v_otro, 'Otro', 1, jsonb_build_object('stock_cut_seen', v_ts));
-  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a2') = 'applied', 'vio el corte: descuenta';
-  -- 3. No vio el corte: solo queda sold_at, con margen. El mismo reloj atrasado ahora sí la deja afuera.
-  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
-    values (v_a, v_old_sale, 'a3', v_otro, 'Otro', 1);
-  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a3') = 'before_count', 'sin testigo y antes del corte';
-  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity, metadata)
-    values (v_a, v_old_sale, 'a4', v_otro, 'Otro', 1, jsonb_build_object('stock_cut_seen', v_ts - interval '1 day'));
-  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a4') = 'before_count', 'testigo de un corte viejo';
-  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity, metadata)
-    values (v_a, v_old_sale, 'a5', v_otro, 'Otro', 1, '{"stock_cut_seen":"no es una fecha"}');
-  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a5') = 'before_count', 'testigo ilegible: no rompe la venta';
+  -- En línea y con el reloj sano, después del corte: descuenta.
   insert into public.sales (store_id, business_date, sold_at) values (v_a, current_date, now()) returning id into v_old_sale;
   insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
-    values (v_a, v_old_sale, 'a6', v_otro, 'Otro', 1);
-  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a6') = 'applied', 'sin testigo y claramente después';
-  insert into public.sales (store_id, business_date, sold_at) values (v_a, current_date, v_ts + interval '1 minute') returning id into v_old_sale;
+    values (v_a, v_old_sale, 'a1', v_otro, 'Otro', 1);
+  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a1') = 'applied', 'en línea y después: descuenta';
+  -- Venta parcial que cruza el conteo: cabecera antes, ítem después, y el reloj coincide. Ya estaba vendida.
+  insert into public.sales (store_id, business_date, sold_at, created_at)
+    values (v_a, current_date, now() - interval '2 hours', now() - interval '2 hours') returning id into v_old_sale;
   insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
-    values (v_a, v_old_sale, 'a7', v_otro, 'Otro', 1);
+    values (v_a, v_old_sale, 'a2', v_otro, 'Otro', 1);
+  assert (select stock_applied_reason = 'before_count' and stock_applied_qty = 0 from public.sale_items
+           where store_id = v_a and legacy_id = 'a2'), 'parcial que cruza, con reloj coherente: anterior';
+  -- La misma parcial con el reloj adelantado o atrasado: la cabecera sola no prueba nada.
+  insert into public.sales (store_id, business_date, sold_at, created_at)
+    values (v_a, current_date, now(), now() - interval '2 hours') returning id into v_old_sale;
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_a, v_old_sale, 'a3', v_otro, 'Otro', 1);
+  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a3') = 'count_review', 'parcial, reloj adelantado';
+  insert into public.sales (store_id, business_date, sold_at, created_at)
+    values (v_a, current_date, now() - interval '5 hours', now() - interval '2 hours') returning id into v_old_sale;
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_a, v_old_sale, 'a4', v_otro, 'Otro', 1);
+  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a4') = 'count_review', 'parcial, reloj atrasado';
+  -- Recibida después del corte con un reloj que no coincide: venta sin conexión o reloj desviado. sold_at solo no decide, en ninguna dirección.
+  insert into public.sales (store_id, business_date, sold_at) values (v_a, current_date, now() - interval '3 hours') returning id into v_old_sale;
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_a, v_old_sale, 'a5', v_otro, 'Otro', 1);
   assert (select stock_applied_reason = 'count_review' and stock_applied_qty = 0 from public.sale_items
-           where store_id = v_a and legacy_id = 'a7'), 'dentro del margen: no descuenta y queda para revisar';
-  assert (select stock from public.products where id = v_otro) = 98, 'solo descontaron a2 y a6';
-  -- La activación es un corte aunque el producto nunca se haya contado.
-  insert into public.sales (store_id, business_date, sold_at) values (v_a, current_date, now() - interval '2 days') returning id into v_old_sale;
+           where store_id = v_a and legacy_id = 'a5'), 'reloj atrasado o sin conexión: a revisar, no anterior';
+  insert into public.sales (store_id, business_date, sold_at) values (v_a, current_date, now() + interval '3 hours') returning id into v_old_sale;
   insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
-    values (v_a, v_old_sale, 'a8', v_leg, 'Legacy', 1);
-  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a8') = 'before_count', 'anterior a la activación';
+    values (v_a, v_old_sale, 'a6', v_otro, 'Otro', 1);
+  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a6') = 'count_review', 'reloj adelantado: a revisar, no aplicado';
+  -- La metadata no es evidencia: declarar un corte visto no cambia el resultado.
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity, metadata)
+    values (v_a, v_old_sale, 'a7', v_otro, 'Otro', 1, jsonb_build_object('stock_cut_seen', v_ts, 'stock_client_mode', 'server'));
+  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a7') = 'count_review', 'metadata ignorada';
+  -- Coherente, pero recibida en los 5 minutos que siguen al corte.
+  insert into public.sales (store_id, business_date, sold_at, created_at)
+    values (v_a, current_date, v_ts + interval '1 minute', v_ts + interval '1 minute') returning id into v_old_sale;
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_a, v_old_sale, 'a8', v_otro, 'Otro', 1);
+  assert (select stock_applied_reason = 'count_review' and stock_applied_qty = 0 from public.sale_items
+           where store_id = v_a and legacy_id = 'a8'), 'dentro del margen: no descuenta y queda para revisar';
+  assert (select stock from public.products where id = v_otro) = 99, 'solo descontó a1: sin doble descuento';
+  -- La activación es un corte aunque el producto nunca se haya contado. Sigue siendo la misma regla.
+  insert into public.sales (store_id, business_date, sold_at, created_at)
+    values (v_a, current_date, now() - interval '2 days', now() - interval '2 days') returning id into v_old_sale;
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_a, v_old_sale, 'a9', v_leg, 'Legacy', 1);
+  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a9') = 'before_count', 'anterior a la activación';
+  -- Un cliente no elige la recepción, ni al insertar ni después.
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', v_user, 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+  insert into public.sales (store_id, business_date, sold_at, created_at)
+    values (v_a, current_date, now(), now() - interval '10 days') returning id into v_old_sale;
+  execute 'reset role';
+  assert (select created_at >= now() from public.sales where id = v_old_sale), 'INSERT: created_at lo pone el servidor';
+  execute 'set local role authenticated';
+  update public.sales set created_at = now() - interval '10 days' where id = v_old_sale;
+  execute 'reset role';
+  assert (select created_at >= now() from public.sales where id = v_old_sale), 'UPDATE: created_at no cambia';
 
   -- G. Local sin activar: registra y no descuenta. Los clientes de hoy siguen funcionando.
   insert into public.products (store_id, name, stock) values (v_c, 'C', 10) returning id into v_pb;
