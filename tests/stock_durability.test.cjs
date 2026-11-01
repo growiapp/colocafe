@@ -42,7 +42,7 @@ const code = [
 ].join('\n');
 
 const ACTIVADO = '2026-01-01T00:00:00+00:00';
-function createServer(stock = 10, {active = true, schema = true} = {}) {
+function createServer(stock = 10, {active = true, schema = true, status} = {}) {
   const db = {
     products:[
       {id:productId, store_id:storeId, name:'Medialuna', legacy_id:'prod_1', category_id:catId, price:100, stock, unlimited:false, active:true, variants:[], metadata:{}},
@@ -54,12 +54,13 @@ function createServer(stock = 10, {active = true, schema = true} = {}) {
     store_users:[{store_id:storeId, user_id:'user_a', role:'owner'}]
   };
   const server = {db, calls:[], beforeRead:null, afterPhoto:null, failProducts:null, noEmbed:false, rlsDeniesWrite:false, failWrite:null,
-    active, schema, failActivation:null, beforeActivation:null,
+    active, schema, status, failActivation:null, beforeActivation:null,
+    estado() { return server.status || (server.active ? 'active' : null); },
     // Contrato de la migración: una fila por identidad, el descuento en la misma operación y sin descuento en ilimitados.
     // late: la clasificación del corte la decide el servidor; acá se indica el resultado para probar al cliente.
     insertItem(legacy_id, product_id, quantity, {late = false, reason} = {}) {
       if (db.sale_items.some(i => i.legacy_id === legacy_id)) return {error:{code:'23505'}};
-      db.sale_items.push({store_id:storeId, legacy_id, product_id, quantity, product_name:'P', stock_applied_reason:reason || (server.active ? 'applied' : 'inactive'), stock_applied_at:'2026-11-01T00:00:00Z'});
+      db.sale_items.push({id:legacy_id, store_id:storeId, legacy_id, product_id, quantity, product_name:'P', stock_applied_reason:reason || (server.active ? 'applied' : 'inactive'), stock_applied_at:'2026-11-01T00:00:00Z'});
       const p = db.products.find(x => x.id === product_id && x.store_id === storeId);
       if (server.active && !late && !reason && p && !p.unlimited) p.stock -= quantity;
       return {error:null};
@@ -70,7 +71,7 @@ function createServer(stock = 10, {active = true, schema = true} = {}) {
       if (!server.schema) return {data:null, error:{code:'PGRST202', message:'sin función'}};
       if (server.failWrite) return {data:null, error:server.failWrite};
       if (server.rlsDeniesWrite) return {data:null, error:{code:'42501', message:'STOCK_FORBIDDEN'}};
-      if (!server.active) return {data:{ok:false, code:'inactive'}, error:null};
+      if (server.estado() !== 'active') return {data:{ok:false, code:'inactive'}, error:null};
       const p = db.products.find(x => x.id === args.p_product && x.store_id === args.p_store);
       if (!p) return {data:{ok:false, code:'not_found'}, error:null};
       if (p.stock !== args.p_expected) return {data:{ok:false, code:'conflict', stock:p.stock}, error:null};
@@ -78,14 +79,13 @@ function createServer(stock = 10, {active = true, schema = true} = {}) {
       if (args.p_kind === 'count') p.stock_counted_at = new Date().toISOString();
       return {data:{ok:true, stock:p.stock, counted_at:p.stock_counted_at || null}, error:null};
     }, from(table) {
-      let op = 'select', payload = null, cols = '', filters = [], embed = null;
+      let op = 'select', payload = null, cols = '', filters = [], embed = null, opts = {}, rango = null;
       const q = {
-        select(c) { if (op === 'select') cols = c || ''; return q; },
+        select(c, o) { if (op === 'select') { cols = c || ''; opts = o || {}; } return q; },
         eq(k, v) { filters.push([k, v]); return q; },
         in(k, v) { if (k.startsWith('sale_items.')) embed = v; else filters.push([k, v, 'in']); return q; },
         order() { return q; },
-        gte() { return q; },
-        limit() { return q; },
+        range(a, b) { rango = [a, b]; return q; },
         update(v) { op = 'update'; payload = v; return q; },
         insert(v) { op = 'insert'; payload = v; return q; },
         maybeSingle() { return run(true); },
@@ -100,8 +100,9 @@ function createServer(stock = 10, {active = true, schema = true} = {}) {
           const hook = server.beforeActivation; server.beforeActivation = null; await hook?.();
           if (server.failActivation) return {data:null, error:server.failActivation};
           if (!server.schema) return {data:null, error:{code:'PGRST205', message:'sin tabla'}};
-          return {data:server.active ? {activated_at:ACTIVADO} : null, error:null};
+          return {data:server.estado() ? {activated_at:ACTIVADO, status:server.estado()} : null, error:null};
         }
+        if (op === 'select' && table === 'sale_items' && opts.count) { const hook = server.beforeIncidents; server.beforeIncidents = null; await hook?.(); }
         if (op === 'select' && !server.schema && cols.includes('stock_counted_at')) return {data:null, error:{code:'42703', message:'sin columna'}};
         if (op === 'select') {
           if (table === 'products' && server.failProducts) return {data:null, error:server.failProducts};
@@ -111,10 +112,12 @@ function createServer(stock = 10, {active = true, schema = true} = {}) {
             found = found.map(p => ({...p, sale_items:db.sale_items.filter(i => i.product_id === p.id && embed.includes(i.legacy_id)).map(i => ({legacy_id:i.legacy_id}))}));
           }
           if (table === 'products') { const hook = server.afterPhoto; server.afterPhoto = null; await hook?.(); }
-          return {data:single ? (found[0] || null) : found, error:null};
+          const count = opts.count ? found.length : null;
+          if (rango) found = found.slice(rango[0], rango[1] + 1);
+          return {data:single ? (found[0] || null) : found, error:null, count};
         }
         if (server.failWrite) return {data:null, error:server.failWrite};
-        if (op === 'update' && table === 'products' && server.active && 'stock' in payload && db.products.some(r => match(r) && r.stock !== payload.stock)) {
+        if (op === 'update' && table === 'products' && ['active', 'sales_paused'].includes(server.estado()) && 'stock' in payload && db.products.some(r => match(r) && r.stock !== payload.stock)) {
           return {data:null, error:{code:'P0001', message:'STOCK_DIRECT_WRITE: el stock de este local lo gestiona el servidor'}};
         }
         if (op === 'update') {
@@ -141,7 +144,7 @@ function load(server, {ventas = [], ilimitadoMenu = false, modo} = {}) {
   ctx.__state = {uid:'user_a', store:storeId, ventas, saves:0, toasts, storage, confirmOk:true, confirms:[]};
   ctx.confirm = text => { ctx.__state.confirms.push(text); return ctx.__state.confirmOk; };
   // Como un dispositivo que ya leyó el modo antes: el activado arranca en servidor, salvo que el test pida lo contrario.
-  if (modo === 'servidor' || (modo === undefined && server.active && server.schema)) {
+  if (modo === 'servidor' || (modo === undefined && server.estado() === 'active' && server.schema)) {
     storage.set(`stock_modo:${storeId}`, JSON.stringify({modo:'servidor', activado:ACTIVADO}));
   }
   ctx.__sesionUserId = () => ctx.__state.uid;
@@ -470,7 +473,7 @@ test('el cobro no muta stock: la fila guardada es el descuento provisional', () 
   const cobro = between('      ventaLocalCreada=true;', '      let salesSync=null;');
   assert.doesNotMatch(cobro, /\.stock\s*=/);
   assert.match(between('      const ventasIdsAntes=', '      ventaLocalCreada=true;'), /ventas\.push\(\.\.\.nuevas\)/);
-  assert.match(html, /_sb_retry_count:0,_stock_pending:stockServidor\(\),_stock_cut_seen:stockServidor\(\)\?stockCorte\(p\):'',/);
+  assert.match(html, /_sb_retry_count:0,_stock_pending:stockServidor\(\),/);
   assert.match(between('      ventaLocalCreada=true;', '      let salesSync=null;'), /ventaPendiente\.length\?'':stockDescontarEnDispositivo\(items\)/);
   assert.doesNotMatch(between('window.debugCatalogWritePermissions=', 'const {error:updateProductError}'), /stock:firstProduct/);
 });
@@ -500,7 +503,7 @@ test('sin migración: el cliente no pide columnas que no existen y funciona en m
   assert.equal(api.stockServidor(), false);
   assert.equal(server.calls.some(c => String(c.cols).includes('stock_counted_at')), false);
   assert.equal(server.calls.some(c => c.table === 'sale_items'), false);
-  assert.equal(state.storage.get(`stock_modo:${storeId}`), JSON.stringify({modo:'local', activado:''}));
+  assert.equal(JSON.parse(state.storage.get(`stock_modo:${storeId}`)).modo, 'local');
 });
 
 test('modo local: el cobro descuenta en el dispositivo como siempre, con clamp; una lectura no lo pisa', async () => {
@@ -664,15 +667,23 @@ test('D: un conteo rechazado devuelve el saldo y el corte anteriores; las pendie
   assert.equal(api.stockInfo(product(api)).teorico, 8);
 });
 
-test('A: testigo. Una venta que vio el corte sigue restando aunque el reloj la ponga antes', () => {
+test('hallazgo 3: la estimación deja de restar lo vendido antes del corte y hasta 5 minutos después, igual que el servidor', () => {
   const {api} = load(createServer(), {ventas:[
-    row('vio', {cantidad:1, timestamp:'2025-01-01T00:00:00.000Z', _stock_cut_seen:ACTIVADO}),
-    row('no_vio', {cantidad:2, timestamp:'2025-01-01T00:00:00.000Z'}),
-    row('viejo', {cantidad:4, timestamp:'2025-01-01T00:00:00.000Z', _stock_cut_seen:'2024-01-01T00:00:00+00:00'}),
-    row('margen', {cantidad:8, timestamp:'2026-01-01T00:04:00.000Z'}),
-    row('despues', {cantidad:16, timestamp:'2026-01-01T00:06:00.000Z'})
+    row('antes', {cantidad:1, timestamp:'2025-01-01T00:00:00.000Z'}),
+    row('margen', {cantidad:2, timestamp:'2026-01-01T00:04:00.000Z'}),
+    row('despues', {cantidad:4, timestamp:'2026-01-01T00:06:00.000Z'})
   ]});
-  assert.equal(api.stockInfo(product(api)).pendiente, 17);
+  assert.equal(api.stockInfo(product(api)).pendiente, 4);
+});
+
+test('hallazgo 3: lo que el servidor deja en count_review no vuelve a restarse ni se pierde de vista', async () => {
+  const server = createServer(), {ctx, api, state} = load(server, {ventas:[row('v1', {cantidad:2})]});
+  assert.equal(api.stockInfo(product(api)).teorico, 8);
+  server.insertItem('v1', productId, 2, {reason:'count_review'});
+  await refresh(ctx);
+  assert.deepEqual([api.stockInfo(product(api)).teorico, api.getVentas()[0]._stock_pending], [10, false]);
+  api.renderStockAlerts();
+  assert.match(state.elements['stock-alerts'].innerHTML, /1 venta pendiente de conciliar/);
 });
 
 test('A: el corte es el más reciente entre conteo y activación', () => {
@@ -682,31 +693,177 @@ test('A: el corte es el más reciente entre conteo y activación', () => {
   assert.equal(api.stockCorte({stock_counted_at:'2026-05-01T00:00:00.123456+00:00'}), '2026-05-01T00:00:00.123456+00:00');
 });
 
-test('A: el testigo viaja con el ítem solo si existe; el read-back de R-B2a no compara metadata', () => {
-  const map = between('  window.mapSaleItemToSupabaseItem=async function', '  window.mapSalePaymentToSupabasePayment=');
-  assert.match(map, /\.\.\.\(row\._stock_cut_seen\?\{stock_cut_seen:row\._stock_cut_seen\}:\{\}\)/);
-  const sameItem = between('const sameItem=(remote,local)=>', 'const samePayment=');
-  assert.doesNotMatch(sameItem, /metadata/);
+test('hallazgo 3, migración: ni la metadata ni sold_at solo clasifican; la recepción no la elige el cliente', () => {
+  const sql = readFileSync(path.join(repo, 'stock_durability.sql'), 'utf8');
+  const apply = sql.match(/function public\.sale_items_stock_apply\(\)[\s\S]*?\$\$;/)[0];
+  assert.doesNotMatch(apply, /stock_cut_seen/);
+  assert.doesNotMatch(apply, /v_sold\s*[<>]\s*v_cut/, 'sold_at nunca se compara solo contra el corte');
+  assert.doesNotMatch(apply.replace(/new\.metadata->>'stock_client_mode' = 'server' or[^\n]*/, ''), /new\.metadata/, 'la metadata solo puede sumar revisión');
+  assert.match(apply, /v_sold not between v_created - interval '5 minutes' and v_created \+ interval '5 minutes'/);
+  assert.match(sql.match(/function public\.sales_stock_guard\(\)[\s\S]*?\$\$;/)[0], /new\.created_at := old\.created_at/);
+  assert.doesNotMatch(html, /stock_cut_seen|_stock_cut_seen/);
 });
 
-test('E: los ítems sin descuento se muestran como incidencia, con el nombre escapado y solo en su contexto', async () => {
+test('hallazgo 2: cada venta en modo servidor se marca para que una transición no la pierda de vista; el resto no', async () => {
+  const map = between('  window.mapSaleItemToSupabaseItem=async function', '  window.mapSalePaymentToSupabasePayment=');
+  assert.match(map, /row\._stock_pending===true\?\{stock_client_mode:'server'\}:\{\}/);
+  assert.doesNotMatch(between('const sameItem=(remote,local)=>', 'const samePayment='), /metadata/, 'el read-back de R-B2a no compara metadata');
+});
+
+test('hallazgo 2: en pausa el cliente avisa, sigue sin descontar en el dispositivo y no pasa a modo local', async () => {
+  const server = createServer(), {ctx, api, state} = load(server);
+  server.status = 'sales_paused';
+  assert.equal(await refresh(ctx), true);
+  assert.equal(api.stockServidor(), true);
+  assert.equal(api.stockDescontarEnDispositivo([{prodId:'prod_1', qty:2}]), '');
+  assert.equal(product(api).stock, 10);
+  api.renderStockAlerts();
+  assert.match(state.elements['stock-alerts'].innerHTML, /Mantenimiento de stock/);
+});
+
+test('hallazgo 2: en pausa un ajuste se rechaza sin perderse en silencio', async () => {
+  const server = createServer(), {ctx, api, state} = load(server);
+  server.status = 'sales_paused';
+  ctx.adjProdStock('prod_1', 1);
+  await flush();
+  assert.equal(state.lastError.code, 'STOCK_MODEL_CHANGED');
+  assert.equal(product(api).stock, 10);
+  assert.equal(server.db.products[0].stock, 10);
+});
+
+test('hallazgo 2: desactivado, el cliente vuelve a modo local aunque la fila siga existiendo, y no pisa el saldo del dispositivo', async () => {
+  const server = createServer(), {ctx, api} = load(server);
+  await refresh(ctx);
+  server.status = 'deactivated';
+  server.db.products[0].stock = 999;
+  assert.equal(await refresh(ctx), false);
+  assert.equal(api.stockServidor(), false);
+  assert.equal(product(api).stock, 10);
+  api.stockDescontarEnDispositivo([{prodId:'prod_1', qty:2}]);
+  assert.equal(product(api).stock, 8);
+});
+
+test('hallazgo 2, migración y rollback: nada apaga el modelo sin pasar por la pausa, y el rollback lo exige', () => {
+  const sql = readFileSync(path.join(repo, 'stock_durability.sql'), 'utf8');
+  const guard = sql.match(/function public\.stock_store_activation_guard\(\)[\s\S]*?\$\$;/)[0];
+  assert.match(guard, /old\.status = 'sales_paused' and new\.status = 'deactivated'/);
+  assert.doesNotMatch(guard, /old\.status = 'active' and new\.status = 'deactivated'/);
+  assert.match(guard, /tg_op = 'DELETE'[\s\S]*raise exception 'STOCK_TRANSITION/);
+  assert.match(sql.match(/function public\.sale_items_stock_prepare\(\)[\s\S]*?\$\$;/)[0], /STOCK_SALES_PAUSED/);
+  assert.match(sql.match(/function public\.sales_stock_guard\(\)[\s\S]*?\$\$;/)[0], /STOCK_SALES_PAUSED/);
+  const rollback = readFileSync(path.join(repo, 'stock_durability_rollback.sql'), 'utf8');
+  assert.match(rollback, /status <> 'deactivated'[\s\S]*raise exception 'STOCK_ROLLBACK/);
+  assert.ok(rollback.indexOf("raise exception 'STOCK_ROLLBACK") < rollback.indexOf('drop trigger'), 'aborta antes de tocar nada');
+  assert.doesNotMatch(rollback, /drop table/i);
+  const plan = readFileSync(path.join(repo, 'stock_activation.sql'), 'utf8');
+  assert.match(plan, /STOP GATE/);
+});
+
+test('hallazgo 1, migración: un cliente no cambia store_id, y la guarda corre antes de mirar el saldo', () => {
+  const sql = readFileSync(path.join(repo, 'stock_durability.sql'), 'utf8');
+  const guard = sql.match(/function public\.products_stock_guard\(\)[\s\S]*?\$\$;/)[0];
+  const store = guard.indexOf('new.store_id is distinct from old.store_id');
+  assert.ok(store > 0 && store < guard.indexOf('new.stock is distinct from old.stock'));
+  assert.ok(guard.indexOf("current_user not in ('anon', 'authenticated')") < store);
+  assert.match(guard, /STOCK_STORE_IMMUTABLE/);
+  assert.doesNotMatch(between('  function mapProductToSupabase(', '  function getFirstAvailableCategorySupabaseId('), /store_id:\s*(?!\s|storeId)/, 'el cliente solo manda su propio local');
+});
+
+test('hallazgo 4, migración: las marcas de movimiento no usan now(), y se toman después del lock', () => {
+  const sql = readFileSync(path.join(repo, 'stock_durability.sql'), 'utf8');
+  const fn = name => sql.match(new RegExp(`function public\\.${name}\\([\\s\\S]*?\\$\\$;`))[0];
+  for (const name of ['sale_items_stock_apply', 'sale_items_stock_compensate', 'stock_apply_adjustment', 'stock_store_activation_guard', 'sales_stock_guard']) {
+    assert.doesNotMatch(fn(name), /\bnow\(\)/, name);
+  }
+  const apply = fn('sale_items_stock_apply');
+  assert.ok(apply.indexOf('for update') < apply.indexOf('stock_applied_at = clock_timestamp()'));
+  const adj = fn('stock_apply_adjustment');
+  assert.ok(adj.indexOf('for update') < adj.indexOf('then clock_timestamp()'));
+  const comp = fn('sale_items_stock_compensate');
+  assert.ok(comp.indexOf('for update') < comp.indexOf('old.stock_applied_at <= greatest'), 'el corte se lee ya con el lock');
+  const repro = readFileSync(path.join(repo, 'stock_durability_concurrency_test.sql'), 'utf8');
+  assert.match(repro, /Caso 10[\s\S]*Caso 11[\s\S]*Caso 12/);
+});
+
+test('E: los ítems sin descuento se muestran como incidencia, con motivo y solo en su contexto', async () => {
   const server = createServer(), {ctx, api, state} = load(server);
   server.insertItem('x1', null, 3, {reason:'unresolved'});
-  server.db.sale_items[0].product_name = '<b>Raro</b>';
   server.insertItem('x2', productId, 1, {reason:'count_review'});
   server.insertItem('x3', productId, 1, {reason:'before_count'});
   server.insertItem('x4', productId, 1);
+  server.insertItem('x5', productId, 1, {reason:'transition_review'});
+  server.insertItem('x6', null, 1, {reason:'no_identity'});
   await refresh(ctx);
   api.renderStockAlerts();
   const banner = state.elements['stock-alerts'].innerHTML;
-  assert.match(banner, /Ventas que no descontaron stock/);
+  assert.match(banner, /4 ventas pendientes de conciliar/);
   assert.match(banner, /producto no identificado/);
-  assert.match(banner, /cerca de un conteo/);
-  assert.doesNotMatch(banner, /×1 \(revisar\)/);
-  assert.equal((banner.match(/×/g) || []).length, 2, 'before_count y applied no son incidencia');
+  assert.match(banner, /sin hora confiable/);
+  assert.match(banner, /cambio de modo/);
+  assert.match(banner, /sin identidad/);
+  assert.equal((banner.match(/×/g) || []).length, 4, 'before_count y applied no son incidencia');
+  assert.doesNotMatch(banner, /Ver más/);
   api.bumpContexto();
   api.renderStockAlerts();
-  assert.doesNotMatch(state.elements['stock-alerts'].innerHTML, /Ventas que no descontaron/);
+  assert.doesNotMatch(state.elements['stock-alerts'].innerHTML, /pendientes de conciliar/);
+});
+
+test('hallazgo 5: nada caduca; una incidencia vieja sigue en la consulta, sin filtro de fecha', async () => {
+  const server = createServer(), {ctx, api, state} = load(server);
+  server.insertItem('viejo', null, 3, {reason:'unresolved'});
+  server.db.sale_items[0].stock_applied_at = '2020-01-01T00:00:00Z';
+  await refresh(ctx);
+  api.renderStockAlerts();
+  assert.match(state.elements['stock-alerts'].innerHTML, /1 venta pendiente/);
+  assert.doesNotMatch(between('  async function leerIncidenciasStock(', '  window.verMasIncidenciasStock='), /\.gte\(|\.limit\(|864e5/);
+});
+
+test('hallazgo 5: más de una página: el total es real y Ver más trae el resto, también si entra una nueva', async () => {
+  const server = createServer(), {ctx, api, state} = load(server);
+  for (let i = 0; i < 120; i++) server.insertItem(`p${i}`, null, 1, {reason:'count_review'});
+  await refresh(ctx);
+  api.renderStockAlerts();
+  let banner = state.elements['stock-alerts'].innerHTML;
+  assert.match(banner, /120 ventas pendientes/);
+  assert.equal((banner.match(/×/g) || []).length, 50);
+  assert.match(banner, /Ver más/);
+  await ctx.verMasIncidenciasStock();
+  server.insertItem('nueva', null, 1, {reason:'count_review'});
+  server.db.sale_items.unshift(server.db.sale_items.pop()); // la más reciente va primero: correría una página con offset
+  await ctx.verMasIncidenciasStock();
+  banner = state.elements['stock-alerts'].innerHTML;
+  assert.equal((banner.match(/×/g) || []).length, 121);
+  assert.match(banner, /121 ventas pendientes/);
+  assert.doesNotMatch(banner, /Ver más/);
+});
+
+test('hallazgo 5: después de desactivar, las incidencias se siguen viendo', async () => {
+  const server = createServer(), {ctx, api, state} = load(server);
+  server.insertItem('x1', null, 1, {reason:'transition_review'});
+  server.status = 'deactivated';
+  assert.equal(await refresh(ctx), false);
+  assert.equal(api.stockServidor(), false);
+  api.renderStockAlerts();
+  assert.match(state.elements['stock-alerts'].innerHTML, /1 venta pendiente/);
+});
+
+test('hallazgo 5: la carga del catálogo de un local desactivado también trae las incidencias', async () => {
+  const server = createServer(10, {status:'deactivated'}), {ctx, api, state} = load(server);
+  server.insertItem('x1', null, 1, {reason:'transition_review'});
+  assert.equal(await ctx.loadCatalogFromSupabase({silent:true}), true, String(state.loadError));
+  assert.equal(api.stockServidor(), false);
+  api.renderStockAlerts();
+  assert.match(state.elements['stock-alerts'].innerHTML, /1 venta pendiente/);
+});
+
+test('hallazgo 5: F0-B: una página que vuelve de otro contexto no se aplica', async () => {
+  const server = createServer(), {ctx, api, state} = load(server);
+  server.insertItem('x1', null, 1, {reason:'unresolved'});
+  await refresh(ctx);
+  server.beforeIncidents = () => { api.bumpContexto(); };
+  await ctx.verMasIncidenciasStock();
+  api.renderStockAlerts();
+  assert.doesNotMatch(state.elements['stock-alerts'].innerHTML, /pendiente/);
 });
 
 test('E: el nombre de una incidencia pasa por escapeHtml', () => {
