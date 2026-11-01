@@ -14400,30 +14400,74 @@ if(config.webappUrl){loadFromSheets();}
     Object.assign(err,meta);
     return err;
   }
+  const salesSameAmount=(a,b)=>a!==null&&a!==undefined&&a!==''&&Number.isFinite(Number(a))&&Math.abs(Number(a)-Number(b))<0.009;
+  const salesAmountsMatch=(amounts,total)=>Number.isFinite(total)&&amounts.every(a=>Number.isFinite(Number(a))&&a!==null)
+    &&salesSameAmount(money2(amounts.reduce((s,a)=>s+Number(a),0)),total);
+  // Cada línea tiene que salir de la fórmula del cobro (carritoItemBruto, carritoItemTotal, resumenCobro) con lo que guarda
+  // mapSaleItemToSupabaseItem: bruto = (precio + variantes) × cantidad; el descuento de línea es descuentoSobre(bruto, regla);
+  // el del ticket se reparte entre las líneas y en total vale descuentoSobre(suma de netos, regla_ticket). Sin datos, no cierra.
+  function salesLinesMatchPosFormula(itemRows){
+    const num=v=>v===null||v===undefined||v===''?NaN:Number(v);
+    let netos=0,tickets=0,reglaTicket=null;
+    for(const r of itemRows){
+      const q=num(r.quantity),unit=num(r.unit_price),vars=num(r.variants_price),total=num(r.line_total);
+      if(![q,unit,vars,total].every(Number.isFinite)||!(q>0)||unit<0||vars<0)return false;
+      const bruto=money2((unit+vars)*q),d=r.metadata?.descuento;
+      let linea=0,ticket=0;
+      if(d){
+        linea=num(d.linea);ticket=num(d.ticket);
+        if(!Number.isFinite(linea)||!Number.isFinite(ticket)||linea<0||ticket<0||!salesSameAmount(d.bruto,bruto))return false;
+        if(!salesSameAmount(linea,d.regla?descuentoSobre(bruto,d.regla):0))return false;
+        if(ticket>0){if(!d.regla_ticket)return false;reglaTicket=reglaTicket||d.regla_ticket;}
+      }
+      const neto=money2(bruto-linea);
+      if(ticket>neto||!salesSameAmount(total,money2(neto-ticket)))return false;
+      netos=money2(netos+neto);tickets=money2(tickets+ticket);
+    }
+    return tickets===0||salesSameAmount(tickets,descuentoSobre(netos,reglaTicket));
+  }
   async function verifySaleGroupReadBack(client,storeId,group,saleId){
     const legacyId=getStableSaleLegacyId(group);
+    const saleCols='id,store_id,legacy_id,metadata,subtotal_amount,total_amount';
     const saleQuery=saleId
-      ? client.from('sales').select('id,legacy_id,total_amount,business_date,sold_at').eq('id',saleId).eq('store_id',storeId).maybeSingle()
-      : client.from('sales').select('id,legacy_id,total_amount,business_date,sold_at').eq('store_id',storeId).eq('legacy_id',legacyId).maybeSingle();
+      ? client.from('sales').select(saleCols).eq('id',saleId).eq('store_id',storeId).maybeSingle()
+      : client.from('sales').select(saleCols).eq('store_id',storeId).eq('legacy_id',legacyId).maybeSingle();
     const saleRes=await saleQuery;
     if(saleRes.error) throw Object.assign(saleRes.error,{_salesOp:'read_back_sale',_salesTable:'sales'});
     if(!saleRes.data) throw makeSalesReadBackError('No pudimos confirmar la venta guardada',{_salesOp:'read_back_sale',_salesTable:'sales',code:'READ_BACK_MISSING_SALE',legacyId,saleId});
+    if(saleRes.data.store_id!==storeId || saleRes.data.legacy_id!==legacyId || (group.ref?.ticket_id && saleRes.data.metadata?.ticket_id!==group.ref.ticket_id)){
+      throw makeSalesReadBackError('La identidad de la venta remota no coincide',{_salesOp:'read_back_sale',_salesTable:'sales',code:'READ_BACK_IDENTITY_MISMATCH',legacyId,saleId});
+    }
     const confirmedSaleId=saleRes.data.id;
-    const expectedItems=(group.rows||[]).length;
-    const expectedPayments=(group.payments&&group.payments.length?group.payments:getTicketPayments(group)).length;
-    const itemsRes=await client.from('sale_items').select('id',{count:'exact',head:true}).eq('store_id',storeId).eq('sale_id',confirmedSaleId);
+    const expectedItemIds=(group.rows||[]).map(row=>getStableSaleItemLegacyId(row));
+    const payments=group.payments&&group.payments.length?group.payments:getTicketPayments(group);
+    const expectedPaymentIds=payments.map((payment,index)=>getStableSalePaymentLegacyId(group,payment,index));
+    const exactIds=(actual,expected)=>expected.length>0 && expected.every(Boolean) && new Set(expected).size===expected.length
+      && actual.length===expected.length && actual.every(id=>expected.includes(id)) && new Set(actual).size===actual.length;
+    const itemsRes=await client.from('sale_items').select('store_id,sale_id,legacy_id,quantity,unit_price,variants_price,line_total,metadata').eq('store_id',storeId).eq('sale_id',confirmedSaleId);
     if(itemsRes.error) throw Object.assign(itemsRes.error,{_salesOp:'read_back_items',_salesTable:'sale_items'});
-    const paymentsRes=await client.from('sale_payments').select('id',{count:'exact',head:true}).eq('store_id',storeId).eq('sale_id',confirmedSaleId);
+    const paymentsRes=await client.from('sale_payments').select('store_id,sale_id,legacy_id,method,amount').eq('store_id',storeId).eq('sale_id',confirmedSaleId);
     if(paymentsRes.error) throw Object.assign(paymentsRes.error,{_salesOp:'read_back_payments',_salesTable:'sale_payments'});
+    const itemRows=itemsRes.data||[], paymentRows=paymentsRes.data||[];
+    if([...itemRows,...paymentRows].some(row=>row.store_id!==storeId||row.sale_id!==confirmedSaleId)){
+      throw makeSalesReadBackError('El detalle remoto no pertenece a esta venta',{_salesOp:'read_back_sale',_salesTable:'sales',code:'READ_BACK_IDENTITY_MISMATCH',legacyId,saleId});
+    }
+    const itemIds=itemRows.map(row=>row.legacy_id), paymentIds=paymentRows.map(row=>row.legacy_id);
+    // Completable: lo que hay es un subconjunto sin repetir de lo esperado; solo puede faltar detalle, nunca sobrar ni ser ajeno.
+    const onlyMissing=(actual,expected)=>exactIds(expected,expected)&&actual.every(id=>expected.includes(id))&&new Set(actual).size===actual.length;
     const readBack={
       saleId:confirmedSaleId,
-      legacyId:saleRes.data.legacy_id||legacyId,
-      expectedItems,
-      itemCount:Number(itemsRes.count)||0,
-      expectedPayments,
-      paymentCount:Number(paymentsRes.count)||0
+      legacyId,
+      expectedItems:expectedItemIds.length,
+      itemCount:itemIds.length,
+      expectedPayments:expectedPaymentIds.length,
+      paymentCount:paymentIds.length,
+      completable:onlyMissing(itemIds,expectedItemIds)&&onlyMissing(paymentIds,expectedPaymentIds),
+      missingItemIds:expectedItemIds.filter(id=>!itemIds.includes(id)),
+      missingPaymentIds:expectedPaymentIds.filter(id=>!paymentIds.includes(id)),
+      sale:saleRes.data,itemRows,paymentRows
     };
-    if(readBack.itemCount<expectedItems || readBack.paymentCount<expectedPayments){
+    if(!exactIds(itemIds,expectedItemIds)||!exactIds(paymentIds,expectedPaymentIds)){
       throw makeSalesReadBackError('No pudimos confirmar el detalle completo de la venta',{
         _salesOp:'read_back_counts',
         _salesTable:'sales',
@@ -14431,11 +14475,25 @@ if(config.webappUrl){loadFromSheets();}
         readBack
       });
     }
+    // Regla del POS (mapSaleGroupToSupabaseSale y getCurrentPaymentState): total = suma de líneas = suma de pagos, al centavo.
+    // Se mide sobre lo remoto, no contra lo local: una venta completa conserva sus ediciones si siguen siendo coherentes.
+    const total=Number(saleRes.data.total_amount);
+    if(!salesAmountsMatch(itemRows.map(r=>r.line_total),total)||!salesAmountsMatch(paymentRows.map(r=>r.amount),total)){
+      throw makeSalesReadBackError('Los importes de la venta remota no cierran',{_salesOp:'read_back_amounts',_salesTable:'sales',code:'READ_BACK_COMMERCIAL_MISMATCH',readBack});
+    }
+    if(!salesLinesMatchPosFormula(itemRows)){
+      throw makeSalesReadBackError('Una línea de la venta remota no sale de su precio, cantidad y descuento',{_salesOp:'read_back_lines',_salesTable:'sale_items',code:'READ_BACK_LINE_MISMATCH',readBack});
+    }
     return readBack;
   }
-  async function saveSalesRowManual(client,table,storeId,payload,selectColumns='id,legacy_id'){
+  async function saveSalesRowManual(client,table,storeId,payload,selectColumns='id,legacy_id',insertOnly=false){
     let existingRow=null;
     try{
+      if(insertOnly){
+        const insertRes=await client.from(table).insert(payload).select(selectColumns).single();
+        if(insertRes.error) throw Object.assign(insertRes.error,{_salesOp:'insert',_salesTable:table,_salesPayload:payload,_salesExisting:null});
+        return insertRes.data;
+      }
       const existingRes=await client.from(table).select('id,legacy_id').eq('store_id',storeId).eq('legacy_id',payload.legacy_id).maybeSingle();
       if(existingRes.error) throw Object.assign(existingRes.error,{_salesOp:'select',_salesTable:table,_salesPayload:payload,_salesExisting:null});
       existingRow=existingRes.data||null;
@@ -15182,8 +15240,15 @@ if(config.webappUrl){loadFromSheets();}
   }
 
   window.saveSaleGroupToSupabase=async function(group){
-    const retenida=(group?.rows||[]).map(r=>origenPermite(r,'venta')).find(x=>!x.ok);
-    if(retenida){const e=new Error(`Venta retenida (${retenida.motivo}): no se envía desde esta sesión`);e.code='F0B_RETENIDA';throw e;}
+    // F0-B: el origen se revisa al empezar y la firma de contexto antes de cada escritura y antes de marcar la venta,
+    // porque la conciliación espera varias lecturas y un cambio de cuenta o local puede ocurrir en el medio.
+    const sigueElContexto=mientrasSigaElContexto();
+    const enContexto=()=>{
+      const retenida=(group?.rows||[]).map(r=>origenPermite(r,'venta')).find(x=>!x.ok)
+        ||(!sigueElContexto()&&{motivo:'cambió la cuenta o el local durante el envío'});
+      if(retenida){const e=new Error(`Venta retenida (${retenida.motivo}): no se envía desde esta sesión`);e.code='F0B_RETENIDA';throw e;}
+    };
+    enContexto();
     if(!hasSalesSupabaseReady()) throw new Error('Supabase no configurado para ventas');
     const storeId=getSalesStoreId();
     if(!storeId) throw new Error('No hay tienda activa');
@@ -15208,30 +15273,64 @@ if(config.webappUrl){loadFromSheets();}
       const existingRow=await findExistingSaleRow(client,storeId,group);
       salePayload=await mapSaleGroupToSupabaseSale(group,{client,storeId,cache:relationCache});
       logSalesWriteAttempt('start',{operation:salePayload?.metadata?.source_kind||'venta',storeId,session,salePayload,legacyId:salesLastTicket});
-      saleData=existingRow
-        ? await (async()=>{
-            try{
-              const res=await client.from('sales').update(salePayload).eq('id',existingRow.id).eq('store_id',storeId).select('id,legacy_id').single();
-              if(res.error) throw Object.assign(res.error,{_salesOp:'update',_salesTable:'sales',_salesPayload:salePayload,_salesExisting:existingRow});
-              return res.data;
-            }catch(err){
-              logSalesTableError('sales',err?._salesOp||'update',err?._salesPayload||salePayload,err?._salesExisting||existingRow,err);
-              throw err;
-            }
-          })()
-        : await saveSalesRowManual(client,'sales',storeId,salePayload,'id,legacy_id');
+      if(existingRow){
+        // Un reintento solo adopta una venta de esta operación; nunca reescribe sus datos comerciales.
+        saleData=existingRow;
+      }else{
+        try{
+          enContexto();
+          saleData=await saveSalesRowManual(client,'sales',storeId,salePayload,'id,legacy_id',true);
+        }catch(err){
+          if(err?.code==='F0B_RETENIDA')throw err;
+          // PostgREST no expone CONSTRAINT_NAME por separado: solo este índice identificado en el mensaje permite recuperar.
+          const sameIdentity=err?.code==='23505'&&err?._salesTable==='sales'&&err?._salesOp==='insert'
+            &&/unique constraint "sales_store_legacy_unique_idx"/i.test(String(err?.message||''));
+          if(!sameIdentity)throw err;
+          const recovered=await findExistingSaleRow(client,storeId,group);
+          if(!recovered)throw err;
+          saleData=recovered;
+        }
+      }
       saleId=saleData.id;
-      itemsPayload=await Promise.all((group.rows||[]).map(row=>mapSaleItemToSupabaseItem(row,saleId,{client,storeId,cache:relationCache})));
-      for(const itemPayload of itemsPayload){
-        const itemData=await saveSalesRowManual(client,'sale_items',storeId,itemPayload,'id,legacy_id');
-        itemsData.push(itemData);
+      try{
+        readBack=await verifySaleGroupReadBack(client,storeId,group,saleId);
+      }catch(err){
+        // R-B2a: con la venta ya guardada, solo se insertan los ítems y pagos que faltan, por su legacy_id estable.
+        // Nada existente se actualiza; el índice único (store_id, legacy_id) frena un duplicado concurrente con 23505.
+        if(err?.code!=='READ_BACK_INCOMPLETE_SALE'||!err.readBack?.completable)throw err;
+        const partial=err.readBack;
+        const missingItems=new Set(partial.missingItemIds), missingPayments=new Set(partial.missingPaymentIds);
+        const localItems=await Promise.all((group.rows||[]).map(row=>mapSaleItemToSupabaseItem(row,saleId,{client,storeId,cache:relationCache})));
+        const localPayments=(group.payments&&group.payments.length?group.payments:getTicketPayments(group))
+          .map((payment,index)=>mapSalePaymentToSupabasePayment(payment,saleId,group,index));
+        // Una venta parcial nunca se confirmó en ningún dispositivo: lo presente tiene que ser exactamente esta operación
+        // (cabecera, líneas y pagos), y la operación local tiene que cerrar sola. Si no, no se agrega nada.
+        const sameItem=(remote,local)=>!!local&&salesSameAmount(remote.quantity,local.quantity)&&salesSameAmount(remote.unit_price,local.unit_price)
+          &&salesSameAmount(remote.variants_price,local.variants_price)&&salesSameAmount(remote.line_total,local.line_total);
+        const samePayment=(remote,local)=>!!local&&remote.method===local.method&&salesSameAmount(remote.amount,local.amount);
+        const coherent=salesSameAmount(partial.sale.total_amount,salePayload.total_amount)&&salesSameAmount(partial.sale.subtotal_amount,salePayload.subtotal_amount)
+          &&partial.itemRows.every(r=>sameItem(r,localItems.find(l=>l.legacy_id===r.legacy_id)))
+          &&partial.paymentRows.every(r=>samePayment(r,localPayments.find(l=>l.legacy_id===r.legacy_id)))
+          &&salesAmountsMatch(localItems.map(l=>l.line_total),Number(salePayload.total_amount))
+          &&salesAmountsMatch(localPayments.map(l=>l.amount),Number(salePayload.total_amount))
+          &&salesLinesMatchPosFormula(localItems)
+          &&salesLinesMatchPosFormula([...partial.itemRows,...localItems.filter(p=>missingItems.has(p.legacy_id))]);
+        if(!coherent){
+          throw makeSalesReadBackError('La venta remota parcial no coincide con esta operación',{_salesOp:'read_back_amounts',_salesTable:'sales',code:'SALE_PARTIAL_MISMATCH',readBack:partial});
+        }
+        itemsPayload=localItems.filter(p=>missingItems.has(p.legacy_id));
+        paymentsPayload=localPayments.filter(p=>missingPayments.has(p.legacy_id));
+        for(const itemPayload of itemsPayload){
+          enContexto();
+          itemsData.push(await saveSalesRowManual(client,'sale_items',storeId,itemPayload,'id,legacy_id',true));
+        }
+        for(const paymentPayload of paymentsPayload){
+          enContexto();
+          paymentsData.push(await saveSalesRowManual(client,'sale_payments',storeId,paymentPayload,'id,legacy_id',true));
+        }
+        readBack=await verifySaleGroupReadBack(client,storeId,group,saleId);
       }
-      paymentsPayload=(group.payments&&group.payments.length?group.payments:getTicketPayments(group)).map((payment,index)=>mapSalePaymentToSupabasePayment(payment,saleId,group,index));
-      for(const paymentPayload of paymentsPayload){
-        const paymentData=await saveSalesRowManual(client,'sale_payments',storeId,paymentPayload,'id,legacy_id');
-        paymentsData.push(paymentData);
-      }
-      readBack=await verifySaleGroupReadBack(client,storeId,group,saleId);
+      enContexto();
       logSalesWriteAttempt('read_back_ok',{operation:salePayload?.metadata?.source_kind||'venta',storeId,session,salePayload,itemsPayload,paymentsPayload,saleResult:saleData,itemsResult:itemsData,paymentsResult:paymentsData,readBack});
       markLocalSaleRowsSync(group.rows,{saleId,status:'synced',error:''});
       if(salePayload?.open_order_id&&window.closeOpenOrderInSupabase){
@@ -15256,6 +15355,8 @@ if(config.webappUrl){loadFromSheets();}
       }
       return{ok:true,saleId,legacyId:saleData.legacy_id||salesLastTicket,readBack};
     }catch(err){
+      // El estado local es de otra cuenta o local: no se marca acá, lo retoma la que la registró.
+      if(err?.code==='F0B_RETENIDA'){setSalesWriteState('ready');throw err;}
       err._sb_sync_status=saleId?'partial_error':'error';
       logSalesWriteAttempt('error',{operation:salePayload?.metadata?.source_kind||'venta',storeId,session,salePayload,itemsPayload,paymentsPayload,saleResult:saleData,itemsResult:itemsData,paymentsResult:paymentsData,readBack:err?.readBack||null,error:err});
       markLocalSaleRowsSync(group.rows,{saleId:saleId||null,status:saleId?'partial_error':'error',error:err?.message||String(err),code:err?.code||''});
