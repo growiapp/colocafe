@@ -2,6 +2,7 @@
 
 // Ejecuta las funciones reales de inventario de index.html contra un servidor simulado. No carga el HTML ni contacta a Supabase.
 // El simulador reproduce el contrato de stock_durability.sql: esto prueba al cliente, NO garantiza nada de la migración.
+// Por defecto el local está activado (modo servidor). active:false = migración aplicada sin activar; schema:false = sin migración.
 
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
@@ -30,7 +31,7 @@ const code = [
   between('const STOCK_OBS_MAX=', '// fin modelo stock'),
   between('function renderStockAlerts(){', '// ══════'),
   between('function adjProdStock(', 'function toggleProdIlimitado('),
-  between('  async function readStockPhoto(', '  // fin foto stock'),
+  between('  const STOCK_SIN_ESQUEMA=', '  // fin foto stock'),
   between('  async function fetchCatalogSupabaseDiagnostics(', '  function buildCategoryMaps('),
   between('  function mapProductFromSupabase(', '  function mapProductToSupabase('),
   between('  function mapProductToSupabase(', '  function getFirstAvailableCategorySupabaseId('),
@@ -40,7 +41,8 @@ const code = [
   between('  const _setProdStock=window.setProdStock;', '  const _toggleProdIlimitado=')
 ].join('\n');
 
-function createServer(stock = 10) {
+const ACTIVADO = '2026-01-01T00:00:00+00:00';
+function createServer(stock = 10, {active = true, schema = true} = {}) {
   const db = {
     products:[
       {id:productId, store_id:storeId, name:'Medialuna', legacy_id:'prod_1', category_id:catId, price:100, stock, unlimited:false, active:true, variants:[], metadata:{}},
@@ -52,22 +54,38 @@ function createServer(stock = 10) {
     store_users:[{store_id:storeId, user_id:'user_a', role:'owner'}]
   };
   const server = {db, calls:[], beforeRead:null, afterPhoto:null, failProducts:null, noEmbed:false, rlsDeniesWrite:false, failWrite:null,
+    active, schema, failActivation:null, beforeActivation:null,
     // Contrato de la migración: una fila por identidad, el descuento en la misma operación y sin descuento en ilimitados.
-    insertItem(legacy_id, product_id, quantity) {
+    // late: la clasificación del corte la decide el servidor; acá se indica el resultado para probar al cliente.
+    insertItem(legacy_id, product_id, quantity, {late = false, reason} = {}) {
       if (db.sale_items.some(i => i.legacy_id === legacy_id)) return {error:{code:'23505'}};
-      db.sale_items.push({store_id:storeId, legacy_id, product_id, quantity});
+      db.sale_items.push({store_id:storeId, legacy_id, product_id, quantity, product_name:'P', stock_applied_reason:reason || (server.active ? 'applied' : 'inactive'), stock_applied_at:'2026-11-01T00:00:00Z'});
       const p = db.products.find(x => x.id === product_id && x.store_id === storeId);
-      if (p && !p.unlimited) p.stock -= quantity;
+      if (server.active && !late && !reason && p && !p.unlimited) p.stock -= quantity;
       return {error:null};
     },
     writes() { return server.calls.filter(c => c.op !== 'select'); },
-    client:{from(table) {
+    client:{async rpc(name, args) {
+      server.calls.push({op:'rpc', name, args:structuredClone(args)});
+      if (!server.schema) return {data:null, error:{code:'PGRST202', message:'sin función'}};
+      if (server.failWrite) return {data:null, error:server.failWrite};
+      if (server.rlsDeniesWrite) return {data:null, error:{code:'42501', message:'STOCK_FORBIDDEN'}};
+      if (!server.active) return {data:{ok:false, code:'inactive'}, error:null};
+      const p = db.products.find(x => x.id === args.p_product && x.store_id === args.p_store);
+      if (!p) return {data:{ok:false, code:'not_found'}, error:null};
+      if (p.stock !== args.p_expected) return {data:{ok:false, code:'conflict', stock:p.stock}, error:null};
+      p.stock = args.p_kind === 'count' ? args.p_value : p.stock + args.p_value;
+      if (args.p_kind === 'count') p.stock_counted_at = new Date().toISOString();
+      return {data:{ok:true, stock:p.stock, counted_at:p.stock_counted_at || null}, error:null};
+    }, from(table) {
       let op = 'select', payload = null, cols = '', filters = [], embed = null;
       const q = {
         select(c) { if (op === 'select') cols = c || ''; return q; },
         eq(k, v) { filters.push([k, v]); return q; },
         in(k, v) { if (k.startsWith('sale_items.')) embed = v; else filters.push([k, v, 'in']); return q; },
         order() { return q; },
+        gte() { return q; },
+        limit() { return q; },
         update(v) { op = 'update'; payload = v; return q; },
         insert(v) { op = 'insert'; payload = v; return q; },
         maybeSingle() { return run(true); },
@@ -78,6 +96,13 @@ function createServer(stock = 10) {
         server.calls.push({table, op, cols, payload:payload && structuredClone(payload), filters:structuredClone(filters), embed});
         if (op === 'select' && table === 'products') { const hook = server.beforeRead; server.beforeRead = null; await hook?.(); }
         const match = row => filters.every(([k, v, how]) => how === 'in' ? v.includes(row[k]) : String(row[k]) === String(v));
+        if (table === 'stock_store_activation') {
+          const hook = server.beforeActivation; server.beforeActivation = null; await hook?.();
+          if (server.failActivation) return {data:null, error:server.failActivation};
+          if (!server.schema) return {data:null, error:{code:'PGRST205', message:'sin tabla'}};
+          return {data:server.active ? {activated_at:ACTIVADO} : null, error:null};
+        }
+        if (op === 'select' && !server.schema && cols.includes('stock_counted_at')) return {data:null, error:{code:'42703', message:'sin columna'}};
         if (op === 'select') {
           if (table === 'products' && server.failProducts) return {data:null, error:server.failProducts};
           if (table === 'products' && server.noEmbed && cols.includes('sale_items(')) return {data:null, error:{code:'PGRST200', message:'sin relación'}};
@@ -89,6 +114,9 @@ function createServer(stock = 10) {
           return {data:single ? (found[0] || null) : found, error:null};
         }
         if (server.failWrite) return {data:null, error:server.failWrite};
+        if (op === 'update' && table === 'products' && server.active && 'stock' in payload && db.products.some(r => match(r) && r.stock !== payload.stock)) {
+          return {data:null, error:{code:'P0001', message:'STOCK_DIRECT_WRITE: el stock de este local lo gestiona el servidor'}};
+        }
         if (op === 'update') {
           const found = server.rlsDeniesWrite ? [] : db[table].filter(match);
           found.forEach(r => Object.assign(r, payload));
@@ -104,13 +132,18 @@ function createServer(stock = 10) {
   return server;
 }
 
-function load(server, {ventas = [], ilimitadoMenu = false} = {}) {
+function load(server, {ventas = [], ilimitadoMenu = false, modo} = {}) {
   const storage = new Map(), toasts = [];
   const ctx = {console:{warn() {}, error() {}, log() {}, info() {}}, setTimeout, Promise, structuredClone, Map, Set};
   ctx.window = ctx;
   ctx.localStorage = {setItem(k, v) { storage.set(k, v); }, getItem(k) { return storage.get(k) ?? null; }};
   ctx.document = {activeElement:null};
-  ctx.__state = {uid:'user_a', store:storeId, ventas, saves:0, toasts, storage};
+  ctx.__state = {uid:'user_a', store:storeId, ventas, saves:0, toasts, storage, confirmOk:true, confirms:[]};
+  ctx.confirm = text => { ctx.__state.confirms.push(text); return ctx.__state.confirmOk; };
+  // Como un dispositivo que ya leyó el modo antes: el activado arranca en servidor, salvo que el test pida lo contrario.
+  if (modo === 'servidor' || (modo === undefined && server.active && server.schema)) {
+    storage.set(`stock_modo:${storeId}`, JSON.stringify({modo:'servidor', activado:ACTIVADO}));
+  }
   ctx.__sesionUserId = () => ctx.__state.uid;
   vm.createContext(ctx);
   const prelude = `
@@ -124,7 +157,9 @@ function load(server, {ventas = [], ilimitadoMenu = false} = {}) {
     function $(id){return __state.elements?.[id]||null;}
     function normalizeOperatorName(v){return String(v||'');}
     function sameId(a,b){return String(a)===String(b);}
-    function save(){__state.saves++;}
+    function save(){__state.saves++;if(!__state.saveFails)localStorage.setItem('menu',JSON.stringify(menu));}
+    function leerLS(k){return localStorage.getItem(k);}
+    function safeJsonParse(raw,fallback){try{return JSON.parse(raw);}catch(_){return fallback;}}
     function showToast(t){__state.toasts.push(t);}
     function escapeHtml(v){return String(v);}
     function renderProdGrid(){} function renderMenuAdm(){} function syncMenuSheets(){}
@@ -158,14 +193,14 @@ function load(server, {ventas = [], ilimitadoMenu = false} = {}) {
     })();`;
   const parts = code.split('  const _setProdStock=window.setProdStock;');
   const api = `
-    globalThis.__api={stockInfo,stockStatus,stockFilasPorObservar,renderStockAlerts,
+    globalThis.__api={stockInfo,stockStatus,stockFilasPorObservar,renderStockAlerts,stockServidor,stockCorte,stockDescontarEnDispositivo,stockFilaAntesDelCorte,
       getMenu:()=>menu,getVentas:()=>ventas,setVentas:v=>{ventas=v;},bumpContexto:()=>{generacionContexto++;}};`;
   vm.runInContext(`${prelude}\n${parts[0]}\n${wrappers}\n  const _setProdStock=window.setProdStock;${parts[1]}\n${api}`, ctx, {filename:'stock.js', timeout:2000});
   ctx.__state.elements = {'stock-alerts':{innerHTML:''}};
   return {ctx, api:ctx.__api, state:ctx.__state};
 }
 
-const row = (id, extra = {}) => ({id, ticket_id:'t', prodId:'prod_1', _product_sb_id:productId, cantidad:2, _stock_pending:true,
+const row = (id, extra = {}) => ({id, ticket_id:'t', prodId:'prod_1', _product_sb_id:productId, cantidad:2, _stock_pending:true, timestamp:'2026-06-01T12:00:00.000Z',
   _sb_sync_status:'pending', _sb_sale_id:null, _origin:{...origin}, ...extra});
 const flush = () => new Promise(resolve => setTimeout(resolve, 5));
 const product = api => api.getMenu().find(p => p.id === 'prod_1');
@@ -348,13 +383,14 @@ test('editar nombre o precio no escribe stock; un producto nuevo sí lo iniciali
   assert.equal(server.writes().find(c => c.op === 'insert').payload.stock, 5);
 });
 
-test('ajuste con compare-and-set: aplica solo sobre el saldo leído', async () => {
+test('modo servidor: el ajuste va por la función del servidor, sin UPDATE directo, y compara contra el saldo leído', async () => {
   const server = createServer(), {ctx, api} = load(server), p = product(api);
   p.stock = 12;
   assert.equal(await ctx.saveProductStockToSupabase(p, {expected:10}), true);
   assert.equal(server.db.products[0].stock, 12);
-  assert.deepEqual(server.writes()[0].payload, {stock:12});
-  assert.ok(server.writes()[0].filters.some(([k, v]) => k === 'stock' && v === 10));
+  const [call] = server.writes();
+  assert.deepEqual([call.op, call.name, call.args.p_kind, call.args.p_expected, call.args.p_value], ['rpc', 'stock_apply_adjustment', 'count', 10, 12]);
+  assert.equal(server.calls.some(c => c.op === 'update'), false);
 });
 
 test('ajuste concurrente: una venta en el medio no se sobrescribe', async () => {
@@ -395,15 +431,17 @@ test('ajustes rápidos salen en orden, cada uno sobre el anterior', async () => 
   assert.equal(product(api).stock, 13);
 });
 
-test('fijar un saldo con ventas pendientes deja a la vista el valor ingresado sin duplicar el descuento', async () => {
+test('A: un conteo con ventas pendientes fija lo contado; esas ventas ya no lo descuentan, ni acá ni en el servidor', async () => {
   const server = createServer(), {ctx, api} = load(server, {ventas:[row('v1')]});
+  assert.equal(api.stockInfo(product(api)).teorico, 8);
   ctx.setProdStock('prod_1', '20');
   await flush();
   assert.equal(api.stockInfo(product(api)).teorico, 20);
-  assert.equal(server.db.products[0].stock, 22);
-  server.insertItem('v1', productId, 2); // la venta llega: el saldo queda en lo contado
+  assert.equal(server.db.products[0].stock, 20);
+  server.insertItem('v1', productId, 2, {late:true}); // llega tarde: el servidor la clasifica como anterior al conteo
   await refresh(ctx);
   assert.equal(api.stockInfo(product(api)).teorico, 20);
+  assert.equal(api.stockInfo(product(api)).estimado, false);
 });
 
 test('fijar el mismo valor o dejar el campo vacío no escribe', async () => {
@@ -432,7 +470,8 @@ test('el cobro no muta stock: la fila guardada es el descuento provisional', () 
   const cobro = between('      ventaLocalCreada=true;', '      let salesSync=null;');
   assert.doesNotMatch(cobro, /\.stock\s*=/);
   assert.match(between('      const ventasIdsAntes=', '      ventaLocalCreada=true;'), /ventas\.push\(\.\.\.nuevas\)/);
-  assert.match(html, /_sb_retry_count:0,_stock_pending:true,/);
+  assert.match(html, /_sb_retry_count:0,_stock_pending:stockServidor\(\),_stock_cut_seen:stockServidor\(\)\?stockCorte\(p\):'',/);
+  assert.match(between('      ventaLocalCreada=true;', '      let salesSync=null;'), /ventaPendiente\.length\?'':stockDescontarEnDispositivo\(items\)/);
   assert.doesNotMatch(between('window.debugCatalogWritePermissions=', 'const {error:updateProductError}'), /stock:firstProduct/);
 });
 
@@ -444,8 +483,258 @@ test('migración, revisión de texto: el descuento no corre antes de que la fila
   assert.match(sql, /create trigger sale_items_stock_prepare before insert on public\.sale_items/);
   assert.match(sql, /create trigger sale_items_stock_apply after insert on public\.sale_items/);
   assert.doesNotMatch(fn('sale_items_stock_apply'), /new\.stock_applied_qty\s*:=/);
-  assert.doesNotMatch(sql, /greatest\s*\(|\bdelete on public\.sale_items\b/i);
-  assert.doesNotMatch(sql, /\b(grant|create policy|alter policy|enable row level security)\b/i);
+  assert.doesNotMatch(fn('sale_items_stock_apply'), /greatest\s*\(\s*(stock|v_stock)/i);
+  assert.match(fn('sale_items_stock_compensate'), /stock = stock \+ old\.stock_applied_qty/);
+  assert.doesNotMatch(fn('sale_items_stock_compensate'), /old\.quantity|public\.sales/);
+  assert.doesNotMatch(fn('products_stock_guard'), /security definer/i);
+  assert.match(fn('sale_items_stock_prepare'), /security definer/i);
+  assert.doesNotMatch(sql, /alter table public\.(products|sale_items|sales) (enable|force)|policy[^;]* on public\.(products|sale_items|sales)\b/i);
   const rollback = readFileSync(path.join(repo, 'stock_durability_rollback.sql'), 'utf8');
   assert.doesNotMatch(rollback, /update public\.products|set stock/i);
+  assert.doesNotMatch(rollback.replace(/^--.*$/gm, ''), /not valid/i);
+});
+
+test('sin migración: el cliente no pide columnas que no existen y funciona en modo local', async () => {
+  const server = createServer(10, {schema:false, active:false}), {ctx, api, state} = load(server);
+  assert.equal(await ctx.loadCatalogFromSupabase({silent:true}), true, String(state.loadError));
+  assert.equal(api.stockServidor(), false);
+  assert.equal(server.calls.some(c => String(c.cols).includes('stock_counted_at')), false);
+  assert.equal(server.calls.some(c => c.table === 'sale_items'), false);
+  assert.equal(state.storage.get(`stock_modo:${storeId}`), JSON.stringify({modo:'local', activado:''}));
+});
+
+test('modo local: el cobro descuenta en el dispositivo como siempre, con clamp; una lectura no lo pisa', async () => {
+  const server = createServer(3, {active:false}), {ctx, api} = load(server, {ventas:[row('v1', {_stock_pending:false})]});
+  assert.equal(api.stockServidor(), false);
+  assert.equal(api.stockDescontarEnDispositivo([{prodId:'prod_1', qty:2}, {prodId:'prod_2', qty:9}]), '');
+  assert.equal(product(api).stock, 1);
+  assert.equal(api.getMenu().find(p => p.id === 'prod_2').stock, 7);
+  assert.equal(api.stockDescontarEnDispositivo([{prodId:'prod_1', qty:5}]), '');
+  assert.equal(product(api).stock, 0);
+  assert.equal(await refresh(ctx), false);
+  assert.equal(product(api).stock, 0);
+  assert.equal(server.calls.some(c => c.table === 'products'), false, 'ni siquiera lee el saldo');
+  const info = api.stockInfo(product(api));
+  assert.deepEqual([info.pendiente, info.estimado], [0, false]);
+});
+
+test('modo local: si el stock no se pudo guardar en el dispositivo, el cobro avisa', () => {
+  const {api, state} = load(createServer(3, {active:false}));
+  state.saveFails = true;
+  assert.match(api.stockDescontarEnDispositivo([{prodId:'prod_1', qty:1}]), /no se pudo guardar/);
+});
+
+test('modo servidor: el cobro no muta nada en el dispositivo', () => {
+  const {api} = load(createServer());
+  assert.equal(api.stockDescontarEnDispositivo([{prodId:'prod_1', qty:2}]), '');
+  assert.equal(product(api).stock, 10);
+});
+
+test('modo local: los ajustes son UPDATE compare-and-set, sin función del servidor y sin negativos', async () => {
+  const server = createServer(1, {active:false}), {ctx, api} = load(server);
+  ctx.adjProdStock('prod_1', -3);
+  await flush();
+  assert.equal(product(api).stock, 0);
+  const [call] = server.writes();
+  assert.deepEqual([call.op, call.payload.stock], ['update', 0]);
+  assert.ok(call.filters.some(([k, v]) => k === 'stock' && v === 1));
+  assert.equal(server.calls.some(c => c.op === 'rpc'), false);
+});
+
+test('activación: el cliente pasa a modo servidor en la lectura siguiente y toma el saldo del servidor', async () => {
+  const server = createServer(10, {active:false}), {ctx, api} = load(server);
+  assert.equal(await refresh(ctx), false);
+  assert.equal(api.stockServidor(), false);
+  api.stockDescontarEnDispositivo([{prodId:'prod_1', qty:2}]);
+  assert.equal(product(api).stock, 8);
+  server.active = true;
+  assert.equal(await refresh(ctx), true);
+  assert.equal(api.stockServidor(), true);
+  assert.equal(product(api).stock, 10); // el descuento local no viaja: el servidor es la fuente y no hay doble descuento
+  assert.equal(api.stockCorte(product(api)), ACTIVADO);
+});
+
+test('corte: una venta local previa a la activación no se resta aunque siga pendiente de sincronizar', async () => {
+  const server = createServer(10, {active:false}), {ctx, api} = load(server, {ventas:[row('v1', {_stock_pending:undefined, timestamp:'2025-12-01T00:00:00.000Z'})]});
+  server.active = true;
+  await refresh(ctx);
+  const info = api.stockInfo(product(api));
+  assert.deepEqual([info.confirmado, info.pendiente, info.teorico], [10, 0, 10]);
+});
+
+test('corte: una escritura de un cliente que todavía se cree en modo local falla sin perder nada y corrige el modo', async () => {
+  const server = createServer(10, {active:false}), {ctx, api, state} = load(server);
+  server.active = true; // se activó y este dispositivo aún no leyó
+  ctx.adjProdStock('prod_1', 1);
+  await flush();
+  assert.equal(state.lastError.code, 'STOCK_MODEL_CHANGED');
+  assert.equal(product(api).stock, 10);
+  assert.equal(server.db.products[0].stock, 10);
+  await flush();
+  assert.equal(api.stockServidor(), true);
+});
+
+test('rollback: en modo servidor sin la función, el ajuste no se pierde en silencio y el cliente vuelve a modo local', async () => {
+  const server = createServer(), {ctx, api, state} = load(server);
+  server.schema = false; server.active = false;
+  ctx.adjProdStock('prod_1', 1);
+  await flush();
+  assert.equal(state.lastError.code, 'STOCK_MODEL_CHANGED');
+  assert.equal(product(api).stock, 10);
+  await flush();
+  assert.equal(api.stockServidor(), false);
+});
+
+test('rollback: una columna ausente en la lectura vuelve a modo local en lugar de romper', async () => {
+  const server = createServer(), {ctx, api, state} = load(server);
+  server.failActivation = {code:'XX', message:'red'}; // no se pudo detectar: conserva servidor y va a leer
+  server.schema = false;
+  assert.equal(await refresh(ctx), false);
+  assert.equal(api.stockServidor(), false);
+  assert.equal(state.loadState === 'error', false);
+});
+
+test('un error de red al detectar conserva el modo: una caída no apaga el modelo', async () => {
+  const server = createServer(), {ctx, api} = load(server);
+  server.failActivation = {code:'', message:'sin red'};
+  await refresh(ctx);
+  assert.equal(api.stockServidor(), true);
+  const local = createServer(10, {active:false}), b = load(local);
+  local.failActivation = {code:'', message:'sin red'};
+  await refresh(b.ctx);
+  assert.equal(b.api.stockServidor(), false);
+});
+
+test('F0-B: un cambio de contexto durante la detección no fija el modo ni toca almacenamiento', async () => {
+  const server = createServer(10, {active:false}), {ctx, api, state} = load(server);
+  server.active = true;
+  server.beforeActivation = () => { api.bumpContexto(); };
+  assert.equal(await refresh(ctx), false);
+  assert.equal(api.stockServidor(), false);
+  assert.equal(state.storage.has(`stock_modo:${storeId}`), false);
+});
+
+test('D: fijar es un conteo explícito: pide confirmación, va como count y mueve el corte', async () => {
+  const server = createServer(), {ctx, api, state} = load(server);
+  ctx.setProdStock('prod_1', '20');
+  await flush();
+  assert.equal(state.confirms.length, 1);
+  const [call] = server.writes();
+  assert.deepEqual([call.args.p_kind, call.args.p_value], ['count', 20]);
+  assert.equal(product(api).stock_counted_at, server.db.products[0].stock_counted_at);
+  assert.ok(Date.parse(api.stockCorte(product(api))) > Date.parse(ACTIVADO));
+});
+
+test('D: cancelar la confirmación no cambia ni escribe nada', async () => {
+  const server = createServer(), {ctx, api, state} = load(server);
+  state.confirmOk = false;
+  ctx.setProdStock('prod_1', '20');
+  await flush();
+  assert.equal(product(api).stock, 10);
+  assert.equal(product(api).stock_counted_at, undefined);
+  assert.deepEqual(server.writes(), []);
+});
+
+test('D: ± es una corrección: sin confirmación, va como adjust con el delta y no mueve el corte', async () => {
+  const server = createServer(), {ctx, api, state} = load(server);
+  ctx.adjProdStock('prod_1', -1);
+  await flush();
+  assert.equal(state.confirms.length, 0);
+  const [call] = server.writes();
+  assert.deepEqual([call.args.p_kind, call.args.p_value, call.args.p_expected], ['adjust', -1, 10]);
+  assert.equal(server.db.products[0].stock_counted_at, undefined);
+  assert.equal(api.stockCorte(product(api)), ACTIVADO);
+});
+
+test('D: contar el mismo saldo confirmado con ventas pendientes también es un conteo: mueve el corte', async () => {
+  const server = createServer(), {ctx, api} = load(server, {ventas:[row('v1')]});
+  ctx.setProdStock('prod_1', '10');
+  await flush();
+  assert.equal(server.writes().length, 1);
+  assert.equal(api.stockInfo(product(api)).teorico, 10);
+});
+
+test('D: un conteo rechazado devuelve el saldo y el corte anteriores; las pendientes vuelven a restar', async () => {
+  const server = createServer(), {ctx, api} = load(server, {ventas:[row('v1')]});
+  server.failWrite = {message:'sin red'};
+  ctx.setProdStock('prod_1', '20');
+  await flush();
+  assert.equal(product(api).stock, 10);
+  assert.equal(product(api).stock_counted_at, '');
+  assert.equal(api.stockInfo(product(api)).teorico, 8);
+});
+
+test('A: testigo. Una venta que vio el corte sigue restando aunque el reloj la ponga antes', () => {
+  const {api} = load(createServer(), {ventas:[
+    row('vio', {cantidad:1, timestamp:'2025-01-01T00:00:00.000Z', _stock_cut_seen:ACTIVADO}),
+    row('no_vio', {cantidad:2, timestamp:'2025-01-01T00:00:00.000Z'}),
+    row('viejo', {cantidad:4, timestamp:'2025-01-01T00:00:00.000Z', _stock_cut_seen:'2024-01-01T00:00:00+00:00'}),
+    row('margen', {cantidad:8, timestamp:'2026-01-01T00:04:00.000Z'}),
+    row('despues', {cantidad:16, timestamp:'2026-01-01T00:06:00.000Z'})
+  ]});
+  assert.equal(api.stockInfo(product(api)).pendiente, 17);
+});
+
+test('A: el corte es el más reciente entre conteo y activación', () => {
+  const {api} = load(createServer());
+  assert.equal(api.stockCorte({}), ACTIVADO);
+  assert.equal(api.stockCorte({stock_counted_at:'2025-01-01T00:00:00+00:00'}), ACTIVADO);
+  assert.equal(api.stockCorte({stock_counted_at:'2026-05-01T00:00:00.123456+00:00'}), '2026-05-01T00:00:00.123456+00:00');
+});
+
+test('A: el testigo viaja con el ítem solo si existe; el read-back de R-B2a no compara metadata', () => {
+  const map = between('  window.mapSaleItemToSupabaseItem=async function', '  window.mapSalePaymentToSupabasePayment=');
+  assert.match(map, /\.\.\.\(row\._stock_cut_seen\?\{stock_cut_seen:row\._stock_cut_seen\}:\{\}\)/);
+  const sameItem = between('const sameItem=(remote,local)=>', 'const samePayment=');
+  assert.doesNotMatch(sameItem, /metadata/);
+});
+
+test('E: los ítems sin descuento se muestran como incidencia, con el nombre escapado y solo en su contexto', async () => {
+  const server = createServer(), {ctx, api, state} = load(server);
+  server.insertItem('x1', null, 3, {reason:'unresolved'});
+  server.db.sale_items[0].product_name = '<b>Raro</b>';
+  server.insertItem('x2', productId, 1, {reason:'count_review'});
+  server.insertItem('x3', productId, 1, {reason:'before_count'});
+  server.insertItem('x4', productId, 1);
+  await refresh(ctx);
+  api.renderStockAlerts();
+  const banner = state.elements['stock-alerts'].innerHTML;
+  assert.match(banner, /Ventas que no descontaron stock/);
+  assert.match(banner, /producto no identificado/);
+  assert.match(banner, /cerca de un conteo/);
+  assert.doesNotMatch(banner, /×1 \(revisar\)/);
+  assert.equal((banner.match(/×/g) || []).length, 2, 'before_count y applied no son incidencia');
+  api.bumpContexto();
+  api.renderStockAlerts();
+  assert.doesNotMatch(state.elements['stock-alerts'].innerHTML, /Ventas que no descontaron/);
+});
+
+test('E: el nombre de una incidencia pasa por escapeHtml', () => {
+  assert.match(between('function renderStockAlerts(){', '// ══════'), /escapeHtml\(i\.product_name/);
+});
+
+test('E: en modo local no se piden incidencias: la columna puede no existir', async () => {
+  const server = createServer(10, {active:false}), {ctx} = load(server);
+  await refresh(ctx);
+  await ctx.loadCatalogFromSupabase({silent:true});
+  assert.equal(server.calls.some(c => c.table === 'sale_items'), false);
+});
+
+test('F: ajustes rápidos no chocan entre sí: cada uno manda su propio destino', async () => {
+  const server = createServer(), {ctx, state} = load(server);
+  ctx.adjProdStock('prod_1', 1); ctx.adjProdStock('prod_1', 1); ctx.adjProdStock('prod_1', 1);
+  await flush();
+  assert.equal(state.lastError, undefined);
+  assert.deepEqual(server.writes().map(c => [c.args.p_expected, c.args.p_value]), [[10, 1], [11, 1], [12, 1]]);
+});
+
+test('B: la forma de las fixtures del ejecutor R-B2a, sin producto, no cuenta como pendiente', () => {
+  const fixture = row('r2a', {prodId:null, _product_sb_id:null, _product_legacy_id:'', _stock_pending:undefined});
+  const {api} = load(createServer(), {ventas:[fixture]});
+  assert.equal(api.stockInfo(product(api)).pendiente, 0);
+});
+
+test('activación, revisión de texto: el protocolo existe y no activa nada por sí solo', () => {
+  const plan = readFileSync(path.join(repo, 'stock_activation.sql'), 'utf8').replace(/^--.*$/gm, '');
+  assert.doesNotMatch(plan, /\b(insert|update|delete|alter|drop|create)\b/i, 'sin comentar solo quedan lecturas');
 });
