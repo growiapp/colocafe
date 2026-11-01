@@ -17,6 +17,7 @@
 --   * E. Lo que no descuenta queda con motivo en el ítem; unresolved, store_mismatch, count_review y no_identity se muestran como incidencia.
 --   * F. El ajuste compara contra el saldo leído bajo lock y devuelve conflict. En un local activado no hay otra vía de escritura.
 --   * G. Activado el local, un cliente viejo ya no puede escribir stock: su UPDATE directo falla con STOCK_DIRECT_WRITE.
+--   * Ningún cliente puede cambiar products.store_id, en ningún estado: esa era la forma de salir de un local activado.
 --
 -- Reversión: stock_durability_rollback.sql. Pruebas: stock_durability_test.sql, stock_durability_concurrency_test.sql y stock_durability_rollback_test.sql.
 
@@ -273,6 +274,10 @@ begin
   if tg_op = 'INSERT' then
     new.stock_counted_at := null;
     return new;
+  end if;
+  -- Sin esto, un owner de dos locales saca el producto del activado, escribe el saldo en el otro y lo devuelve.
+  if new.store_id is distinct from old.store_id then
+    raise exception 'STOCK_STORE_IMMUTABLE: un producto no se traslada de local';
   end if;
   if new.stock_counted_at is distinct from old.stock_counted_at then
     raise exception 'STOCK_DIRECT_WRITE: stock_counted_at lo escribe solo el servidor';

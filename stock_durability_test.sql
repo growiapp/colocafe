@@ -356,6 +356,32 @@ begin
   assert (select count(*) from public.sale_items where store_id = v_a
            and stock_applied_reason in ('unresolved', 'store_mismatch', 'count_review', 'no_identity')) >= 3, 'incidencias visibles';
 
+  -- Evasión: owner de los dos locales intenta sacar el producto del activado, escribir el saldo y devolverlo.
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', v_user, 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+  v_ts := (select updated_at from public.products where id = v_otro);
+  n := (select stock from public.products where id = v_otro);
+  bloqueado := false;
+  begin update public.products set store_id = v_c where id = v_otro;
+  exception when raise_exception then bloqueado := sqlerrm like 'STOCK_STORE_IMMUTABLE%'; end;
+  assert bloqueado, 'activado a inactivo: rechazado';
+  bloqueado := false;
+  begin update public.products set store_id = v_c, stock = 999 where id = v_otro;
+  exception when raise_exception then bloqueado := sqlerrm like 'STOCK_STORE_IMMUTABLE%'; end;
+  assert bloqueado, 'traslado junto con el saldo: rechazado';
+  bloqueado := false;
+  begin update public.products set store_id = v_a where id = v_pb;
+  exception when raise_exception then bloqueado := sqlerrm like 'STOCK_STORE_IMMUTABLE%'; end;
+  assert bloqueado, 'inactivo a activado: rechazado también';
+  assert (select store_id = v_a and stock = n from public.products where id = v_otro), 'el producto no se movió y el saldo sigue igual';
+  update public.products set name = 'Sin traslado', store_id = v_a where id = v_otro;
+  get diagnostics n = row_count;
+  assert n = 1, 'mandar el mismo store_id, como hace el cliente al guardar, sigue pasando';
+  execute 'reset role';
+  -- Una operación interna legítima no es un cliente.
+  update public.products set store_id = v_c where id = v_otro;
+  update public.products set store_id = v_a where id = v_otro;
+
   raise notice 'stock_durability_test: OK';
 end;
 $$;
