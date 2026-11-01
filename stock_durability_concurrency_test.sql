@@ -57,4 +57,32 @@
 --   update public.products set stock = 999 where id = :product;
 --   Esperado: STOCK_DIRECT_WRITE, stock sin cambios. El mismo UPDATE con el mismo saldo, o de name, sí pasa.
 
+-- ORDEN DE MOVIMIENTOS. Estos casos son la única prueba real del hallazgo: requieren transacciones superpuestas, y now() queda fijo en el begin.
+-- Las cabeceras usan created_at y sold_at explícitos, varios minutos después del conteo, para que la venta clasifique como 'applied'.
+
+-- Caso 10: la venta empieza antes que el conteo y toma el lock después.
+--   Sesión A: begin; select now();                          -- fija el now() de A antes del conteo
+--   Sesión C: select public.stock_apply_adjustment(:store, :product, 'count', <saldo>, 50);          -- commit inmediato
+--   Sesión A: insert ... sale_id de una cabecera con created_at = sold_at = clock_timestamp() + '10 min', legacy_id 'c10', quantity 1;
+--   Sesión A: commit;
+--   Esperado: stock_applied_at > stock_counted_at, aunque el now() de A sea anterior. stock = 49.
+--   Sesión C: delete from public.sale_items where store_id = :store and legacy_id = 'c10';
+--   Esperado: stock = 50 y 'delete_compensation'. Con now() habría quedado 49 y 'delete_no_compensation': un movimiento real sin devolver.
+
+-- Caso 11: el conteo empieza antes que la venta y toma el lock después.
+--   Sesión C: begin; select now();
+--   Sesión A: begin; insert ... legacy_id 'c11', quantity 1;   -- toma el lock; el saldo pasa a <s>
+--   Sesión C: select public.stock_apply_adjustment(:store, :product, 'count', <s>, 70);              -- espera
+--   Sesión A: commit;
+--   Sesión C: commit;
+--   Esperado: stock_counted_at > stock_applied_at de 'c11'. Borrar 'c11' deja stock = 70 y 'delete_no_compensation'.
+--   Con now() la marca del conteo sería anterior y el borrado inventaría una unidad.
+
+-- Caso 12: una compensación esperando detrás de un conteo. Lee el corte ya bajo el lock.
+--   Partiendo de un ítem 'c12' aplicado:
+--   Sesión C: begin; select public.stock_apply_adjustment(:store, :product, 'count', <saldo>, 80);
+--   Sesión D: delete from public.sale_items where store_id = :store and legacy_id = 'c12';           -- espera
+--   Sesión C: commit;
+--   Esperado: stock = 80 y 'delete_no_compensation'.
+
 select 'Guion manual: ejecutar los casos con dos sesiones' as stock_durability_concurrency_test;

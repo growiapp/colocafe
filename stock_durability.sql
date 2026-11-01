@@ -68,7 +68,7 @@ alter table public.sale_items add constraint sale_items_stock_applied_reason_che
 -- Una fila = el local usa este modelo. Solo se escribe desde el SQL Editor: ningún cliente puede encenderlo ni apagarlo.
 create table public.stock_store_activation (
   store_id uuid primary key references public.stores(id) on delete cascade,
-  activated_at timestamptz not null default now(),
+  activated_at timestamptz not null default clock_timestamp(),
   activated_by text
 );
 alter table public.stock_store_activation enable row level security;
@@ -89,7 +89,7 @@ create table if not exists public.stock_ledger (
   balance_after numeric,
   sale_item_legacy_id text,
   actor uuid,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default clock_timestamp()
 );
 alter table public.stock_ledger enable row level security;
 alter table public.stock_ledger force row level security;
@@ -126,6 +126,11 @@ begin
 end;
 $$;
 
+-- Orden de movimientos: el lock de la fila del producto serializa descuentos, conteos y compensaciones. now() es el inicio de la transacción,
+-- que puede ser anterior al lock y por lo tanto contar otro orden; por eso las marcas se toman con clock_timestamp() ya con el lock tomado,
+-- y el lock dura hasta el commit: la marca de quien entró después siempre es posterior.
+-- ponytail: depende de que el reloj del servidor no retroceda; un contador por producto lo evitaría, si un ajuste de NTP llegara a importar.
+--
 -- Corre solo si la fila existe. El lock de la fila del producto serializa ventas y conteos: el corte se lee ya bajo ese lock.
 -- lock_timeout: si el producto está bloqueado demasiado tiempo, el INSERT falla entero y R-B2a lo reintenta.
 --
@@ -194,7 +199,7 @@ begin
     end if;
   end if;
   update public.sale_items
-     set stock_applied_qty = v_qty, stock_applied_reason = v_reason, stock_applied_at = now()
+     set stock_applied_qty = v_qty, stock_applied_reason = v_reason, stock_applied_at = clock_timestamp()
    where id = new.id;
   return null;
 end;
@@ -323,7 +328,7 @@ begin
   if v_stock <> p_expected then return jsonb_build_object('ok', false, 'code', 'conflict', 'stock', v_stock); end if;
   update public.products
      set stock = case when p_kind = 'count' then p_value else stock + p_value end,
-         stock_counted_at = case when p_kind = 'count' then now() else stock_counted_at end
+         stock_counted_at = case when p_kind = 'count' then clock_timestamp() else stock_counted_at end
    where id = p_product
    returning stock, stock_counted_at into v_balance, v_counted;
   insert into public.stock_ledger (store_id, product_id, kind, delta, balance_after, actor)

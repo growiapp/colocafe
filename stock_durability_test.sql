@@ -297,7 +297,7 @@ begin
   -- Conteo: fija el saldo y mueve el corte, con la hora del servidor.
   v_res := public.stock_apply_adjustment(v_a, v_otro, 'count', 10, 20);
   assert (v_res->>'ok')::boolean and (v_res->>'stock')::numeric = 20, 'conteo aplicado';
-  assert (select stock = 20 and stock_counted_at = now() from public.products where id = v_otro), 'el conteo mueve el corte';
+  assert (select stock = 20 and stock_counted_at >= now() from public.products where id = v_otro), 'el conteo mueve el corte';
   -- Ajuste ±: relativo, no mueve el corte.
   execute 'reset role';
   update public.products set stock_counted_at = now() - interval '1 hour' where id = v_otro;
