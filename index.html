@@ -3744,22 +3744,26 @@ function carritoTotalFn(c){return Object.values(c).reduce((s,i)=>s+carritoItemTo
 // de la fila no alcanza, porque una venta parcial o con la respuesta perdida puede estar ya descontada en el servidor.
 const STOCK_OBS_MAX=100; // ponytail: tope por largo de URL; lo que excede queda como estimado hasta la lectura siguiente
 const STOCK_MARGEN_CORTE_MS=5*60*1000; // el mismo margen que sale_items_stock_apply
-const STOCK_MOTIVOS_INCIDENCIA={unresolved:'producto no identificado',store_mismatch:'producto de otro local',count_review:'cerca de un conteo: revisar',no_identity:'sin identidad'};
-let stockRev=0,stockFotoFirma='',stockFotoEstimada=false,stockPendCache=null,stockIncidencias={firma:'',lista:[]};
+const STOCK_MOTIVOS_INCIDENCIA={unresolved:'producto no identificado',store_mismatch:'producto de otro local',count_review:'sin hora confiable respecto de un conteo',no_identity:'sin identidad',transition_review:'durante un cambio de modo de stock'};
+const STOCK_INCIDENCIAS_PAGINA=50;
+let stockRev=0,stockFotoFirma='',stockFotoEstimada=false,stockPendCache=null,stockIncidencias={firma:'',lista:[],total:0};
 const stockEstados=new Map();
+// registro: la fila de activación existe, aunque el local esté desactivado. Es lo que dice que puede haber incidencias que mostrar y que las columnas existen.
 function stockEstadoLocal(){
   const store=String(config?.activeStoreId||'');
-  if(!store)return{modo:'local',activado:''};
+  if(!store)return{modo:'local',activado:'',pausado:false,registro:false};
   if(!stockEstados.has(store)){ // persistido: una venta sin conexión tiene que saber en qué modo está
     let e=null;
     try{e=JSON.parse(localStorage.getItem('stock_modo:'+store));}catch(_){}
-    stockEstados.set(store,e?.modo==='servidor'&&e.activado?e:{modo:'local',activado:''});
+    stockEstados.set(store,e?.modo==='servidor'&&e.activado?{pausado:false,registro:true,...e}:{modo:'local',activado:'',pausado:false,registro:!!e?.registro});
   }
   return stockEstados.get(store);
 }
 const stockServidor=()=>stockEstadoLocal().modo==='servidor';
-function stockFijarModo(store,activado){
-  const e=activado?{modo:'servidor',activado:String(activado)}:{modo:'local',activado:''},previo=stockEstados.get(String(store))?.modo;
+// En pausa sigue en modo servidor: esas ventas no se descuentan acá, quedan pendientes y las rechaza el servidor hasta que termine el corte.
+function stockFijarModo(store,fila){
+  const servidor=fila?.status==='active'||fila?.status==='sales_paused',previo=stockEstados.get(String(store))?.modo;
+  const e={modo:servidor?'servidor':'local',activado:servidor?String(fila.activated_at||''):'',pausado:fila?.status==='sales_paused',registro:!!fila};
   stockEstados.set(String(store),e);
   try{localStorage.setItem('stock_modo:'+store,JSON.stringify(e));}catch(_){} // sin espacio: se vuelve a detectar en la próxima lectura
   if(previo!==e.modo)stockRev++;
@@ -3770,11 +3774,10 @@ function stockCorte(p){
   if(!a||!c)return a||c;
   return Date.parse(c)>Date.parse(a)?c:a;
 }
-// La misma clasificación del servidor, sin la cabecera: una fila que el servidor no va a descontar no se resta.
+// Solo para la estimación: una fila vendida antes del corte no se resta, porque el servidor no la va a descontar. Lo decide él al llegar el ítem.
 function stockFilaAntesDelCorte(r,p){
-  const corte=Date.parse(stockCorte(p)),visto=Date.parse(r?._stock_cut_seen||''),vendida=Date.parse(r?.timestamp||'');
-  if(isNaN(corte)||visto>=corte||isNaN(vendida))return false;
-  return vendida<=corte+STOCK_MARGEN_CORTE_MS;
+  const corte=Date.parse(stockCorte(p)),vendida=Date.parse(r?.timestamp||'');
+  return !isNaN(corte)&&!isNaN(vendida)&&vendida<=corte+STOCK_MARGEN_CORTE_MS;
 }
 function filaCuentaParaStock(r){
   if(!r||r._stock_pending===false)return false;
@@ -4644,7 +4647,8 @@ function renderStockAlerts(){
   el.innerHTML=(out.length?`<div class="alert-banner crit">⛔ Sin stock: ${out.map(x=>`${x.p.name}${est(x)}`).join(', ')}</div>`:'')
     +(low.length?`<div class="alert-banner">⚠️ Stock bajo: ${low.map(x=>`${x.p.name} (${x.i.disponible}${est(x)})`).join(', ')}</div>`:'')
     +(disc.length?`<div class="alert-banner crit">⚠️ Discrepancia de stock, hay que conciliar: ${disc.map(x=>`${x.p.name} (faltan ${x.i.discrepancia}${est(x)})`).join(', ')}</div>`:'')
-    +(stockIncidencias.firma===firmaOperativa()&&stockIncidencias.lista.length?`<div class="alert-banner">⚠️ Ventas que no descontaron stock, revisar: ${stockIncidencias.lista.map(i=>`${escapeHtml(i.product_name||'Sin producto')} ×${Number(i.quantity)||0} (${STOCK_MOTIVOS_INCIDENCIA[i.stock_applied_reason]||'revisar'})`).join(', ')}</div>`:'');
+    +(stockEstadoLocal().pausado?`<div class="alert-banner crit">⏸ Mantenimiento de stock: no cobres ahora. Lo que se cobre queda guardado en este dispositivo y se revisa después.</div>`:'')
+    +(stockIncidencias.firma===firmaOperativa()&&stockIncidencias.total?`<div class="alert-banner">⚠️ ${stockIncidencias.total} ${stockIncidencias.total===1?'venta pendiente':'ventas pendientes'} de conciliar, sin descuento de stock: ${stockIncidencias.lista.map(i=>`${escapeHtml(i.product_name||'Sin producto')} ×${Number(i.quantity)||0} (${STOCK_MOTIVOS_INCIDENCIA[i.stock_applied_reason]||'revisar'})`).join(', ')}${stockIncidencias.lista.length<stockIncidencias.total?` <button class="btn ghost" type="button" onclick="window.verMasIncidenciasStock?.()">Ver más</button>`:''}</div>`:'');
 }
 
 // ══════════════════════════════════════════════════
@@ -5579,7 +5583,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro){
           _reservation_local_id:reservaActiva?.id||null,_reservation_sb_id:reservaActiva?._sb_id||null,
           _customer_local_id:reservaActiva?.clienteId||null,_customer_sb_id:clienteReserva?._sb_id||null,
           _source_kind:esReserva?'reserva':'mesa',
-          _sb_sync_status:'pending',_sb_sync_error:'',_sb_synced_at:'',_sb_retry_count:0,_stock_pending:stockServidor(),_stock_cut_seen:stockServidor()?stockCorte(p):'',
+          _sb_sync_status:'pending',_sb_sync_error:'',_sb_synced_at:'',_sb_retry_count:0,_stock_pending:stockServidor(),
           _open_order_sb_id:_openOrderSbId};
       });
       const ventasIdsAntes=turnoActivo?turnoActivo.ventasIds:null;
@@ -10471,19 +10475,31 @@ if(config.webappUrl){loadFromSheets();}
   // Sin respuesta útil se conserva el último modo conocido: una caída de red no apaga el modelo.
   async function detectarModoStock(client,storeId){
     const sigue=mientrasSigaElContexto();
-    const {data,error}=await client.from('stock_store_activation').select('activated_at').eq('store_id',storeId).maybeSingle();
+    const {data,error}=await client.from('stock_store_activation').select('activated_at,status').eq('store_id',storeId).maybeSingle();
     if(!sigue()||(error&&!STOCK_SIN_ESQUEMA.has(error.code)))return;
-    stockFijarModo(storeId,error?'':data?.activated_at||'');
+    stockFijarModo(storeId,error?null:data);
   }
-  // Una incidencia no se puede recuperar de una lectura fallida ni bloquea nada: sin lista queda la última vista.
-  async function leerIncidenciasStock(client,storeId){
+  // Las incidencias no caducan y nada las cierra solas: se muestra el total real, y el resto por páginas. Una lectura fallida deja la última lista vista.
+  // "Ver más" agranda la ventana desde el principio: una incidencia nueva no puede correr una página y dejar otra sin mostrar.
+  async function leerIncidenciasStock(client,storeId,cuantas=STOCK_INCIDENCIAS_PAGINA){
     const sigue=mientrasSigaElContexto();
-    const {data,error}=await client.from('sale_items').select('legacy_id,product_name,quantity,stock_applied_reason,stock_applied_at')
+    const {data,error,count}=await client.from('sale_items').select('id,product_name,quantity,stock_applied_reason,stock_applied_at',{count:'exact'})
       .eq('store_id',storeId).in('stock_applied_reason',Object.keys(STOCK_MOTIVOS_INCIDENCIA))
-      .gte('stock_applied_at',new Date(Date.now()-30*864e5).toISOString()) // ponytail: ventana de 30 días en lugar de marcarlas como resueltas
-      .order('stock_applied_at',{ascending:false}).limit(20);
-    if(sigue()&&!error)stockIncidencias={firma:firmaOperativa(),lista:data||[]};
+      .order('stock_applied_at',{ascending:false}).order('id',{ascending:false})
+      .range(0,cuantas-1);
+    if(!sigue()||error)return;
+    const lista=data||[];
+    stockIncidencias={firma:firmaOperativa(),lista,total:Number(count??lista.length)};
   }
+  window.verMasIncidenciasStock=async function(){
+    if(!hasCatalogSupabaseReady())return;
+    const storeId=getCatalogStoreId(),client=getCatalogSupabaseClient();
+    if(!client||!storeId)return;
+    const sigue=mientrasSigaElContexto();
+    try{await leerIncidenciasStock(client,storeId,(stockIncidencias.firma===firmaOperativa()?stockIncidencias.lista.length:0)+STOCK_INCIDENCIAS_PAGINA);}
+    catch(err){if(catalogCanTechLog())console.warn('[Stock] sin incidencias',err);return;}
+    if(sigue())renderStockAlerts();
+  };
   async function readStockPhoto(client,storeId,columns){
     const {ids,truncada}=stockFilasPorObservar();
     const leer=conObservacion=>{
@@ -10495,7 +10511,7 @@ if(config.webappUrl){loadFromSheets();}
     };
     let res=await leer(ids.length>0),sinRelacion=false;
     if(res.error&&ids.length&&res.error.code==='PGRST200'){sinRelacion=true;res=await leer(false);}
-    if(res.error&&stockServidor()&&STOCK_SIN_ESQUEMA.has(res.error.code)){stockFijarModo(storeId,'');res=await leer(false);}
+    if(res.error&&stockServidor()&&STOCK_SIN_ESQUEMA.has(res.error.code)){stockFijarModo(storeId,null);res=await leer(false);}
     if(res.error)throw res.error;
     const rows=res.data||[],observadas=new Set();
     rows.forEach(r=>(r.sale_items||[]).forEach(i=>observadas.add(String(i.legacy_id))));
@@ -10521,7 +10537,13 @@ if(config.webappUrl){loadFromSheets();}
       if(!await getCatalogSession(client))return false;
       await detectarModoStock(client,storeId);
       if(!sigue())return false;
-      if(!stockServidor())return false; // modo local: el servidor no descuenta, y su saldo pisaría el descuento del dispositivo
+      if(!stockServidor()){ // modo local: el servidor no descuenta, y su saldo pisaría el descuento del dispositivo
+        if(stockEstadoLocal().registro){
+          await leerIncidenciasStock(client,storeId); // un local desactivado sigue viendo lo que quedó sin conciliar
+          if(sigue()){try{renderStockAlerts();}catch(_){}}
+        }
+        return false;
+      }
       const foto=await readStockPhoto(client,storeId,'id,stock,unlimited');
       if(!sigue())return false; // M-02: una respuesta de otro contexto no toca memoria, almacenamiento ni pantalla
       if(!stockServidor())return false;
@@ -10695,7 +10717,7 @@ if(config.webappUrl){loadFromSheets();}
       localStorage.setItem(APP_DATA_VERSION_KEY,APP_DATA_VERSION);
       localStorage.setItem(CATALOG_BACKUP_KEY,JSON.stringify({version:APP_DATA_VERSION,appVersion:APP_VERSION,storeId,readAt:new Date().toISOString(),cats,menu}));
       if(diag.stockPhoto)stockAplicarFoto(diag.stockPhoto.consultadas,diag.stockPhoto.observadas,{estimada:diag.stockPhoto.estimada});
-      if(stockServidor()){
+      if(stockEstadoLocal().registro){
         try{await leerIncidenciasStock(getCatalogSupabaseClient(),storeId);}catch(err){if(catalogCanTechLog())console.warn('[Stock] sin incidencias',err);}
         if(!sigue())return retenida();
       }
@@ -15461,7 +15483,7 @@ if(config.webappUrl){loadFromSheets();}
         prodId:row.prodId??null,
         product_legacy_id:row._product_legacy_id||null,
         unresolved_product:!productId,
-        ...(row._stock_cut_seen?{stock_cut_seen:row._stock_cut_seen}:{})
+        ...(row._stock_pending===true?{stock_client_mode:'server'}:{}) // no prueba nada: solo marca para revisar una venta de una transición
       }
     };
   };
