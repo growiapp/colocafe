@@ -23,7 +23,9 @@ begin
   insert into public.stores (name, slug) values ('Stock B', 'stock-b-' || gen_random_uuid()) returning id into v_b;
   insert into public.stores (name, slug) values ('Stock C', 'stock-c-' || gen_random_uuid()) returning id into v_c;
   insert into public.store_users (store_id, user_id, role, active) values (v_a, v_user, 'operator', true);
+  alter table public.stock_store_activation disable trigger stock_store_activation_guard;
   insert into public.stock_store_activation (store_id, activated_at) values (v_a, now() - interval '1 day'), (v_b, now() - interval '1 day');
+  alter table public.stock_store_activation enable trigger stock_store_activation_guard;
   insert into public.sales (store_id, business_date, sold_at) values (v_a, current_date, now()) returning id into v_sale;
   insert into public.sales (store_id, business_date, sold_at) values (v_b, current_date, now()) returning id into v_sale_b;
   insert into public.products (store_id, name, stock) values (v_a, 'P', 10) returning id into v_p;

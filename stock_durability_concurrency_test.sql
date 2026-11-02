@@ -1,4 +1,6 @@
 -- Pruebas de concurrencia de stock_durability.sql. Dos sesiones reales, a mano, en un entorno de pruebas. NO EJECUTADAS todavía.
+-- En un mensaje con varias sentencias, now() queda fijo al inicio del mensaje y las sentencias fuera de begin forman una transacción implícita: usar begin y commit explícitos.
+-- Los casos de espera necesitan un hold menor a 3 s, o los corta el lock_timeout.
 -- Una transacción sola no puede demostrar esto. :store, :sale y :product son fixtures sintéticas de ese entorno, con stock 10,
 -- el local activado en stock_store_activation y :sale creada después de la activación. Sesión C = dos ventanas como rol authenticated
 -- con request.jwt.claims de un owner del local, para poder llamar a stock_apply_adjustment.
@@ -19,11 +21,12 @@
 --   Sesión A: commit;
 --   Esperado: B recibe 23505 y el stock baja solo 1.
 
--- Caso 3: fallo por lock_timeout, sin estado intermedio.
---   Sesión A: begin; select 1 from public.products where id = :product for update;
+-- Caso 3: fallo por lock_timeout, sin estado intermedio. El lock lo tiene que sostener otra venta o un ajuste.
+--   Sesión A: begin; insert ... legacy_id 'c4a', quantity 1; select pg_sleep(5);
 --   Sesión B: insert ... legacy_id 'c4', quantity 1;      -- a los 3 s: 55P03
---   Sesión A: rollback;
---   Esperado: B falla, no existe el ítem 'c4' y el stock no cambió. Un reintento de B descuenta una sola vez.
+--   Sesión A: commit;
+--   Esperado: B falla, no existe el ítem 'c4' y el stock bajó solo por 'c4a'. Un reintento de B descuenta una sola vez.
+--   Observado en staging: un FOR UPDATE externo sobre el producto no da 55P03: la venta espera en la FK, fuera del lock_timeout de la función.
 
 -- Caso 4: una venta contra un ajuste. El compare-and-set ocurre bajo el lock.
 --   Sesión A: begin; insert ... legacy_id 'c5', quantity 1;
