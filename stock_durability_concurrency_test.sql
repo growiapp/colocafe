@@ -100,4 +100,24 @@
 --   Sesión C: commit;
 --   Esperado: stock = 80 y 'delete_no_compensation'.
 
+-- CRUCE TEMPORAL. Con el corte ya confirmado por otra sesión, antes de sincronizar el ítem.
+
+-- Caso 13: cabecera anterior, venta declarada posterior. El escenario 12:00, 12:01, 12:02 del hallazgo.
+--   Sesión A: insert into public.sales (store_id, business_date, sold_at) values (:store, current_date, clock_timestamp() + '2 min'); commit;   -- venta parcial
+--   Sesión C: select public.stock_apply_adjustment(:store, :product, 'count', <saldo>, 50);
+--   Sesión A: insert ... sale_id de esa cabecera, legacy_id 'c13', quantity 1;
+--   Esperado: 'count_review', applied 0, stock = 50 y la incidencia visible.
+
+-- Caso 14: cabecera posterior, venta declarada anterior.
+--   Sesión C: select public.stock_apply_adjustment(:store, :product, 'count', <saldo>, 50);
+--   Sesión A: insert into public.sales (store_id, business_date, sold_at) values (:store, current_date, clock_timestamp() - '1 min'); commit;
+--   Sesión A: insert ... sale_id de esa cabecera, legacy_id 'c14', quantity 1;
+--   Esperado: 'count_review', applied 0, stock = 50.
+
+-- Caso 15: cabecera parcial, con cabecera y sold_at antes del conteo, y el ítem después. Es el caso seguro que se conserva.
+--   Sesión A: insert into public.sales (store_id, business_date, sold_at) values (:store, current_date, clock_timestamp()); commit;
+--   Sesión C: select public.stock_apply_adjustment(:store, :product, 'count', <saldo>, 50);
+--   Sesión A: insert ... sale_id de esa cabecera, legacy_id 'c15', quantity 1;
+--   Esperado: 'before_count', applied 0, stock = 50.
+
 select 'Guion manual: ejecutar los casos con dos sesiones' as stock_durability_concurrency_test;

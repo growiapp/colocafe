@@ -194,11 +194,12 @@ $$;
 -- A. Corte = último conteo o activación, el más reciente. El servidor solo conoce un hecho propio: cuándo recibió la cabecera. sold_at viene del
 -- reloj del dispositivo y la metadata la escribe el cliente, así que ninguno prueba nada por sí solo. Pero si sold_at coincide con la recepción
 -- (±5 min), la venta se registró en línea y con el reloj sano, y entonces la recepción fecha la venta:
---   recepción antes del corte                 -> before_count: ya estaba vendida. No descuenta.
---   recepción 5 min o más después del corte   -> applied.
+--   recepción y sold_at antes del corte        -> before_count: ya estaba vendida. No descuenta.
+--   recepción 5 min o más después del corte    -> applied. Con el ±5 min de arriba, sold_at tampoco queda antes del corte.
+--   recepción y sold_at a lados opuestos       -> count_review: la evidencia se contradice, en cualquier sentido.
 --   recepción en los 5 min que siguen al corte -> count_review.
---   sold_at no coincide con la recepción      -> count_review, sea venta sin conexión o reloj desviado, adelantado o atrasado. Una cabecera vieja
---                                                con un reloj que no coincide tampoco se da por anterior.
+--   sold_at no coincide con la recepción       -> count_review, sea venta sin conexión o reloj desviado, adelantado o atrasado. Una cabecera vieja
+--                                                 con un reloj que no coincide tampoco se da por anterior.
 -- count_review no descuenta y queda como incidencia, sin cerrarse sola: la decide una persona, y un ajuste ± aplica lo que corresponda.
 create or replace function public.sale_items_stock_apply()
 returns trigger
@@ -245,7 +246,7 @@ begin
       select s.created_at, s.sold_at into v_created, v_sold from public.sales s where s.id = new.sale_id;
       if v_sold not between v_created - interval '5 minutes' and v_created + interval '5 minutes' then
         v_reason := 'count_review';
-      elsif v_created < v_cut then
+      elsif v_created < v_cut and v_sold < v_cut then
         v_reason := 'before_count';
       elsif v_created >= v_cut + interval '5 minutes' then
         v_reason := 'applied';

@@ -244,6 +244,31 @@ begin
   insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity, metadata)
     values (v_a, v_old_sale, 'a7', v_otro, 'Otro', 1, jsonb_build_object('stock_cut_seen', v_ts, 'stock_client_mode', 'server'));
   assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a7') = 'count_review', 'metadata ignorada';
+  -- El cruce, en los dos sentidos: recepción y sold_at a lados opuestos del corte. Ninguno decide.
+  insert into public.sales (store_id, business_date, sold_at, created_at)
+    values (v_a, current_date, v_ts + interval '1 minute', v_ts - interval '1 minute') returning id into v_old_sale;
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_a, v_old_sale, 'a7a', v_otro, 'Otro', 1);
+  assert (select stock_applied_reason = 'count_review' and stock_applied_qty = 0 from public.sale_items
+           where store_id = v_a and legacy_id = 'a7a'), 'cabecera anterior, venta declarada posterior';
+  insert into public.sales (store_id, business_date, sold_at, created_at)
+    values (v_a, current_date, v_ts - interval '1 minute', v_ts + interval '1 minute') returning id into v_old_sale;
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_a, v_old_sale, 'a7b', v_otro, 'Otro', 1);
+  assert (select stock_applied_reason = 'count_review' and stock_applied_qty = 0 from public.sale_items
+           where store_id = v_a and legacy_id = 'a7b'), 'cabecera posterior, venta declarada anterior';
+  -- Recepción ya pasado el margen y sold_at antes del corte: el ±5 min lo manda a revisar.
+  insert into public.sales (store_id, business_date, sold_at, created_at)
+    values (v_a, current_date, v_ts - interval '1 minute', v_ts + interval '6 minutes') returning id into v_old_sale;
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_a, v_old_sale, 'a7c', v_otro, 'Otro', 1);
+  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a7c') = 'count_review', 'cruce con recepción lejana';
+  -- Cabecera parcial, sold_at exactamente en el corte: tampoco es anterior.
+  insert into public.sales (store_id, business_date, sold_at, created_at)
+    values (v_a, current_date, v_ts, v_ts - interval '1 minute') returning id into v_old_sale;
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_a, v_old_sale, 'a7d', v_otro, 'Otro', 1);
+  assert (select stock_applied_reason from public.sale_items where store_id = v_a and legacy_id = 'a7d') = 'count_review', 'sold_at en el corte';
   -- Coherente, pero recibida en los 5 minutos que siguen al corte.
   insert into public.sales (store_id, business_date, sold_at, created_at)
     values (v_a, current_date, v_ts + interval '1 minute', v_ts + interval '1 minute') returning id into v_old_sale;
