@@ -920,6 +920,8 @@ input:checked + .toggle-slider:before{transform:translateX(16px)}
 .prod-adm-stock-ctrl{display:flex;align-items:center;gap:4px;flex-shrink:0}
 .prod-adm-stock-num{width:42px;text-align:center;padding:3px 4px;border:1px solid var(--border2);border-radius:var(--r-xs);font-family:var(--ff);font-size:12px;font-weight:500;color:var(--ink);background:var(--surf2);outline:none}
 .prod-adm-stock-num:focus{border-color:var(--orange)}
+.stock-count-error{display:block;color:var(--red);font-size:11px;line-height:1.3}
+.prod-adm-stock-ctrl .stock-count-error{max-width:160px}
 .ilim-toggle{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink3);cursor:pointer;white-space:nowrap;flex-shrink:0}
 .ilim-toggle input{width:14px;height:14px;accent-color:var(--orange);cursor:pointer}
 /* ── CATEGORIA RESERVABLE ── */
@@ -2355,7 +2357,8 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
         <span class="toggle-lbl" id="m-ilimitado-lbl">∞ Ilimitado</span>
       </div>
       <div id="m-stock-wrap" style="margin-top:6px">
-        <input class="modal-input" id="m-stock" type="number" placeholder="20" min="0" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other">
+        <input class="modal-input" id="m-stock" type="number" placeholder="20" min="0" autocomplete="off" oninput="clearPhysicalCountError(this)" aria-describedby="m-stock-error" data-lpignore="true" data-1p-ignore="true" data-form-type="other">
+        <span class="stock-count-error" id="m-stock-error" role="alert"></span>
       </div>
     </div>
     <!-- Variantes (expandible) -->
@@ -2526,7 +2529,8 @@ button:focus-visible,.btn:focus-visible,.btn-sm:focus-visible,.chip:focus-visibl
         <span class="toggle-lbl" id="pr-ilimitado-lbl">∞ Ilimitado</span>
       </div>
       <div id="pr-stock-wrap" style="margin-top:6px">
-        <input class="modal-input" id="pr-stock" type="number" placeholder="20" min="0" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other">
+        <input class="modal-input" id="pr-stock" type="number" placeholder="20" min="0" autocomplete="off" oninput="clearPhysicalCountError(this)" aria-describedby="pr-stock-error" data-lpignore="true" data-1p-ignore="true" data-form-type="other">
+        <span class="stock-count-error" id="pr-stock-error" role="alert"></span>
       </div>
     </div>
     <div id="prod-rapido-actions" class="modal-actions"></div>
@@ -4426,7 +4430,7 @@ function renderContextoGlobal(){
 
   const s=getCajaPendingBannerState();
   const oo=window.getOpenOrdersSyncState?.()||{};
-  const pendientes=s.pending.length+s.confirming.length+s.errors.length+s.rejected.length+s.slow.length+s.hidden.length+s.conflicts.length;
+  const pendientes=s.pending.length+s.confirming.length+s.paused.length+s.transient.length+s.errors.length+s.rejected.length+s.slow.length+s.hidden.length+s.conflicts.length;
   const nPend=k=>`${k} pendiente${k===1?'':'s'}`;
   const enDispositivo=pendientes?` Hay ${nPend(pendientes)} en este dispositivo.`:'';
   if(navigator.onLine===false)setCtxItem('ctx-sync','Sin conexión',`Sin conexión. Lo que registres queda en este dispositivo y se envía al volver la red.${enDispositivo}`,'error',pendientes?irAPendientesCaja:null);
@@ -4434,7 +4438,7 @@ function renderContextoGlobal(){
   else if(!cuenta.loggedIn)setCtxItem('ctx-sync','Sin sesión',`Sin sesión no se sincroniza. Tocá para iniciar sesión.${enDispositivo}`,'aviso',abrirCuenta);
   else if(s.rejected.length||s.conflicts.length){const k=s.rejected.length+s.conflicts.length;setCtxItem('ctx-sync',`Revisar ${k}`,`${k} ${k===1?'operación necesita':'operaciones necesitan'} revisión. Tocá para ver.`,'error',irAPendientesCaja);}
   else if(s.errors.length)setCtxItem('ctx-sync','Error al sincronizar',`No se pudo sincronizar ${s.errors.length===1?'1 operación':`${s.errors.length} operaciones`}. Tocá para reintentar.`,'error',irAPendientesCaja);
-  else if(s.pending.length||s.confirming.length){const k=s.pending.length+s.confirming.length;setCtxItem('ctx-sync',nPend(k),`${nPend(k)} de sincronizar. Tocá para ver.`,'aviso',irAPendientesCaja);}
+  else if(s.pending.length||s.confirming.length||s.paused.length||s.transient.length){const k=s.pending.length+s.confirming.length+s.paused.length+s.transient.length;setCtxItem('ctx-sync',nPend(k),`${nPend(k)} de sincronizar. Tocá para ver.`,'aviso',irAPendientesCaja);}
   else if(!cuenta.storeId)setCtxItem('ctx-sync','Sin local','Sin local activo no se sincroniza. Tocá para elegir uno.','aviso',abrirCuenta);
   else if(oo.state==='error')setCtxItem('ctx-sync','Error de conexión','No pudimos leer los datos del servidor. Tocá para reintentar.','error',()=>{window.triggerOORefresh?.('manual');showToast('Reintentando la conexión con el servidor…');});
   else if(s.slow.length||s.hidden.length||oo.state==='syncing'||!oo.ready||!oo.hasSupabaseRead)setCtxItem('ctx-sync','Sincronizando…','Sincronizando con el servidor. No hace falta hacer nada.');
@@ -4820,14 +4824,18 @@ function getCajaPendingOperationsForBanner(){
   if(typeof window.getPendingOperationsOutbox==='function')return window.getPendingOperationsOutbox();
   return Array.from({length:getCajaPendingOperationsCount()},()=>({type:'unknown',operation:'pending',status:'pending'}));
 }
-// Una venta cobrada que falló sin respuesta del servidor (red, timeout, lectura de confirmación) pudo haber llegado:
-// se muestra como "confirmando", no como error. Solo un rechazo con código del servidor pide intervención.
-function ventaRechazadaPorServidor(operation){
+// Un código HTTP o SQL no prueba por sí solo que la venta no se escribió. La identidad estable y la
+// lectura R-B2a determinan el resultado al reintentar; acá solo se decide qué acción mostrar.
+function clasificarErrorVenta(operation){
   const code=String(operation?.error_code||'');
-  return !!code&&!code.startsWith('READ_BACK')&&code!=='23505';
+  const message=String(operation?.last_error||'');
+  if(code==='55000'&&/STOCK_SALES_PAUSED/i.test(message))return 'paused';
+  if(code==='55P03'||code==='57014')return 'transient';
+  if(['42501','403','401','23514','22023','SALE_PARTIAL_MISMATCH','READ_BACK_IDENTITY_MISMATCH','READ_BACK_COMMERCIAL_MISMATCH','READ_BACK_LINE_MISMATCH'].includes(code))return 'rejected';
+  return 'confirming';
 }
 function getCajaPendingBannerState(now=Date.now()){
-  const state={hidden:[],slow:[],pending:[],errors:[],confirming:[],rejected:[],conflicts:[],nextRefreshMs:0};
+  const state={hidden:[],slow:[],pending:[],errors:[],confirming:[],paused:[],transient:[],rejected:[],conflicts:[],nextRefreshMs:0};
   state.conflicts=(mesas||[]).filter(m=>m?._items_conflict);
   const transientOperations=new Set(['create_open_order','sync_open_order_items','replace_open_order_items']);
   const openOrdersReady=window.getOpenOrdersSyncState?.()?.ready;
@@ -4835,7 +4843,7 @@ function getCajaPendingBannerState(now=Date.now()){
     const status=String(operation?.status||'pending').toLowerCase();
     const isError=['error','failed','sync_error','partial_error'].includes(status)||!!operation?.last_error;
     if(operation?.type==='venta'){
-      (isError&&ventaRechazadaPorServidor(operation)?state.rejected:state.confirming).push(operation);
+      state[isError?clasificarErrorVenta(operation):'confirming'].push(operation);
       return;
     }
     if(isError){state.errors.push(operation);return;}
@@ -4881,6 +4889,8 @@ function renderCajaPendingBanner(){
   const retenidas=operacionesRetenidas().length;
   if(retenidas)lineas.push({cls:'espera',texto:`<strong>${n(retenidas,'operación retenida','operaciones retenidas')}.</strong> Es de otra cuenta, de otro local o de una versión anterior: no se envía desde esta sesión ni se borra.`});
   if(state.rejected.length)lineas.push({cls:'accion',texto:`<strong>El servidor rechazó ${n(state.rejected.length,'venta cobrada','ventas cobradas')}.</strong> Está guardada en este dispositivo: no la cobres de nuevo y avisá al administrador.`});
+  if(state.paused.length)lineas.push({cls:'espera',texto:`<strong>${n(state.paused.length,'venta cobrada','ventas cobradas')} en pausa por mantenimiento.</strong> Quedó guardada acá. Cuando termine la pausa, tocá Reintentar; no la cobres de nuevo.`,reintentar:true});
+  if(state.transient.length)lineas.push({cls:'espera',texto:`<strong>${n(state.transient.length,'venta cobrada','ventas cobradas')} con una demora del servidor.</strong> Quedó guardada acá. Reintentar comprueba primero si llegó; no la cobres de nuevo.`,reintentar:true});
   if(state.errors.length)lineas.push({cls:'error',texto:`<strong>No pudimos sincronizar ${n(state.errors.length,'operación','operaciones')}.</strong> Se reintenta sola; podés reintentar ahora.`,reintentar:true});
   if(state.confirming.length)lineas.push({cls:'espera',texto:`<strong>${n(state.confirming.length,'venta cobrada','ventas cobradas')} esperando confirmación del servidor.</strong> Ya está${state.confirming.length===1?'':'n'} guardada${state.confirming.length===1?'':'s'} acá: no la${state.confirming.length===1?'':'s'} cobres de nuevo.`,reintentar:true});
   if(state.pending.length)lineas.push({cls:'espera',texto:`<strong>${n(state.pending.length,'operación pendiente','operaciones pendientes')}.</strong> No cierres la app hasta que se sincronice.`,reintentar:true});
@@ -5706,12 +5716,12 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null)
           reservation_id:reservaActiva?._sb_id||reservaActiva?.id||null
         });
         // La venta ya está guardada en el dispositivo: nunca pedir que se vuelva a cobrar.
-        // Con código de PostgREST el servidor la rechazó; sin código (red, timeout, read-back) no sabemos si llegó.
-        // 23505 (unique) significa que la venta ya existe en el servidor: no es un rechazo.
-        const rechazada=!!err?.code&&!String(err.code).startsWith('READ_BACK')&&String(err.code)!=='23505';
-        avisar(rechazada
+        const tipoError=clasificarErrorVenta({error_code:err?.code,last_error:err?.message});
+        avisar(tipoError==='rejected'
           ?'El servidor no aceptó la venta. Quedó guardada en este dispositivo como pendiente: avisá al administrador y no la cobres de nuevo.'
-          :'No pudimos confirmar la venta con el servidor. Quedó guardada en este dispositivo y se va a reintentar sola. No la cobres de nuevo.');
+          :tipoError==='paused'
+            ?'Las ventas están en pausa por mantenimiento. Esta quedó guardada en el dispositivo; reintentá al terminar la pausa. No la cobres de nuevo.'
+            :'No pudimos confirmar la venta con el servidor. Quedó guardada en este dispositivo; Reintentar comprobará si ya llegó. No la cobres de nuevo.');
         volverALista();
         return;
       }
@@ -7030,7 +7040,37 @@ function addCatFromModal(){ abrirNuevaCatDesdeProducto('ajustes'); }
 function populateCatSelect(){const el=$('m-cat');if(el)el.innerHTML=cats.sort((a,b)=>a.name.localeCompare(b.name,'es')).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');}
 function toggleIlimitado(){const ilim=$('m-ilimitado')?.checked;$('m-stock-wrap').style.display=ilim?'none':'block';}
 function adjProdStock(id,d){const p=menu.find(x=>sameId(x.id,id));if(!p||p.ilimitado)return;const n=(Number(p.stock)||0)+d;p.stock=stockServidor()?n:Math.max(0,n);save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
-function setProdStock(id,val){const p=menu.find(x=>sameId(x.id,id));if(!p||p.ilimitado)return;const parsed=parseInt(val,10),info=stockInfo(p);if(isNaN(parsed)||parsed===info.teorico){renderMenuAdm();return;}const contado=Math.max(0,parsed);if(stockServidor()){if(!confirm(`¿Registrar el conteo físico de ${p.name}: ${contado}? Reemplaza el saldo y las ventas anteriores a este momento ya no lo descuentan.`)){renderMenuAdm();return;}p.stock_counted_at=new Date().toISOString();stockRev++;}p.stock=contado;save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
+function clearPhysicalCountError(input){
+  if(!input)return;
+  input.removeAttribute?.('aria-invalid');
+  const error=input.nextElementSibling;
+  if(error?.classList?.contains('stock-count-error'))error.textContent='';
+}
+function physicalCountValue(input){
+  const raw=String(input?.value??'').trim(),value=Number(raw);
+  const error=input?.nextElementSibling;
+  if(!raw||!Number.isFinite(value)||value<0||input?.validity?.badInput){
+    input?.setAttribute?.('aria-invalid','true');
+    if(error?.classList?.contains('stock-count-error'))error.textContent='Ingresá un conteo físico válido: cero o un número positivo.';
+    return null;
+  }
+  clearPhysicalCountError(input);
+  return value;
+}
+function setProdStock(id,val,input){
+  const p=menu.find(x=>sameId(x.id,id));if(!p||p.ilimitado)return;
+  const field=input||null;
+  const contado=physicalCountValue(field||{value:val});
+  if(contado===null)return;
+  const info=stockInfo(p);
+  if(contado===info.teorico)return;
+  if(stockServidor()&&!confirm(`¿Registrar el conteo físico de ${p.name}: ${contado}? Reemplaza el saldo y las ventas anteriores a este momento ya no lo descuentan.`)){
+    if(field)field.value=info.teorico;
+    return;
+  }
+  if(stockServidor()){p.stock_counted_at=new Date().toISOString();stockRev++;}
+  p.stock=contado;save();renderMenuAdm();renderStockAlerts();syncMenuSheets();
+}
 function toggleProdIlimitado(id,checked){const p=menu.find(x=>sameId(x.id,id));if(!p)return;p.ilimitado=checked;save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
 
 function renderMenuAdm(){
@@ -7050,10 +7090,10 @@ function renderMenuAdm(){
     <span class="prod-adm-precio">${fmt(p.price)}</span>
     <div class="prod-adm-stock-ctrl" style="${p.ilimitado?'display:none':''}">
       <button class="qty-btn" type="button" title="Corrección: resta 1" onclick="adjProdStock('${p.id}',-1)">−</button>
-      <input class="prod-adm-stock-num" type="number" title="Conteo físico: el saldo real de hoy" value="${p.ilimitado?0:stockInfo(p).teorico}" min="0"
-        onchange="setProdStock('${p.id}',this.value)"
-        onblur="setProdStock('${p.id}',this.value)"
-        onkeydown="if(event.key==='Enter'){setProdStock('${p.id}',this.value);this.blur();}">
+      <input class="prod-adm-stock-num" type="number" title="Conteo físico: el saldo real de hoy" value="${p.ilimitado?0:stockInfo(p).teorico}" min="0" oninput="clearPhysicalCountError(this)"
+        onchange="setProdStock('${p.id}',this.value,this)"
+        onkeydown="if(event.key==='Enter')this.blur()">
+      <span class="stock-count-error" role="alert"></span>
       <button class="qty-btn" type="button" title="Corrección: suma 1" onclick="adjProdStock('${p.id}',1)">+</button>
       ${stockEtiqueta(p)}
     </div>
@@ -7067,6 +7107,7 @@ function renderMenuAdm(){
 
 function openProdModal(id){
   editId=id;populateCatSelect();_variantesEdit=[];
+  clearPhysicalCountError($('m-stock'));
   $('variantes-arr').className='variantes-toggle-arr';$('variantes-body').className='variantes-body';
   if(id){
     const p=menu.find(x=>sameId(x.id,id));if(!p)return;
@@ -7115,10 +7156,13 @@ async function guardarProducto(){
   // No resetear stock a 0 al marcar ilimitado — conservar el valor para cuando se desactive
   const existing=editId?menu.find(x=>sameId(x.id,editId)):null;
   // Editar nombre, precio o categoría no escribe stock. Solo un cambio real del campo es un conteo, y va con compare-and-set.
-  const stockIngresado=parseInt($('m-stock')?.value),infoStock=existing?stockInfo(existing):null;
-  const stockCambiado=!!existing&&!ilimitado&&!isNaN(stockIngresado)&&stockIngresado!==infoStock.teorico;
+  const infoStock=existing?stockInfo(existing):null;
+  const stockSinCambios=!!existing&&String($('m-stock')?.value).trim()===String(infoStock.teorico);
+  const stockIngresado=ilimitado||stockSinCambios?null:physicalCountValue($('m-stock'));
+  if(!ilimitado&&!stockSinCambios&&stockIngresado===null)return;
+  const stockCambiado=!!existing&&!ilimitado&&!stockSinCambios&&stockIngresado!==infoStock.teorico;
   const stockAntes=existing?infoStock.confirmado:null;
-  const stock=!existing?Math.max(0,stockIngresado||0):stockCambiado?Math.max(0,stockIngresado):stockAntes;
+  const stock=!existing?(ilimitado?0:stockIngresado):stockCambiado?stockIngresado:stockAntes;
   if(stockCambiado&&stockServidor()&&!confirm(`¿Registrar el conteo físico de ${name}: ${stock}? Reemplaza el saldo y las ventas anteriores a este momento ya no lo descuentan.`))return;
   const product={...(existing||{}),id:existing?.id||`prod_${Date.now()}`,name,price,cat,stock,ilimitado,variantes:_variantesEdit,active:true};
   const btn=$('prod-modal-actions')?.querySelector('.btn-save');
@@ -7189,6 +7233,7 @@ function openProdRapidoModal(contexto){
   setTimeout(()=>$('pr-nombre').focus(),100);
 }
 function _rellenarModalProd(snap){
+  clearPhysicalCountError($('pr-stock'));
   const sortedCats=cats.slice().sort((a,b)=>a.name.localeCompare(b.name,'es'));
   $('pr-cat').innerHTML=sortedCats.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   if(snap){
@@ -7216,8 +7261,9 @@ async function guardarProdRapido(){
   const price=parseInt($('pr-precio')?.value)||0;
   const cat=$('pr-cat')?.value;
   const ilimitado=!!$('pr-ilimitado')?.checked;
-  const stock=ilimitado?0:parseInt($('pr-stock')?.value)||10;
   if(!name||!price){showToast('Completá nombre y precio');return;}
+  const stock=ilimitado?0:physicalCountValue($('pr-stock'));
+  if(stock===null)return;
   const newId='prod_'+Date.now();
   const newProd={id:newId,name,price,cat,stock,ilimitado,variantes:[]};
   const btn=$('modal-prod-rapido')?.querySelector('.btn-save');
@@ -15786,7 +15832,7 @@ if(config.webappUrl){loadFromSheets();}
   };
   window.retryPendingSalesSync=async function(){
     const pendingGroups=findPendingSalesSyncGroups(ventas||[]).filter(g=>(g.rows||[]).every(r=>origenEnviable(r,'venta')));
-    if(!pendingGroups.length){showToast('No hay ventas pendientes para sincronizar');return;}
+    if(!pendingGroups.length){showToast('No hay ventas pendientes para sincronizar');return{ok:true,groups:0};}
     let okCount=0;
     for(const group of pendingGroups){
       try{
@@ -15798,6 +15844,7 @@ if(config.webappUrl){loadFromSheets();}
     if(okCount===pendingGroups.length) showToast(`${okCount} venta${okCount===1?'':'s'} enviada${okCount===1?'':'s'}.`);
     else if(okCount===0) showToast('No pudimos enviar las operaciones pendientes.');
     else showToast(`Se sincronizaron ${okCount} de ${pendingGroups.length}. Quedan pendientes.`);
+    return{ok:okCount===pendingGroups.length,groups:okCount,failed:pendingGroups.length-okCount};
   };
   window.debugPendingSalesSync=function(){
     const pendingGroups=findPendingSalesSyncGroups(ventas||[]);

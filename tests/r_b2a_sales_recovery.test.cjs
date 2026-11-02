@@ -86,7 +86,7 @@ function createDb(initial=completeRows(),options={}){
           return {data:null,error:{code:'23514',message:'violates check constraint'}};
         const row={...payload,id:table==='sales'?saleId:`new_${rows[table].length}`};
         rows[table].push(row);
-        if(table==='sales'&&options.loseSaleResponse)return {data:null,error:{message:'network lost'}};
+        if(table==='sales'&&options.loseSaleResponse)return {data:null,error:{code:options.loseSaleResponseCode,message:'network lost'}};
         if(table==='sale_payments'&&losePayment())return {data:null,error:{message:'payment response lost'}};
         return {data:row,error:null};
       }
@@ -190,6 +190,18 @@ test('INSERT de la venta con respuesta perdida: el reintento completa solo ítem
   assert.equal(marks.at(-1).status,'synced');
 });
 
+test('D3: 57014 tras persistir cabecera se concilia antes de completar, sin duplicar',async()=>{
+  const db=createDb(emptyRows(),{loseSaleResponse:true,loseSaleResponseCode:'57014'});
+  const {ctx,marks}=harness(current,db);
+  await assert.rejects(ctx.saveSaleGroupToSupabase(group),err=>err.code==='57014');
+  assert.equal(marks.at(-1).status,'error');
+  assert.deepEqual([db.rows.sales.length,db.rows.sale_items.length,db.rows.sale_payments.length],[1,0,0]);
+  assert.equal((await ctx.saveSaleGroupToSupabase(group)).ok,true);
+  assert.deepEqual([db.rows.sales.length,db.rows.sale_items.length,db.rows.sale_payments.length],[1,1,1]);
+  assert.deepEqual(writeLog(db),['insert:sales','insert:sale_items','insert:sale_payments']);
+  assert.equal(marks.at(-1).status,'synced');
+});
+
 test('detalle parcial coherente: inserta solo lo que falta y una segunda interrupción converge sin duplicar',async()=>{
   const rows=completeRows();rows.sale_payments=[];
   const db=createDb(rows,{losePaymentResponse:1});
@@ -216,7 +228,7 @@ test('respuesta perdida tras el último INSERT: el reintento solo lee y conserva
 });
 
 // Stock Durability: durante una pausa el servidor rechaza con 55000, y una espera vencida da 55P03. Para R-B2a son errores comunes.
-for(const code of ['55000','55P03']){
+for(const code of ['55000','55P03','57014']){
   const rechazo={code,message:'STOCK_SALES_PAUSED: ventas en pausa'};
   test(`corte de stock (${code}): cabecera rechazada queda en error, sin marcar; levantada la pausa se completa una vez`,async()=>{
     let pausa=true;
