@@ -3,6 +3,14 @@
 --
 -- Aplicarla NO cambia ningún saldo: el modelo se enciende por local, con una fila en stock_store_activation (stock_activation.sql).
 -- Apagarlo tiene un solo camino: active -> sales_paused -> deactivated. En la pausa el servidor rechaza las ventas de ese local y R-B2a las conserva.
+--
+-- Orden de locks, siempre el mismo: fila de stock_store_activation (FOR SHARE) -> fila del producto (FOR NO KEY UPDATE).
+--   * Cada venta, compensación y ajuste sostiene el FOR SHARE hasta su commit. Un cambio de estado es un UPDATE: espera a los que están en vuelo, y lo que
+--     llega después espera al cambio. Por eso lo que pasó la guarda antes de la pausa confirma antes de que la pausa exista.
+--   * FOR NO KEY UPDATE y no FOR UPDATE: la FK de un sale_items toma FOR KEY SHARE del producto antes de que corra el trigger. FOR UPDATE choca con eso y dos
+--     ventas simultáneas del mismo producto se bloquearían entre sí.
+--   * Una escritura directa de stock ya tiene el producto cuando corre su BEFORE UPDATE, que es el orden inverso. Por eso no espera: usa NOWAIT y falla.
+-- Una espera vencida (55P03) o la pausa (55000) abortan la operación entera; para R-B2a son errores comunes, la venta queda guardada y se reintenta.
 -- Mientras un local no esté activado, sus ítems quedan con motivo 'inactive' y sus clientes, viejos o nuevos, siguen como hasta hoy.
 --
 -- Contrato:
@@ -80,6 +88,7 @@ create table if not exists public.stock_store_activation (
   paused_at timestamptz,
   deactivated_at timestamptz
 );
+alter table public.stock_store_activation drop constraint if exists stock_store_activation_rolled_back; -- la deja el rollback
 alter table public.stock_store_activation enable row level security;
 alter table public.stock_store_activation force row level security;
 drop policy if exists stock_store_activation_select_members on public.stock_store_activation;
@@ -159,12 +168,15 @@ returns trigger
 language plpgsql
 security definer
 set search_path = public
+set lock_timeout = '3s'
 as $$
 declare
   v_ref text;
+  v_status text;
 begin
   -- Fail-closed: durante el corte no entra nada. El error deja la venta en error o partial_error en el dispositivo, y R-B2a la reintenta.
-  if exists (select 1 from public.stock_store_activation a where a.store_id = new.store_id and a.status = 'sales_paused') then
+  select a.status into v_status from public.stock_store_activation a where a.store_id = new.store_id for share;
+  if v_status = 'sales_paused' then
     raise exception 'STOCK_SALES_PAUSED: ventas en pausa por mantenimiento de stock; quedan guardadas en el dispositivo' using errcode = '55000';
   end if;
   new.stock_applied_qty := null;
@@ -221,7 +233,7 @@ declare
   v_sold timestamptz;
 begin
   select a.status, a.activated_at, a.deactivated_at into v_status, v_activated, v_deactivated
-    from public.stock_store_activation a where a.store_id = new.store_id;
+    from public.stock_store_activation a where a.store_id = new.store_id for share;
   if v_status is null then
     v_reason := 'inactive';
   elsif v_status = 'deactivated' then
@@ -236,7 +248,7 @@ begin
     v_reason := 'unresolved';
   else
     select p.stock_counted_at, p.unlimited into v_counted, v_unlimited
-      from public.products p where p.id = new.product_id and p.store_id = new.store_id for update;
+      from public.products p where p.id = new.product_id and p.store_id = new.store_id for no key update;
     if not found then
       v_reason := 'store_mismatch';
     elsif v_unlimited then
@@ -280,12 +292,18 @@ declare
   v_activated timestamptz;
   v_counted timestamptz;
   v_balance numeric;
+  v_product_found boolean;
 begin
   if coalesce(old.stock_applied_qty, 0) = 0 then return null; end if; -- no movió nada: sin UPDATE y sin registro
-  select a.status, a.activated_at into v_status, v_activated from public.stock_store_activation a where a.store_id = old.store_id;
+  select a.status, a.activated_at into v_status, v_activated from public.stock_store_activation a where a.store_id = old.store_id for share;
   select p.stock_counted_at into v_counted from public.products p
-   where p.id = old.product_id and p.store_id = old.store_id for update;
-  if not found or v_status is distinct from 'active' or old.stock_applied_at <= greatest(v_counted, v_activated) then
+   where p.id = old.product_id and p.store_id = old.store_id for no key update;
+  v_product_found := found;
+  -- En la pausa no se mueve nada, y omitir la devolución perdería unidades: el borrado se rechaza entero, también el que viene en cascada.
+  if v_product_found and v_status = 'sales_paused' and old.stock_applied_at > greatest(v_counted, v_activated) then
+    raise exception 'STOCK_SALES_PAUSED: este borrado tiene que devolver stock y hay una pausa de mantenimiento; reintentar al terminar' using errcode = '55000';
+  end if;
+  if not v_product_found or v_status is distinct from 'active' or old.stock_applied_at <= greatest(v_counted, v_activated) then
     insert into public.stock_ledger (store_id, product_id, kind, delta, sale_item_legacy_id, actor)
       values (old.store_id, old.product_id, 'delete_no_compensation', 0, old.legacy_id, auth.uid());
     return null;
@@ -337,9 +355,6 @@ language plpgsql
 set search_path = public
 as $$
 begin
-  if tg_op = 'INSERT' and exists (select 1 from public.stock_store_activation a where a.store_id = new.store_id and a.status = 'sales_paused') then
-    raise exception 'STOCK_SALES_PAUSED: ventas en pausa por mantenimiento de stock; quedan guardadas en el dispositivo' using errcode = '55000';
-  end if;
   if current_user in ('anon', 'authenticated') then
     if tg_op = 'INSERT' then
       new.created_at := clock_timestamp();
@@ -347,6 +362,40 @@ begin
       new.created_at := old.created_at;
     end if;
   end if;
+  return new;
+end;
+$$;
+
+-- SECURITY DEFINER: FOR SHARE exige un permiso de escritura que un cliente no tiene sobre la tabla. Por eso son funciones de trigger aparte de las guardas.
+-- Una cabecera también sostiene el lock: la transición no puede confirmar con una cabecera en vuelo.
+create or replace function public.sales_stock_gate()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+set lock_timeout = '3s'
+as $$
+declare
+  v_status text;
+begin
+  select a.status into v_status from public.stock_store_activation a where a.store_id = new.store_id for share;
+  if v_status = 'sales_paused' then
+    raise exception 'STOCK_SALES_PAUSED: ventas en pausa por mantenimiento de stock; quedan guardadas en el dispositivo' using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
+-- Corre antes que products_stock_guard por orden de nombre. NOWAIT: ver el orden de locks al principio. Si hay un cambio de estado en curso, esta escritura
+-- falla y el cliente la revierte; lo que la guarda lea después ya no puede cambiar hasta el commit.
+create or replace function public.products_stock_gate()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform 1 from public.stock_store_activation a where a.store_id = old.store_id for share nowait;
   return new;
 end;
 $$;
@@ -392,6 +441,7 @@ declare
   v_unlimited boolean;
   v_balance numeric;
   v_counted timestamptz;
+  v_status text;
 begin
   if p_kind is null or p_kind not in ('count', 'adjust') or p_expected is null or p_value is null
      or p_expected in ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric)
@@ -402,11 +452,12 @@ begin
   if not public.has_store_role(p_store, array['owner', 'admin']::public.store_user_role[]) then
     raise exception 'STOCK_FORBIDDEN' using errcode = '42501'; -- SECURITY DEFINER saltea RLS: el rol se comprueba acá
   end if;
-  if not exists (select 1 from public.stock_store_activation a where a.store_id = p_store and a.status = 'active') then
+  select a.status into v_status from public.stock_store_activation a where a.store_id = p_store for share;
+  if v_status is distinct from 'active' then
     return jsonb_build_object('ok', false, 'code', 'inactive');
   end if;
   select p.stock, p.unlimited into v_stock, v_unlimited from public.products p
-   where p.id = p_product and p.store_id = p_store for update;
+   where p.id = p_product and p.store_id = p_store for no key update;
   if not found then return jsonb_build_object('ok', false, 'code', 'not_found'); end if;
   if v_unlimited then return jsonb_build_object('ok', false, 'code', 'unlimited'); end if;
   if v_stock <> p_expected then return jsonb_build_object('ok', false, 'code', 'conflict', 'stock', v_stock); end if;
@@ -428,6 +479,8 @@ revoke all on function public.sale_items_stock_guard() from public, anon, authen
 revoke all on function public.products_stock_guard() from public, anon, authenticated;
 revoke all on function public.sales_stock_guard() from public, anon, authenticated;
 revoke all on function public.stock_store_activation_guard() from public, anon, authenticated;
+revoke all on function public.sales_stock_gate() from public, anon, authenticated;
+revoke all on function public.products_stock_gate() from public, anon, authenticated;
 revoke all on function public.stock_apply_adjustment(uuid, uuid, text, numeric, numeric) from public, anon;
 grant execute on function public.stock_apply_adjustment(uuid, uuid, text, numeric, numeric) to authenticated;
 
@@ -443,6 +496,10 @@ create trigger stock_store_activation_guard before insert or update or delete on
   for each row execute function public.stock_store_activation_guard();
 create trigger sales_stock_guard before insert or update on public.sales
   for each row execute function public.sales_stock_guard();
+create trigger sales_stock_gate before insert on public.sales
+  for each row execute function public.sales_stock_gate();
+create trigger products_stock_gate before update on public.products
+  for each row when (new.stock is distinct from old.stock) execute function public.products_stock_gate();
 create trigger products_stock_guard before insert or update on public.products
   for each row execute function public.products_stock_guard();
 

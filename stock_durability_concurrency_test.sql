@@ -55,18 +55,74 @@
 --   Sesión A: commit;
 --   Esperado: el ítem queda 'inactive' y no descuenta: es anterior al corte y el conteo inicial lo refleja. Sin doble descuento.
 
--- Caso 8b: la pausa contra una venta en vuelo. Lo que entró antes del commit de la pausa queda bajo el régimen activo.
---   Sesión A: begin; insert ... legacy_id 'c8b', quantity 1;     -- leyó 'active' y descontó
---   Sesión D: update public.stock_store_activation set status = 'sales_paused' where store_id = :store; -- commit, sin esperar a A
---   Sesión A: commit;
---   Esperado: 'c8b' aplicado y descontado una vez. Un ítem nuevo ya recibe 55000 STOCK_SALES_PAUSED, y un reintento posterior a la pausa no queda a medias.
+-- TRANSICIONES. La regla: un cambio de estado espera a lo que está en vuelo, y lo que llega después espera al cambio.
 
--- Caso 8c: desactivar contra una venta en vuelo.
---   Sesión D: begin; update public.stock_store_activation set status = 'deactivated' where store_id = :store;  -- en sales_paused
---   Sesión A: insert ... legacy_id 'c8c', metadata {"stock_client_mode":"server"};   -- rechazada: todavía lee sales_paused
+-- Caso 8b: INSERT iniciado antes de la pausa y confirmado después de pedirla.
+--   Sesión A: begin; insert ... legacy_id 'c8b', quantity 1;     -- leyó 'active', descontó y sostiene FOR SHARE
+--   Sesión D: update public.stock_store_activation set status = 'sales_paused' where store_id = :store;   -- ESPERA a A
+--   Sesión A: commit;
+--   Esperado: D termina recién ahora, con paused_at posterior a stock_applied_at de 'c8b'. Descontó una vez. Un ítem nuevo recibe 55000.
+--   Con un SELECT sin lock, D habría confirmado antes y 'c8b' habría llegado después de deactivated.
+
+-- Caso 8c: lo mismo con una cabecera.
+--   Sesión A: begin; insert into public.sales (store_id, business_date, sold_at) values (:store, current_date, clock_timestamp());
+--   Sesión D: update ... set status = 'sales_paused' ...;   -- ESPERA a A
+--   Sesión A: commit;
+--   Esperado: D termina. La cabecera queda sin ítems y el ítem recibe 55000: es una venta parcial, ver el caso 8h.
+
+-- Caso 8d: una venta llega durante el cambio de estado.
+--   Sesión D: begin; update ... set status = 'sales_paused' ...;
+--   Sesión A: insert ... legacy_id 'c8d', quantity 1;      -- ESPERA a D. Si D tarda más de 3 s: 55P03, sin ítem y sin descuento
 --   Sesión D: commit;
---   Sesión A: reintento del mismo legacy_id.
---   Esperado: 'transition_review', applied 0. La venta no se perdió, no descontó dos veces y queda a conciliar.
+--   Esperado: A recibe 55000, no 'applied': el FOR SHARE relee la fila ya cambiada.
+
+-- Caso 8e: DELETE con compensación durante la pausa.
+--   Con 'c8e' aplicado y posterior al corte, y el local en sales_paused:
+--   Sesión C: delete from public.sale_items where store_id = :store and legacy_id = 'c8e';
+--   Esperado: 55000, el ítem sigue, stock igual y nada en stock_ledger. Abortada la pausa, el mismo DELETE devuelve y registra.
+
+-- Caso 8f: DELETE en cascada durante la pausa.
+--   Con la cabecera de 'c8e' y el local en sales_paused:
+--   Sesión C: delete from public.sales where id = <cabecera>;
+--   Esperado: 55000 y la cabecera con todos sus ítems y pagos sigue. Lo mismo para delete from public.stores.
+
+-- Caso 8g: DELETE en vuelo contra la pausa.
+--   Sesión C: begin; delete ... legacy_id 'c8g';           -- devolvió y sostiene FOR SHARE
+--   Sesión D: update ... set status = 'sales_paused' ...;  -- ESPERA a C
+--   Sesión C: commit;
+--   Esperado: devolución aplicada y registrada antes de la pausa. Con rollback de C en lugar de commit: ni devolución ni ledger, y el ítem sigue.
+
+-- Caso 8h: operaciones parcialmente persistidas, los tres finales posibles. Cabecera confirmada mientras el local estaba activo, 10 min después de la activación.
+--   Pausar. Sesión A: insert del ítem 'c8h';                -- 55000; R-B2a deja partial_error
+--   a) Abortar la pausa: update ... set status = 'active'. Reintento de 'c8h': clasifica normal y descuenta una vez.
+--   b) En cambio, desactivar. Reintento de 'c8h': 'transition_review', applied 0: la cabecera es anterior a la desactivación.
+--   c) En cambio, con la app: R-B2a adopta la cabecera e inserta solo lo que falta. Una sola cabecera y un solo ítem por legacy_id.
+
+-- Caso 8i: reintentos de R-B2a después de levantar la pausa, con la app real y dos dispositivos.
+--   Vender con el local en pausa: la venta queda en error en el dispositivo y "Ventas pendientes" la cuenta. Abortar la pausa. retryPendingSalesSync.
+--   Esperado: synced, un descuento. Repetir el reintento no cambia el saldo. Un segundo intento concurrente recibe 23505 y no descuenta.
+
+-- Caso 8j: reactivación concurrente con rollback. Los dos órdenes.
+--   Con todos los locales en 'deactivated'.
+--   a) Sesión R: begin; hasta justo después del precheck de stock_durability_rollback.sql.
+--      Sesión D: update ... set status = 'active' ...;     -- ESPERA a R
+--      Sesión R: commit;
+--      Esperado: D falla con 23514 stock_store_activation_rolled_back. Sin triggers y sin modo servidor.
+--   b) Sesión D: begin; update ... set status = 'active' ...;
+--      Sesión R: correr el rollback;                        -- espera en el primer LOCK
+--      Sesión D: commit;
+--      Esperado: R aborta con STOCK_ROLLBACK, o con 55P03 si pasaron los 10 s. Triggers, funciones y saldos intactos.
+
+-- Caso 8k: orden de locks. Dos ventas simultáneas del mismo producto no se bloquean entre sí.
+--   Sesión A: begin; insert ... legacy_id 'c8k1', quantity 1;
+--   Sesión B: begin; insert ... legacy_id 'c8k2', quantity 1;   -- su FK toma FOR KEY SHARE y su trigger espera a A
+--   Sesión A: commit;  Sesión B: commit;
+--   Esperado: sin 40P01, y los dos descuentos. Con FOR UPDATE en lugar de FOR NO KEY UPDATE, según el orden de las sentencias, aquí hay deadlock.
+
+-- Caso 8l: una escritura directa, en orden inverso, no espera una transición.
+--   Con el local en 'deactivated'. Sesión D: begin; update ... set status = 'active' ...;
+--   Sesión C (authenticated, owner): update public.products set stock = 5 where id = :product;
+--   Esperado: 55P03 inmediato por el NOWAIT. D confirma sin deadlock.
 
 -- Caso 9: un cliente viejo en un local activado. Rol authenticated, owner del local.
 --   update public.products set stock = 999 where id = :product;

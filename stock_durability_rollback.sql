@@ -18,10 +18,15 @@
 
 begin;
 
+-- Los locks van antes del precheck y duran hasta el commit: una reactivación concurrente espera, y al entrar choca con el CHECK de abajo.
+-- Orden: activación, y después las tablas en el orden en que las toma una venta. Si no se consiguen rápido, falla sin haber tocado nada.
+set local lock_timeout = '10s';
+lock table public.stock_store_activation in share row exclusive mode;
+lock table public.sales, public.sale_items, public.products in access exclusive mode;
+
 do $$
 begin
-  if to_regclass('public.stock_store_activation') is not null
-     and exists (select 1 from public.stock_store_activation where status <> 'deactivated') then
+  if exists (select 1 from public.stock_store_activation where status <> 'deactivated') then
     raise exception 'STOCK_ROLLBACK: hay locales sin desactivar; primero sales_paused y deactivated (stock_activation.sql)';
   end if;
 end;
@@ -33,7 +38,10 @@ drop trigger if exists sale_items_stock_compensate on public.sale_items;
 drop trigger if exists sale_items_stock_guard on public.sale_items;
 drop trigger if exists products_stock_guard on public.products;
 drop trigger if exists sales_stock_guard on public.sales;
+drop trigger if exists sales_stock_gate on public.sales;
+drop trigger if exists products_stock_gate on public.products;
 drop trigger if exists stock_store_activation_guard on public.stock_store_activation;
+alter table public.stock_store_activation drop constraint if exists stock_store_activation_rolled_back; -- correr el archivo otra vez
 
 drop function if exists public.sale_items_stock_prepare();
 drop function if exists public.sale_items_stock_apply();
@@ -41,11 +49,13 @@ drop function if exists public.sale_items_stock_compensate();
 drop function if exists public.sale_items_stock_guard();
 drop function if exists public.products_stock_guard();
 drop function if exists public.sales_stock_guard();
+drop function if exists public.sales_stock_gate();
+drop function if exists public.products_stock_gate();
 drop function if exists public.stock_store_activation_guard();
 drop function if exists public.stock_apply_adjustment(uuid, uuid, text, numeric, numeric);
 
--- Sin escrituras concurrentes entre contar y validar.
-lock table public.products in share row exclusive mode;
+-- Sin triggers ya nada frena un update a 'active', y un cliente pasaría a modo servidor sin descuento en ningún lado. Reactivar exige reaplicar la migración.
+alter table public.stock_store_activation add constraint stock_store_activation_rolled_back check (status = 'deactivated');
 
 do $$
 declare

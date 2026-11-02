@@ -11,6 +11,12 @@ declare
 begin
   assert to_regclass('public.stock_store_activation') is not null, 'el estado se conserva: el cliente sigue viendo sus incidencias';
   assert not exists (select 1 from public.stock_store_activation where status <> 'deactivated'), 'el rollback exige locales desactivados';
+  assert exists (select 1 from pg_constraint where conname = 'stock_store_activation_rolled_back'), 'sin triggers, el CHECK impide reactivar';
+  begin
+    update public.stock_store_activation set status = 'active';
+    if found then raise exception 'ROLLBACK_TEST: se pudo reactivar sin migración'; end if;
+  exception when check_violation then null;
+  end;
   assert to_regclass('public.stock_ledger') is not null, 'el registro se conserva';
   assert to_regprocedure('public.stock_apply_adjustment(uuid,uuid,text,numeric,numeric)') is null, 'la función de ajuste se fue';
   assert not exists (select 1 from pg_trigger where not tgisinternal and tgname like '%stock%'

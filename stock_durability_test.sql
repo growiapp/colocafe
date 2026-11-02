@@ -452,8 +452,33 @@ begin
   begin delete from public.stock_store_activation where store_id = v_d;
   exception when raise_exception then bloqueado := sqlerrm like 'STOCK_TRANSITION%'; end;
   assert bloqueado, 'borrar la fila no desactiva';
+  -- Un ítem que el conteo ya reflejó, para la pausa de abajo.
+  insert into public.sale_items (store_id, sale_id, legacy_id, product_id, product_name, quantity)
+    values (v_d, v_sd, 'd0', v_pd, 'D', 1) returning id into v_hist;
+  update public.products set stock = stock + 1 where id = v_pd;
   -- Pausa: nada entra, y sigue sin haber escrituras de stock.
   update public.stock_store_activation set status = 'sales_paused' where store_id = v_d;
+  -- Un borrado que tiene que devolver stock se rechaza, directo o en cascada, y no deja nada a medias.
+  bloqueado := false;
+  begin delete from public.sale_items where id = v_item_d;
+  exception when object_not_in_prerequisite_state then bloqueado := sqlerrm like 'STOCK_SALES_PAUSED%'; end;
+  assert bloqueado, 'pausa: borrado directo con compensación rechazado';
+  bloqueado := false;
+  begin delete from public.sales where id = v_sd;
+  exception when object_not_in_prerequisite_state then bloqueado := sqlerrm like 'STOCK_SALES_PAUSED%'; end;
+  assert bloqueado, 'pausa: borrado en cascada rechazado';
+  bloqueado := false;
+  begin delete from public.stores where id = v_d;
+  exception when object_not_in_prerequisite_state then bloqueado := sqlerrm like 'STOCK_SALES_PAUSED%'; end;
+  assert bloqueado, 'pausa: borrar el local también';
+  assert exists (select 1 from public.sale_items where id = v_item_d) and exists (select 1 from public.sales where id = v_sd), 'el rechazo no deja nada borrado';
+  assert (select stock from public.products where id = v_pd) = 9, 'pausa: sin devolución';
+  assert not exists (select 1 from public.stock_ledger where store_id = v_d), 'pausa: sin registro de un borrado que no ocurrió';
+  -- Lo anterior al corte no requiere devolución: se puede borrar, y queda en el registro.
+  update public.products set stock_counted_at = clock_timestamp() + interval '1 hour' where id = v_pd;
+  delete from public.sale_items where id = v_hist;
+  assert (select kind = 'delete_no_compensation' from public.stock_ledger where store_id = v_d and sale_item_legacy_id = 'd0'), 'pausa: anterior al corte, sin devolución';
+  update public.products set stock_counted_at = null where id = v_pd;
   assert (select paused_at is not null from public.stock_store_activation where store_id = v_d), 'pausa sellada';
   bloqueado := false;
   begin insert into public.sales (store_id, business_date, sold_at) values (v_d, current_date, now());

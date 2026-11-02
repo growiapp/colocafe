@@ -24,8 +24,9 @@
 -- Un cliente en modo servidor no descuenta en su dispositivo: si el servidor dejara de descontar sin que lo sepa, la venta no descontaría en ningún lado.
 --   D1. Avisar y cerrar caja en todos los dispositivos. Condición: nadie cobrando.
 --   D2. Con conexión, en cada dispositivo: "Ventas pendientes = 0" en Soporte. Sin poder lograrlo en alguno, anotar cuál: lo suyo entrará por D6.
---   D3. PAUSAR (abajo). Desde el commit el servidor rechaza cabeceras e ítems de ese local con STOCK_SALES_PAUSED, los ajustes con 'inactive' y las
---       escrituras directas. Una venta hecha igual queda guardada en el dispositivo, en error o partial_error, y R-B2a la reintenta: no se pierde.
+--   D3. PAUSAR (abajo). El UPDATE espera a las ventas y borrados en vuelo. Desde el commit el servidor rechaza con STOCK_SALES_PAUSED las cabeceras, los ítems y
+--       los borrados que tendrían que devolver stock, incluidos los de cascada; los ajustes con 'inactive' y las escrituras directas.
+--       Una venta hecha igual queda guardada en el dispositivo, en error o partial_error, y R-B2a la reintenta: no se pierde.
 --       Para abortar sin cambios: update ... set status = 'active'. El corte no se mueve.
 --   D4. En cada dispositivo, recargar y confirmar el aviso de pausa en la pantalla de stock. Condición: todos lo muestran.
 --       Un dispositivo apagado o sin conexión no se puede confirmar: anotarlo. No bloquea, porque D6 captura lo suyo; recargar no es la garantía.
@@ -33,7 +34,10 @@
 --   D6. CONCILIAR hasta que no aparezca nada nuevo y todos los dispositivos anotados hayan sincronizado. Una venta de un cliente que seguía en modo servidor, o
 --       anterior a la desactivación, queda transition_review: sin descuento, visible y sin cerrarse sola. Corregir el saldo con el conteo del modo local.
 -- REVERTIR EL ESQUEMA, recién después de D6 y con todos los locales en 'deactivated': stock_durability_rollback.sql. Con otro estado aborta.
+-- Toma sus locks antes de comprobar el estado y los conserva hasta el commit. Después de revertir no se puede reactivar sin reaplicar la migración.
 -- REACTIVAR: repetir desde el paso 4; el update a 'active' marca un corte nuevo. El saldo ya no es confiable sin conteo.
+-- Cada UPDATE de estado, en su transacción con espera acotada: begin; set local lock_timeout = '10s'; update ...; commit;
+-- Si vence, nada cambió: repetirlo. Mantener esa transacción abierta deja las ventas del local esperando, y a los 3 s fallan con 55P03 y se reintentan.
 --
 -- R-B2a: las fixtures técnicas no deben mover inventario. El ejecutor congelado manda prodId null (quedaría 'unresolved', sin descuento).
 -- Una fixture nueva con producto usa uno ilimitado. Correr R-B2a en un local sin activar evita además incidencias de prueba.
