@@ -106,6 +106,9 @@ set search_path = public
 as $$
 begin
   if tg_op = 'DELETE' then
+    if old.status = 'sales_paused' then -- también en cascada: el orden en que llega no tiene que importar
+      raise exception 'STOCK_SALES_PAUSED: pausa de mantenimiento de stock en este local' using errcode = '55000';
+    end if;
     if pg_trigger_depth() > 1 then return old; end if;
     raise exception 'STOCK_TRANSITION: un local no se desactiva borrando la fila; usar sales_paused y después deactivated';
   end if;
