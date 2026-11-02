@@ -2809,7 +2809,7 @@ function contextoVerificadoActual(){
   return v&&uid&&store&&v.user_id===uid&&v.store_id===store?{user_id:uid,store_id:store}:null;
 }
 const ventaFilaPendiente=r=>!!r&&!(r._sb_sale_id&&String(r._sb_sync_status||'')==='synced');
-const mesaPendiente=m=>!!m&&(!m._sb_id||!!m._syncing||!!m._close_pending||m.status==='close_pending'||m._sync_status==='partial_error');
+const mesaPendiente=m=>!!m&&!m._items_conflict&&(!m._sb_id||!!m._syncing||!!m._close_pending||m.status==='close_pending'||m._sync_status==='partial_error');
 const turnoPendiente=t=>!!(t&&t.abierto&&(!t._sb_id||t._sync_status==='pending'||t._sync_status==='error'));
 const colaPendiente=x=>!!x&&x.status!=='synced';
 function registroPendiente(rec,tipo){
@@ -4016,7 +4016,7 @@ async function resolverConflictoMesa(opcion){
   const revision=m._items_local_revision;
   const ok=await window.syncMesaToSupabase?.(m).catch(()=>false);
   const actual=findMesaByAnyId(m._sb_id||m.id)||m;
-  if(actual._items_local_revision===revision)actual._syncing=(!ok&&!actual._items_conflict)||!!actual._items_dirty;
+  if(actual._items_local_revision===revision)actual._syncing=!actual._items_conflict&&(!ok||!!actual._items_dirty);
   save();renderMesasSection();
   showToast(ok?'Quedó la versión de este dispositivo.':(m._items_conflict?'La mesa volvió a cambiar: revisala de nuevo.':'No pudimos guardar. Se reintenta solo.'));
   if(m._items_conflict)window.mostrarConflictoMesa(m);
@@ -4809,7 +4809,7 @@ function getCajaPendingOperationsCount(){
   const sales=window.findPendingSalesSyncGroups?.(ventas||[])?.length||0;
   const expenses=countPersistencePending(gastos,{localWhenNoRemoteId:true});
   const reservations=countPersistencePending(reservas,{localWhenNoRemoteId:true});
-  const tables=(mesas||[]).filter(m=>m&&((!m._sb_id)||m._syncing||m._close_pending||m.status==='close_pending'||m._sync_status==='partial_error')).length;
+  const tables=(mesas||[]).filter(m=>mesaPendiente(m)).length;
   const closures=(pendingOpenOrderClosures||[]).filter(x=>x&&x.status!=='synced').length;
   const itemSyncs=(pendingOpenOrderItemSyncs||[]).filter(x=>x&&x.status!=='synced').length;
   const shiftOpen=(turno&&turno.abierto&&(!turno._sb_id||turno._sync_status==='pending'||turno._sync_status==='error'))?1:0;
@@ -5278,7 +5278,7 @@ async function volverAMesas(){
       m._syncing=true;
       const revision=m._items_local_revision;
       save();syncMesasSheets();
-      window.syncMesaToSupabase?.(m).then(ok=>{const actual=findMesaByAnyId(m._sb_id||m.id)||m;if(actual._items_local_revision===revision)actual._syncing=!ok||!!actual._items_dirty;save();renderMesasSection();}).catch(()=>{const actual=findMesaByAnyId(m._sb_id||m.id)||m;actual._syncing=true;save();renderMesasSection();});
+      window.syncMesaToSupabase?.(m).then(ok=>{const actual=findMesaByAnyId(m._sb_id||m.id)||m;if(actual._items_local_revision===revision)actual._syncing=!actual._items_conflict&&(!ok||!!actual._items_dirty);save();renderMesasSection();}).catch(()=>{const actual=findMesaByAnyId(m._sb_id||m.id)||m;actual._syncing=!actual._items_conflict;save();renderMesasSection();});
     }
   }else if(mesaActivaId&&mesaActivaId.startsWith('reserva_')){
     const r=reservas.find(x=>x.id===mesaActivaId.replace('reserva_',''));if(r){r.pago=pago;r.payment_mode=paymentMode;r.pagos=paymentMode==='mixed'?getDraftMixedPayments():[];save();syncReservasSheets();}
@@ -5300,7 +5300,7 @@ function saveMesaCarrito(){
     window.syncMesaToSupabase?.(m)
       .then(ok=>{
         const actual=findMesaByAnyId(m._sb_id||m.id)||m;
-        if(actual._items_local_revision===revision)actual._syncing=(!ok&&!actual._items_conflict)||!!actual._items_dirty;
+        if(actual._items_local_revision===revision)actual._syncing=!actual._items_conflict&&(!ok||!!actual._items_dirty);
         save();
         if(ok) setTimeout(()=>window.triggerOORefresh?.('post_action'),300);
         // Otro dispositivo cambió la mesa mientras se editaba: se pregunta ya, no al cobrar.
@@ -5310,7 +5310,7 @@ function saveMesaCarrito(){
         }
         else if(window.getOpenOrdersSyncState?.()?.ready) showToast('No pudimos actualizar esta mesa. Reintentá.');
       })
-      .catch(()=>{const actual=findMesaByAnyId(m._sb_id||m.id)||m;actual._syncing=true;save();showToast('No pudimos actualizar esta mesa. Reintentá.');});
+      .catch(()=>{const actual=findMesaByAnyId(m._sb_id||m.id)||m;actual._syncing=!actual._items_conflict;save();showToast('No pudimos actualizar esta mesa. Reintentá.');});
   }
 }
 function findExistingReservationSaleRows(reservation){
@@ -5359,7 +5359,9 @@ async function cerrarMesaOReserva(){
   if(!items.length){showToast('El pedido está vacío');return;}
   const paymentState=getCurrentPaymentState();
   if(!paymentState.valido){showToast(paymentState.mensaje||'Revisá los pagos');return;}
-  const firmaSolicitada=firmaCarritoParaCobro();
+  const firmaSolicitada={firma:firmaCarritoParaCobro(),mesaId:mesaActivaId,items:JSON.parse(JSON.stringify(Object.values(carrito))),
+    descuento:descuentoTicket?JSON.parse(JSON.stringify(descuentoTicket)):null,paymentState:JSON.parse(JSON.stringify(paymentState)),contexto:firmaOperativa(),
+    estadoMesa:firmaEstadoMesaParaCobro(getCurrentVentaTarget())};
   const btn=$('btn-confirm');
   if(btn){btn.disabled=true;btn.textContent='Cargando…';}
   try{
@@ -5422,12 +5424,44 @@ async function confirmarOperadorCobroUnaVez(){
 const cobrosEnCurso=new Set();
 let ultimoOperadorCobro=null; // N-01: al reintentar un cobro que no quedó registrado se ofrece el mismo operador
 let confirmacionCobroSolicitada=null;
-function firmaCarritoParaCobro(){return JSON.stringify({carrito,descuentoTicket,paymentMode,pago,mixedPayments});}
+// Cada valor es una línea independiente. Orden de líneas y claves técnicas del refresh no alteran la venta.
+function firmaLineasParaCobro(items){
+  const canon=(v,clave='')=>{
+    if(Array.isArray(v)){
+      const lista=v.map(x=>canon(x));
+      return clave==='vars'?lista.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))):lista;
+    }
+    if(v&&typeof v==='object')return Object.fromEntries(Object.keys(v).filter(k=>k!=='_sb_item_id').sort().map(k=>[k,canon(v[k],k)]));
+    return v;
+  };
+  return JSON.stringify((items||[]).map(i=>JSON.stringify(canon(i))).sort());
+}
+function firmaEstadoMesaParaCobro(m){
+  if(!m)return '';
+  const mode=normalizePaymentMode(m.payment_mode,m.pagos);
+  return JSON.stringify({descuento:m.descuento||null,mode,pago:mode==='mixed'?'mixed':normalizeNewPaymentMethod(m.pago||'ef'),
+    pagos:mode==='mixed'?normalizeStoredPayments(m.pagos).sort((a,b)=>String(a.metodo).localeCompare(String(b.metodo))):[]});
+}
+function firmaCarritoParaCobro(){return JSON.stringify({lineas:firmaLineasParaCobro(Object.values(carrito)),descuentoTicket,paymentMode,pago,mixedPayments});}
 async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null){
   // El cobro corre después de elegir el operador: se vuelve a verificar el diario y la sesión del detalle antes de registrar la venta.
   if(operacionesBloqueadasPorDiario()||!edicionDelDetallePermitida())return;
-  const firmaConfirmada=firmaSolicitada||firmaCarritoParaCobro();
-  const carritoSigueConfirmado=()=>firmaCarritoParaCobro()===firmaConfirmada;
+  const solicitud=firmaSolicitada&&typeof firmaSolicitada==='object'?firmaSolicitada:null;
+  if(solicitud&&solicitud.contexto!==firmaOperativa())return;
+  const mesaOrigen=solicitud?.mesaId||mesaActivaId;
+  const itemsOrigen=solicitud?.items||JSON.parse(JSON.stringify(Object.values(carrito)));
+  const firmaConfirmada=solicitud?.firma||firmaSolicitada||firmaCarritoParaCobro();
+  const firmaItemsOrigen=firmaLineasParaCobro(itemsOrigen);
+  const estadoMesaOrigen=solicitud?.estadoMesa||firmaEstadoMesaParaCobro(getCurrentVentaTarget());
+  const carritoSigueConfirmado=()=>{
+    const reserva=String(mesaOrigen||'').startsWith('reserva_');
+    const origen=reserva?reservas.find(r=>String(r.id)===String(mesaOrigen).slice(8)):findMesaByAnyId(mesaOrigen);
+    const vistaOrigen=String(mesaActivaId||'')===String(mesaOrigen)||(!reserva&&origen&&findMesaByAnyId(mesaActivaId)===origen);
+    if(vistaOrigen&&firmaCarritoParaCobro()!==firmaConfirmada)return false;
+    if(reserva&&vistaOrigen)return true; // los cambios de la reserva abierta viven en carrito hasta confirmar el cobro
+    return !!origen&&firmaLineasParaCobro(reserva?(origen.items||[]):Object.values(origen.items||{}))===firmaItemsOrigen
+      &&firmaEstadoMesaParaCobro(origen)===estadoMesaOrigen;
+  };
   if(!carritoSigueConfirmado()){
     showToast('El pedido cambió mientras preparábamos el cobro. Revisá cantidades y total antes de volver a cobrar.');
     return;
@@ -5436,9 +5470,9 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null)
   // registrar venta ni tocar turno, stock, mesa o pantalla: la mesa queda como estaba para que su cuenta la retome.
   const sigueElContexto=mientrasSigaElContexto();
   const otroContexto=()=>{if(sigueElContexto())return false;console.warn('[F0B] El cobro empezó en otra sesión o local: se descarta sin registrar nada');return true;};
-  const esReserva=mesaActivaId&&mesaActivaId.startsWith('reserva_');
+  const esReserva=String(mesaOrigen||'').startsWith('reserva_');
   // mesaActivaId cambia si el cajero abre otra mesa mientras este cobro espera la red: el cobro usa su propia copia.
-  let mesaId=mesaActivaId;
+  let mesaId=mesaOrigen;
   // Un cobro por mesa/reserva a la vez; mesas distintas no se bloquean entre sí.
   // El candado cubre TODAS las identidades de la mesa: la sync cambia el id local por el remoto en medio del cobro
   // (y el refresh puede reemplazar el objeto), así que una reapertura llega con otro id que debe seguir bloqueado.
@@ -5448,11 +5482,10 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null)
   if([...cobroKeys].some(k=>cobrosEnCurso.has(k))){showToast('Este cobro ya se está procesando. Esperá la confirmación.');return;}
   const bloquear=ids=>ids.forEach(k=>{cobroKeys.add(k);cobrosEnCurso.add(k);});
   bloquear([...cobroKeys]);
-  const items=JSON.parse(JSON.stringify(Object.values(carrito)));
+  const items=JSON.parse(JSON.stringify(itemsOrigen));
   // Lo cobrado sale de esta foto: mostrado, pagos, líneas de la venta y cierre usan el mismo resumen.
-  const descTicketCobro=descuentoTicket,resumen=resumenCobro(items,descTicketCobro);
+  const descTicketCobro=solicitud?solicitud.descuento:descuentoTicket,resumen=resumenCobro(items,descTicketCobro);
   const btn=$('btn-confirm');btn.disabled=true;btn.textContent='Cerrando…';
-  const reservasBeforeCobro=esReserva?cloneReservasState():null;
   let reservaOptimisticHidden=null;
   let ventaLocalCreada=false;
   let mesaClosePending=false;
@@ -5467,8 +5500,13 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null)
   };
   const cobro=(async()=>{try{
       const totalVenta=resumen.total;
-      const paymentState=getCurrentPaymentState(totalVenta);
+      const paymentState=solicitud?solicitud.paymentState:getCurrentPaymentState(totalVenta);
       if(!paymentState.valido){showToast(paymentState.mensaje||'Revisá los pagos');return;}
+      const pedidoVigente=()=>{
+        if(carritoSigueConfirmado())return true;
+        showToast('El pedido cambió durante el cobro. No se registró ninguna venta; revisá cantidades y total.');
+        return false;
+      };
       // ── Anti-double-cobro: verificar que la mesa siga abierta en Supabase ──
       // El cobro conserva la mesa que verificó: un refresh puede sacarla de `mesas` en medio y la venta no debe quedar sin su open_order.
       let mesaCobro=null;
@@ -5476,7 +5514,8 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null)
         const mesaChk=mesaCobro=findMesaByAnyId(mesaId);
         if(!mesaChk){showToast('No pudimos cargar esta mesa. Reintentá.');return;}
         if(!mesaChk?._sb_id){
-          mesaChk.items=JSON.parse(JSON.stringify(carrito));
+          if(!pedidoVigente())return;
+          mesaChk.items=JSON.parse(JSON.stringify(itemsOrigen));
           mesaChk.pago=paymentState.pago;
           mesaChk.payment_mode=paymentState.payment_mode;
           mesaChk.pagos=paymentState.pagos;
@@ -5487,6 +5526,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null)
           // La sync ya asignó el id remoto: se suma al candado antes del próximo await.
           bloquear(idsDeMesa(mesaChk));
           if(otroContexto())return;
+          if(!pedidoVigente())return;
           if(synced&&mesaChk._sb_id){
             const openOrderId=getMesaOpenOrderId(mesaChk);
             // Solo se renombra el detalle de este cobro si sigue abierto: tras un cambio de sesión (detalle cerrado) no se reabre.
@@ -5503,9 +5543,11 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null)
         if(mesaChk?._sb_id&&window.mesaItemsVersionadoActivo?.()){
           // Con ítems versionados la mesa se guarda antes de cobrar: si cambió en otro dispositivo, el cobro se frena
           // y se ofrece resolver el conflicto (nunca se cobra una versión vieja de la mesa).
-          mesaChk.items=JSON.parse(JSON.stringify(carrito));
+          if(!pedidoVigente())return;
+          mesaChk.items=JSON.parse(JSON.stringify(itemsOrigen));
           const guardada=await cajaWithTimeout(window.syncMesaToSupabase(mesaChk,{cobroVivo:()=>!cobroTerminado}),'sync_items_before_payment',12000).catch(()=>false);
           if(otroContexto())return;
+          if(!pedidoVigente())return;
           if(!guardada){
             if(mesaChk._items_conflict){showToast('La mesa cambió en otro dispositivo. Revisala antes de cobrar.');window.mostrarConflictoMesa?.(mesaChk);}
             else showToast('No pudimos verificar esta mesa. Reintentá antes de cobrar.');
@@ -5580,10 +5622,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null)
       if(!esReserva&&!_openOrderSbId){showToast('No pudimos verificar esta mesa. Reintentá antes de cobrar.');return;}
       // Una edición o una lectura tardía puede ocurrir durante las esperas de mesa y operador.
       // El snapshot que se vende debe seguir siendo el pedido que el cajero confirmó.
-      if(!carritoSigueConfirmado()){
-        showToast('El pedido cambió durante el cobro. No se registró ninguna venta; revisá cantidades y total.');
-        return;
-      }
+      if(!pedidoVigente())return;
       // Si la mesa ya tiene una venta local sin confirmar, se reenvía ese mismo ticket: un reintento nunca crea otra venta.
       const ventaPendiente=findMesaSaleRows(_openOrderSbId).filter(v=>v._sb_sync_status!=='synced');
       // Solo se reenvía si es exactamente el mismo cobro; si no, se frena para no registrar algo distinto a lo cobrado.
@@ -5638,7 +5677,7 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null)
           for(let i=ventas.length-1;i>=0;i--)if(ids.has(ventas[i]?.id))ventas.splice(i,1);
           if(turnoActivo)turnoActivo.ventasIds=ventasIdsAntes;
         }
-        if(esReserva&&reservaOptimisticHidden&&reservasBeforeCobro){reservas=reservasBeforeCobro;clearReservationHidden(reservaOptimisticHidden);renderReservasSection();}
+        if(esReserva&&reservaOptimisticHidden){clearReservationHidden(reservaOptimisticHidden);renderReservasSection();}
         try{save();}catch(_){}
         ultimoOperadorCobro={mesa:String(mesaId),op:operadorCobro||''};
         showToast('El cobro NO quedó registrado: no hay espacio en este dispositivo para guardarlo. La mesa y el pedido siguen igual; liberá espacio y volvé a cobrar.',8000);
@@ -5666,11 +5705,6 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null)
           open_order_id:_openOrderSbId,
           reservation_id:reservaActiva?._sb_id||reservaActiva?.id||null
         });
-        if(esReserva&&reservaOptimisticHidden&&reservasBeforeCobro){
-          reservas=reservasBeforeCobro;
-          clearReservationHidden(reservaOptimisticHidden);
-          save();renderReservasSection();
-        }
         // La venta ya está guardada en el dispositivo: nunca pedir que se vuelva a cobrar.
         // Con código de PostgREST el servidor la rechazó; sin código (red, timeout, read-back) no sabemos si llegó.
         // 23505 (unique) significa que la venta ya existe en el servidor: no es un rechazo.
@@ -5754,6 +5788,10 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null)
       }
       volverALista();
   }finally{
+    if(esReserva&&reservaOptimisticHidden&&!ventaLocalCreada&&sigueElContexto()){
+      clearReservationHidden(reservaOptimisticHidden);
+      renderReservasSection();
+    }
     // El candado se libera cuando el cobro termina de verdad, no cuando vence la espera de la UI.
     // Todas las esperas internas tienen timeout, así que este punto siempre llega.
     cobroTerminado=true;
@@ -5771,11 +5809,6 @@ async function ejecutarCobro(operadorCobro,operatorIdCobro,firmaSolicitada=null)
     if(!cobroTerminado){
       showToast('El cobro sigue procesándose. No lo cobres de nuevo: te avisamos cuando se confirme.');
       return;
-    }
-    if(esReserva&&reservaOptimisticHidden&&!ventaLocalCreada&&reservasBeforeCobro){
-      reservas=reservasBeforeCobro;
-      clearReservationHidden(reservaOptimisticHidden);
-      save();renderReservasSection();
     }
     showToast(ventaLocalCreada
       ?'La venta ya quedó registrada en este dispositivo. No la cobres de nuevo; si figura pendiente, se sincroniza sola.'
@@ -7882,7 +7915,7 @@ if(config.webappUrl){loadFromSheets();}
       ops.push({type:'venta',operation:'save_sale',status:window.getGroupSyncMeta?.(group)?.status||'pending',label:getStableSaleLegacyId?.(group)||'Venta pendiente',idempotency_key:getStableSaleLegacyId?.(group)||'',attempts:Math.max(...(group.rows||[]).map(r=>Number(r._sb_retry_count)||0),0),last_error:(group.rows||[]).map(r=>r._sb_sync_error).filter(Boolean).join(' | '),error_code:(group.rows||[]).map(r=>r._sb_sync_error_code).find(Boolean)||'',payload:{rows:(group.rows||[]).length,total:money2(group.total)}});
     });
     const pendingMesaKeys=new Set();
-    (mesas||[]).filter(m=>m&&((!m._sb_id)||m._syncing||m._sync_status==='partial_error')&&origenEnviable(m,'mesa')).forEach(m=>{
+    (mesas||[]).filter(m=>m&&!m._items_conflict&&((!m._sb_id)||m._syncing||m._sync_status==='partial_error')&&origenEnviable(m,'mesa')).forEach(m=>{
       [m.id,m._sb_id,m.open_order_id,m.legacy_local_id].map(v=>String(v||'')).filter(Boolean).forEach(key=>pendingMesaKeys.add(key));
       ops.push({type:'mesa',operation:m._sb_id?'sync_open_order_items':'create_open_order',status:m._sync_status||'pending',created_at:m._sync_started_at||m.apertura||'',label:m.nombre||'Mesa',idempotency_key:`open_order:${m.legacy_local_id||m.id}`,attempts:0,last_error:m._sync_error||m._lastSyncError||'',payload:{id:m.id,_sb_id:m._sb_id,items:Object.keys(m.items||{}).length}});
     });
@@ -7928,7 +7961,7 @@ if(config.webappUrl){loadFromSheets();}
     const pendingSales=window.findPendingSalesSyncGroups?.(ventas||[])?.length||0;
     const pendingExpenses=countPersistencePending(gastos,{localWhenNoRemoteId:true});
     const pendingReservations=countPersistencePending(reservas,{localWhenNoRemoteId:true});
-    const pendingTables=(mesas||[]).filter(m=>m&&((!m._sb_id)||m._syncing)).length;
+    const pendingTables=(mesas||[]).filter(m=>m&&!m._items_conflict&&((!m._sb_id)||m._syncing)).length;
     const pendingShift=(turno&&turno.abierto&&(!turno._sb_id||turno._sync_status==='pending'||turno._sync_status==='error'))?1:0;
     const pendingOpenOrderClosuresCount=(pendingOpenOrderClosures||[]).filter(x=>x&&x.status!=='synced').length;
     const pendingOpenOrderItemsCount=(pendingOpenOrderItemSyncs||[]).filter(x=>x&&x.status!=='synced').length;
@@ -9863,7 +9896,7 @@ if(config.webappUrl){loadFromSheets();}
 
   function retryPendingOpenOrderWrites({reason='auto'}={}){
     if(ooPendingWriteRetryPromise)return ooPendingWriteRetryPromise;
-    const initialTables=(mesas||[]).filter(m=>m&&((!m._sb_id)||m._syncing||m._sync_status==='partial_error')).length;
+    const initialTables=(mesas||[]).filter(m=>mesaPendiente(m)).length;
     const initialItems=(pendingOpenOrderItemSyncs||[]).filter(entry=>entry&&entry.status!=='synced').length;
     const initialTotal=initialTables+initialItems;
     if(!initialTotal)return Promise.resolve({ok:true,reason:'empty',total:0,synced:0,failed:0});
@@ -9871,7 +9904,7 @@ if(config.webappUrl){loadFromSheets();}
     ooPendingWriteRetryPromise=(async()=>{
       await window.retryPendingOpenOrdersSync?.({silent:true});
       await window.retryPendingOpenOrderItemSyncs?.({silent:true});
-      const remainingTables=(mesas||[]).filter(m=>m&&((!m._sb_id)||m._syncing||m._sync_status==='partial_error')).length;
+      const remainingTables=(mesas||[]).filter(m=>mesaPendiente(m)).length;
       const remainingItems=(pendingOpenOrderItemSyncs||[]).filter(entry=>entry&&entry.status!=='synced').length;
       const remaining=remainingTables+remainingItems;
       ooTechLog('pending writes retry',{reason,remainingTables,remainingItems});

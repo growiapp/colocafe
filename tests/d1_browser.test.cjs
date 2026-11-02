@@ -104,8 +104,8 @@ test('D1: five visible units survive an in-flight stale table refresh and immedi
         {id:'c',product_id:'prod-test',quantity:1,unit_price:100,variants:[{nombre:'grande',precio:20}],metadata:{prodId:'prod-test'}},
         {id:'d',product_id:'prod-test',quantity:1,unit_price:100,variants:[{nombre:'chico',precio:0}],metadata:{prodId:'prod-test'}}
       ]);
-      mesas=[{id:'mesa-edit',_sb_id:'mesa-edit',open_order_id:'mesa-edit',nombre:'Mesa edit',tipo:'salon',items:{},_items_version:1}];
       mesaActivaId='mesa-edit';carrito={'prod-test_plain':{prodId:'prod-test',qty:1,vars:[],nota:'',precio:100}};
+      mesas=[{id:'mesa-edit',_sb_id:'mesa-edit',open_order_id:'mesa-edit',nombre:'Mesa edit',tipo:'salon',items:JSON.parse(JSON.stringify(carrito)),_items_version:1}];
       $('view-pedido').style.display='block';
       const releases=[];
       window.syncMesaToSupabase=()=>new Promise(resolve=>releases.push(resolve));
@@ -144,8 +144,8 @@ test('D1: five visible units survive an in-flight stale table refresh and immedi
       for(let i=0;i<100&&mesas[0]._items_dirty;i++)await new Promise(resolve=>setTimeout(resolve,0));
       const delayedRpc={firstQty,secondQty,afterOldResponse,finalDirty:mesas[0]._items_dirty,
         finalQty:mesas[0].items['prod-test_plain']?.qty,version:mesas[0]._items_version};
-      mesas.push({id:'mesa-retry',_sb_id:'mesa-retry',open_order_id:'mesa-retry',nombre:'Mesa retry',tipo:'salon',items:{},_items_version:1});
       mesaActivaId='mesa-retry';carrito={'prod-test_plain':{prodId:'prod-test',qty:2,vars:[],nota:'',precio:100}};
+      mesas.push({id:'mesa-retry',_sb_id:'mesa-retry',open_order_id:'mesa-retry',nombre:'Mesa retry',tipo:'salon',items:JSON.parse(JSON.stringify(carrito)),_items_version:1});
       ventas.push({id:'v-old',ticket_id:'t-old',mesa:'Mesa retry',_source_kind:'mesa',_open_order_sb_id:'mesa-retry',
         _sb_sync_status:'pending',prodId:'prod-test',cantidad:1,variantes:'',nota:'',precioBase:100,precioVars:0,total:100,pagos:[]});
       window.syncMesaToSupabase=async()=>true;
@@ -157,8 +157,8 @@ test('D1: five visible units survive an in-flight stale table refresh and immedi
       async function pendingContextChange(kind){
         config.activeStoreId='store-test';activeUser='user-test';
         const id=`mesa-${kind}`;
-        mesas.push({id,_sb_id:id,open_order_id:id,nombre:id,tipo:'salon',items:{},_items_version:1});
         mesaActivaId=id;carrito={'prod-test_plain':{prodId:'prod-test',qty:1,vars:[],nota:'',precio:100}};
+        mesas.push({id,_sb_id:id,open_order_id:id,nombre:id,tipo:'salon',items:JSON.parse(JSON.stringify(carrito)),_items_version:1});
         let release;
         window.syncMesaToSupabase=()=>new Promise(resolve=>{release=resolve;});
         renderCart();
