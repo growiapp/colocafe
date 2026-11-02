@@ -75,6 +75,8 @@ function createDb(initial=completeRows(),options={}){
         return {data:single?(found[0]||null):found,error:null};
       }
       if(op==='insert'){
+        const rejected=options.rejectInsert?.(table);
+        if(rejected)return {data:null,error:rejected};
         const conflict=options.insertError;
         if(conflict)return {data:null,error:{code:'23505',message:`duplicate key value violates unique constraint "${conflict}"`}};
         // Como el esquema: únicos (store_id, legacy_id) en las tres tablas y los CHECK de cantidad e importe.
@@ -212,6 +214,37 @@ test('respuesta perdida tras el último INSERT: el reintento solo lee y conserva
   assert.equal(db.rows.sale_payments.length,1);
   assert.equal(marks.at(-1).status,'synced');
 });
+
+// Stock Durability: durante una pausa el servidor rechaza con 55000, y una espera vencida da 55P03. Para R-B2a son errores comunes.
+for(const code of ['55000','55P03']){
+  const rechazo={code,message:'STOCK_SALES_PAUSED: ventas en pausa'};
+  test(`corte de stock (${code}): cabecera rechazada queda en error, sin marcar; levantada la pausa se completa una vez`,async()=>{
+    let pausa=true;
+    const db=createDb(emptyRows(),{rejectInsert:()=>pausa?rechazo:null}),{ctx,marks}=harness(current,db);
+    await assert.rejects(ctx.saveSaleGroupToSupabase(group),err=>err.code===code);
+    assert.equal(marks.at(-1).status,'error');
+    assert.deepEqual([db.rows.sales.length,db.rows.sale_items.length,db.rows.sale_payments.length],[0,0,0]);
+    pausa=false;
+    assert.equal((await ctx.saveSaleGroupToSupabase(group)).ok,true);
+    assert.equal(marks.at(-1).status,'synced');
+    assert.deepEqual([db.rows.sales.length,db.rows.sale_items.length,db.rows.sale_payments.length],[1,1,1]);
+    assert.equal((await ctx.saveSaleGroupToSupabase(group)).ok,true);
+    assert.deepEqual([db.rows.sales.length,db.rows.sale_items.length,db.rows.sale_payments.length],[1,1,1]);
+  });
+  test(`corte de stock (${code}): cabecera anterior e ítem rechazado queda partial_error; el reintento agrega solo lo que falta`,async()=>{
+    let pausa=true;
+    const rows=completeRows();rows.sale_items=[];rows.sale_payments=[];
+    const db=createDb(rows,{rejectInsert:table=>pausa&&table==='sale_items'?rechazo:null}),{ctx,marks}=harness(current,db);
+    await assert.rejects(ctx.saveSaleGroupToSupabase(group),err=>err.code===code);
+    assert.equal(marks.at(-1).status,'partial_error');
+    assert.deepEqual([db.rows.sales.length,db.rows.sale_items.length],[1,0]);
+    pausa=false;
+    assert.equal((await ctx.saveSaleGroupToSupabase(group)).ok,true);
+    assert.equal(marks.at(-1).status,'synced');
+    assert.deepEqual([db.rows.sales.length,db.rows.sale_items.length,db.rows.sale_payments.length],[1,1,1]);
+    assert.equal(writes(db).filter(x=>x.table==='sales').length,0,'no toca la cabecera');
+  });
+}
 
 test('un 23505 al completar el detalle deja la venta pendiente y no actualiza nada',async()=>{
   const rows=completeRows();rows.sale_items=[itemRow({id:'otro',sale_id:'otra_venta'})];

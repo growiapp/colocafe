@@ -697,7 +697,7 @@ test('hallazgo 3, migración: ni la metadata ni sold_at solo clasifican; la rece
   const sql = readFileSync(path.join(repo, 'stock_durability.sql'), 'utf8');
   const apply = sql.match(/function public\.sale_items_stock_apply\(\)[\s\S]*?\$\$;/)[0];
   assert.doesNotMatch(apply, /stock_cut_seen/);
-  assert.doesNotMatch(apply, /v_sold\s*[<>]\s*v_cut/, 'sold_at nunca se compara solo contra el corte');
+  assert.doesNotMatch(apply, /(if|elsif) v_sold\s*[<>]/, 'sold_at nunca decide solo contra el corte');
   assert.doesNotMatch(apply.replace(/new\.metadata->>'stock_client_mode' = 'server' or[^\n]*/, ''), /new\.metadata/, 'la metadata solo puede sumar revisión');
   assert.match(apply, /v_sold not between v_created - interval '5 minutes' and v_created \+ interval '5 minutes'/);
   assert.match(sql.match(/function public\.sales_stock_guard\(\)[\s\S]*?\$\$;/)[0], /new\.created_at := old\.created_at/);
@@ -750,13 +750,80 @@ test('hallazgo 2, migración y rollback: nada apaga el modelo sin pasar por la p
   assert.doesNotMatch(guard, /old\.status = 'active' and new\.status = 'deactivated'/);
   assert.match(guard, /tg_op = 'DELETE'[\s\S]*raise exception 'STOCK_TRANSITION/);
   assert.match(sql.match(/function public\.sale_items_stock_prepare\(\)[\s\S]*?\$\$;/)[0], /STOCK_SALES_PAUSED/);
-  assert.match(sql.match(/function public\.sales_stock_guard\(\)[\s\S]*?\$\$;/)[0], /STOCK_SALES_PAUSED/);
+  assert.match(sql.match(/function public\.sales_stock_gate\(\)[\s\S]*?\$\$;/)[0], /STOCK_SALES_PAUSED/);
   const rollback = readFileSync(path.join(repo, 'stock_durability_rollback.sql'), 'utf8');
   assert.match(rollback, /status <> 'deactivated'[\s\S]*raise exception 'STOCK_ROLLBACK/);
   assert.ok(rollback.indexOf("raise exception 'STOCK_ROLLBACK") < rollback.indexOf('drop trigger'), 'aborta antes de tocar nada');
   assert.doesNotMatch(rollback, /drop table/i);
   const plan = readFileSync(path.join(repo, 'stock_activation.sql'), 'utf8');
   assert.match(plan, /STOP GATE/);
+});
+
+test('bloqueo 3: recepción y sold_at a lados opuestos del corte nunca deciden; lo seguro se conserva', () => {
+  const sql = readFileSync(path.join(repo, 'stock_durability.sql'), 'utf8');
+  const apply = sql.match(/function public\.sale_items_stock_apply\(\)[\s\S]*?\$\$;/)[0];
+  const order = ["v_sold not between v_created - interval '5 minutes' and v_created + interval '5 minutes'", 'v_created < v_cut and v_sold < v_cut', "v_created >= v_cut + interval '5 minutes'"];
+  order.reduce((prev, text) => { const at = apply.indexOf(text); assert.ok(at > prev, text); return at; }, -1);
+  // La misma regla evaluada: el caso del hallazgo y su espejo.
+  const M = 5 * 60 * 1000, min = 60 * 1000;
+  const clasifica = (created, sold, cut) => Math.abs(sold - created) > M ? 'count_review' : created < cut && sold < cut ? 'before_count' : created >= cut + M ? 'applied' : 'count_review';
+  const body = apply.slice(apply.indexOf('v_sold not between'), apply.indexOf("if v_reason = 'applied'"));
+  assert.match(body, /count_review[\s\S]*before_count[\s\S]*applied[\s\S]*count_review/);
+  assert.equal(clasifica(0, 2 * min, min), 'count_review', 'cabecera 12:00, conteo 12:01, sold_at 12:02');
+  assert.equal(clasifica(2 * min, 0, min), 'count_review', 'cabecera posterior, venta declarada anterior');
+  assert.equal(clasifica(0, 0, min), 'before_count', 'parcial con cabecera y sold_at anteriores');
+  assert.equal(clasifica(10 * min, 10 * min, min), 'applied');
+  assert.equal(clasifica(0, min, min), 'count_review', 'sold_at justo en el corte');
+  assert.equal(clasifica(6 * min, 0, min), 'count_review', 'recepción lejana y sold_at anterior');
+});
+
+test('bloqueo 2: ventas, compensaciones y ajustes sostienen el lock de la activación, y lo toman antes que el del producto', () => {
+  const sql = readFileSync(path.join(repo, 'stock_durability.sql'), 'utf8');
+  const fn = name => sql.match(new RegExp(`function public\\.${name}\\([\\s\\S]*?\\$\\$;`))[0];
+  for (const name of ['sale_items_stock_prepare', 'sale_items_stock_apply', 'sale_items_stock_compensate', 'stock_apply_adjustment', 'sales_stock_gate']) {
+    const body = fn(name);
+    const at = body.indexOf('for share');
+    assert.ok(at > 0, `${name} no toma el lock`);
+    assert.match(body, /security definer/, `${name}: FOR SHARE necesita ser definer`);
+    const product = body.indexOf('for no key update');
+    if (product > 0) assert.ok(at < product, `${name}: orden de locks`);
+    assert.doesNotMatch(body, /\bfor update\b/, `${name}: FOR UPDATE choca con la FK de una venta concurrente`);
+  }
+  assert.doesNotMatch(sql.replace(/^--.*$/gm, ''), /\bfor update\b/);
+  assert.match(fn('products_stock_gate'), /for share nowait/);
+  assert.doesNotMatch(fn('products_stock_guard'), /sales_paused'\s*then/);
+  assert.match(sql, /create trigger products_stock_gate before update on public\.products\s+for each row when \(new\.stock is distinct from old\.stock\)/);
+  assert.ok('products_stock_gate' < 'products_stock_guard', 'los BEFORE corren por orden de nombre');
+  assert.match(fn('sale_items_stock_prepare'), /set lock_timeout = '3s'/);
+  assert.match(fn('sales_stock_gate'), /set lock_timeout = '3s'/);
+});
+
+test('bloqueo 2: en la pausa, un borrado que debe devolver stock se rechaza; lo anterior al corte no', () => {
+  const sql = readFileSync(path.join(repo, 'stock_durability.sql'), 'utf8');
+  const comp = sql.match(/function public\.sale_items_stock_compensate\(\)[\s\S]*?\$\$;/)[0];
+  const rejects = comp.indexOf("v_status = 'sales_paused' and old.stock_applied_at > greatest(v_counted, v_activated)");
+  assert.ok(rejects > 0 && rejects < comp.indexOf('delete_no_compensation'), 'rechaza antes de escribir el registro');
+  assert.match(comp.slice(rejects), /^[^\n]*\n\s*raise exception 'STOCK_SALES_PAUSED[^\n]*errcode = '55000'/);
+  const guard = sql.match(/function public\.stock_store_activation_guard\(\)[\s\S]*?\$\$;/)[0];
+  assert.ok(guard.indexOf("old.status = 'sales_paused'") < guard.indexOf('pg_trigger_depth() > 1'), 'borrar el local en pausa tampoco pasa, sea cual sea el orden de la cascada');
+});
+
+test('bloqueo 2: el rollback toma sus locks antes del precheck, y sin triggers impide reactivar', () => {
+  const rollback = readFileSync(path.join(repo, 'stock_durability_rollback.sql'), 'utf8').replace(/^--.*$/gm, '');
+  const lock = rollback.indexOf('lock table public.stock_store_activation in share row exclusive mode');
+  const tables = rollback.indexOf('lock table public.sales, public.sale_items, public.products in access exclusive mode');
+  const precheck = rollback.indexOf("status <> 'deactivated'");
+  const drop = rollback.indexOf('drop trigger');
+  assert.ok(lock > 0 && lock < tables && tables < precheck && precheck < drop);
+  assert.ok(rollback.indexOf('add constraint stock_store_activation_rolled_back') > drop);
+  assert.equal(rollback.match(/\bcommit;/g).length, 1, 'una sola transacción: los locks duran hasta el final');
+  const sql = readFileSync(path.join(repo, 'stock_durability.sql'), 'utf8');
+  assert.match(sql, /drop constraint if exists stock_store_activation_rolled_back/, 'reaplicar la migración permite reactivar');
+});
+
+test('bloqueo 2: el guion SQL cubre cada escenario pedido', () => {
+  const repro = readFileSync(path.join(repo, 'stock_durability_concurrency_test.sql'), 'utf8');
+  for (const caso of ['Caso 8b', 'Caso 8c', 'Caso 8d', 'Caso 8e', 'Caso 8f', 'Caso 8g', 'Caso 8h', 'Caso 8i', 'Caso 8j', 'Caso 8k', 'Caso 8l', 'Caso 13', 'Caso 14', 'Caso 15']) assert.ok(repro.includes(caso), caso);
 });
 
 test('hallazgo 1, migración: un cliente no cambia store_id, y la guarda corre antes de mirar el saldo', () => {
@@ -776,11 +843,11 @@ test('hallazgo 4, migración: las marcas de movimiento no usan now(), y se toman
     assert.doesNotMatch(fn(name), /\bnow\(\)/, name);
   }
   const apply = fn('sale_items_stock_apply');
-  assert.ok(apply.indexOf('for update') < apply.indexOf('stock_applied_at = clock_timestamp()'));
+  assert.ok(apply.indexOf('for no key update') > 0 && apply.indexOf('for no key update') < apply.indexOf('stock_applied_at = clock_timestamp()'));
   const adj = fn('stock_apply_adjustment');
-  assert.ok(adj.indexOf('for update') < adj.indexOf('then clock_timestamp()'));
+  assert.ok(adj.indexOf('for no key update') > 0 && adj.indexOf('for no key update') < adj.indexOf('then clock_timestamp()'));
   const comp = fn('sale_items_stock_compensate');
-  assert.ok(comp.indexOf('for update') < comp.indexOf('old.stock_applied_at <= greatest'), 'el corte se lee ya con el lock');
+  assert.ok(comp.indexOf('for no key update') > 0 && comp.indexOf('for no key update') < comp.indexOf('old.stock_applied_at <= greatest'), 'el corte se lee ya con el lock');
   const repro = readFileSync(path.join(repo, 'stock_durability_concurrency_test.sql'), 'utf8');
   assert.match(repro, /Caso 10[\s\S]*Caso 11[\s\S]*Caso 12/);
 });
