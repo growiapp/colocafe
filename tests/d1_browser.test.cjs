@@ -97,6 +97,8 @@ test('D1: five visible units survive an in-flight stale table refresh and immedi
       releaseOperators([]);
       await opened;
       await ejecutarCobro('Test operator','operator-test');
+      const receiptAfterConfirmedSale=document.getElementById('modal-comprobante')?.classList.contains('open')===true&&/Cobro realizado/.test(document.getElementById('modal-comprobante').innerText);
+      document.getElementById('modal-comprobante')?.classList.remove('open');
       const firstPersistedRows=persistedRows;
       const distinctLines=window.ooItemsDesdeFilas([
         {id:'a',product_id:'prod-test',quantity:1,unit_price:100,variants:[],note:'sin azúcar',metadata:{prodId:'prod-test'}},
@@ -116,7 +118,7 @@ test('D1: five visible units survive an in-flight stale table refresh and immedi
       addItem('prod-test');
       releases.forEach(release=>release(true));
       await payment;
-      const duringSync={paymentSyncStarted,visible:carrito['prod-test_plain']?.qty||0,
+      const duringSync={receiptWhenRefused:document.getElementById('modal-comprobante')?.classList.contains('open')===true,paymentSyncStarted,visible:carrito['prod-test_plain']?.qty||0,
         persisted:ventas.filter(v=>v.mesa==='Mesa edit').length,toast:$('toast').textContent};
       // Exercise the real per-table queue and versioned RPC with a delayed first response.
       const rpcCalls=[];
@@ -179,7 +181,7 @@ test('D1: five visible units survive an in-flight stale table refresh and immedi
         persisted:ventas.filter(v=>v.mesa==='Mesa test').map(v=>v.cantidad),
         total:ventas.filter(v=>v.mesa==='Mesa test').reduce((n,v)=>n+v.total,0),
         persistedTotal:firstPersistedRows.reduce((n,v)=>n+v.total,0),
-        distinctLineCount:Object.keys(distinctLines).length,duringSync,delayedRpc,partialRetry,changedUserSales,changedStoreSales};
+        distinctLineCount:Object.keys(distinctLines).length,receiptAfterConfirmedSale,duringSync,delayedRpc,partialRetry,changedUserSales,changedStoreSales};
     }, {syncSource:sourceOf('syncActiveOpenOrderView'),shouldPreserveSource:sourceOf('ooShouldPreserveLocal'),mergeSource:sourceOf('ooMergeRemoteWithPending')});
     assert.equal(result.visibleAtClick, 5);
     assert.equal(result.localAtClick, 5);
@@ -191,6 +193,8 @@ test('D1: five visible units survive an in-flight stale table refresh and immedi
     assert.equal(result.total, 500);
     assert.equal(result.persistedTotal, 500);
     assert.equal(result.distinctLineCount, 4);
+    assert.equal(result.receiptAfterConfirmedSale, true, 'el comprobante aparece solo tras una venta confirmada');
+    assert.equal(result.duringSync.receiptWhenRefused, false, 'un cobro rechazado no muestra comprobante');
     assert.equal(result.duringSync.paymentSyncStarted, true);
     assert.equal(result.duringSync.visible, 2);
     assert.equal(result.duringSync.persisted, 0, JSON.stringify(result.duringSync));
