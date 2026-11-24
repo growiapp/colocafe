@@ -2274,6 +2274,79 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 #tab-dashboard .kpi .kpi-val{font:700 17px 'DM Sans',sans-serif;text-align:right;color:var(--ink)}
 #tab-dashboard .kpi>:nth-child(n+3){grid-column:1/-1;font-size:12px;color:var(--ink2)}
 .kpi .kpi-lbl{color:var(--ink2)!important}
+
+/* Mesa: filas compactas como V2 */
+.cart-row{padding:8px 0;gap:0 8px}
+.cart-row .qty-wrap{border-radius:8px}
+.qty-wrap .qty-btn{height:34px;min-width:28px;width:28px}
+.qty-wrap input.qty-n{width:26px;font-size:14px}
+.cart-row>.qty-btn{width:24px;height:24px;font-size:16px}
+.cart-row .c-sub{font-size:15px}
+.cart-row .c-name{font-size:14px;line-height:1.25}
+.cart-row .c-desc:not(.on){display:none}
+.cart-row:hover .c-desc,.cart-row:focus-within .c-desc{display:inline-block}
+.cart-desglose{margin-top:6px}
+#view-pedido .carga-right .carrito-wrap{padding:18px 18px 20px}
+#view-pedido .carga-left>div:first-child #mesa-titulo,#view-pedido .carga-left>div:first-child #mesa-tipo-badge{align-self:end}
+#view-pedido .carga-left>div:first-child .back{font-size:16px;font-weight:700}
+
+/* Gastos como V2 */
+.gasto-top{display:flex;align-items:center;justify-content:space-between;margin:6px 0 14px;font-size:15px;color:var(--ink)}
+.gasto-top .btn-save{min-height:44px;padding:0 20px}
+#gastos-lista .gasto-row{display:grid;grid-template-columns:64px minmax(0,1fr) auto;align-items:center;gap:0 14px;background:var(--surf);border-radius:0;box-shadow:none;border:0;border-bottom:1px solid var(--border);padding:16px 18px}
+#gastos-lista{background:var(--surf);border-radius:var(--r-lg);box-shadow:inset 0 0 0 1px var(--border);overflow:hidden}
+#gastos-lista .gasto-top{background:none;padding:0;border:0}
+.gasto-hora{font-family:'Alfa Slab One',Georgia,serif;font-size:20px;color:var(--ink)}
+#gastos-lista .gasto-row:last-child{border-bottom:0}
+.gasto-monto{font-weight:700;font-size:16px;color:var(--ink)}
+.gasto-monto::after{content:'›';margin-left:18px;font-weight:400;color:var(--ink2);font-size:20px}
+
+/* Comprobante: pantalla completa como V2 */
+@media (min-width:768px){#modal-comprobante.open{inset:60px 0 0 96px;background:var(--bg);align-items:flex-start;justify-content:center;padding-top:26px;backdrop-filter:none}}
+#modal-comprobante .modal-box.cmp-box{background:transparent;box-shadow:none;max-width:420px;padding:0 0 30px;border:0}
+#modal-comprobante .cmp-head{justify-content:center}
+#modal-comprobante .cmp-ok{display:none}
+#modal-comprobante .cmp-head h2{font-family:'Alfa Slab One',Georgia,serif;font-size:36px;font-weight:400;text-align:center;margin:0}
+#modal-comprobante .cmp-sub{text-align:center}
+#modal-comprobante .modal-actions{justify-content:center}
+#modal-comprobante .modal-box.cmp-box{max-width:460px;width:calc(100vw - 24px)}
+#modal-comprobante .cmp-ticket{background:var(--surf);border-top:8px solid var(--ink);border-radius:2px}
+#modal-comprobante .modal-actions .btn-sm,#modal-comprobante .modal-actions .btn-save{white-space:nowrap;min-height:52px;font-size:16px;padding:0 22px;flex:0 0 auto}
+#gastos-lista{background:none!important;box-shadow:none!important;border-radius:0;overflow:visible}
+.gasto-card{background:var(--surf);border-radius:var(--r-lg);box-shadow:inset 0 0 0 1px var(--border);overflow:hidden}
+
+/* Clientes a todo el ancho */
+#tab-clientes{max-width:1560px;margin:0 auto;padding:0 28px 40px}
+#tab-clientes .cliente-search-bar{background:none;border:0;padding:0 0 14px}
+#tab-clientes .cliente-search-bar>div{max-width:none!important;margin:0!important}
+#tab-clientes .clientes-lista{max-width:none;margin:0;background:var(--surf);border-radius:var(--r-lg);box-shadow:inset 0 0 0 1px var(--border);overflow:hidden;padding:0}
+#tab-clientes .cliente-row{border-radius:0;box-shadow:none;border:0;border-bottom:1px solid var(--border);margin:0;padding:16px 18px;position:relative}
+#tab-clientes .cliente-row:last-child{border-bottom:0}
+#tab-clientes .ph-title{margin:6px 0 12px}
+
+/* Gestión como lista V2 */
+#tab-ajustes{max-width:860px;margin:0;padding:0 28px 40px}
+#tab-ajustes .adj-layout{display:flex;flex-direction:column;padding:0;max-width:none}
+#tab-ajustes .brand-panel{order:99;background:none;box-shadow:none;border:0;padding:20px 0 0;display:flex;justify-content:space-between;align-items:center;gap:12px;color:var(--ink2)}
+#tab-ajustes .brand-panel-kicker,#tab-ajustes .brand-panel-title{display:none}
+#tab-ajustes .brand-panel-text{font-size:13px}
+#tab-ajustes .accordion-item{background:none;box-shadow:none;border:0;border-bottom:1px solid var(--border);border-radius:0;margin:0}
+#tab-ajustes .accordion-hdr{padding:20px 0;min-height:0}
+#tab-ajustes .accordion-titulo{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:22px}
+#tab-ajustes .accordion-meta{font-size:15px;color:var(--ink2);margin-top:4px}
+@media (max-width:420px){#tab-carga .ph-row,#tab-carga .ph-actions{flex-wrap:wrap;gap:8px}#tab-carga .ph-actions{width:100%;justify-content:flex-start}#tab-carga .ph-actions .btn-sm{min-height:44px;padding:0 14px}}
+@media (max-width:480px){#tab-carga .ventas-header>div[style*="flex-shrink"]{flex-wrap:wrap;flex-shrink:1!important}#tab-carga .ventas-header .cat-chips{flex-direction:row;flex-wrap:wrap}}
+@media (max-width:480px){.ph-row{flex-wrap:wrap}.ph-row>div,.ph-row>.ph-actions{flex-wrap:wrap;max-width:100%;min-width:0}}
+.seccion-lbl,.split-lbl{color:var(--brand-ink,#8F2F00)!important}
+[data-theme="dark"] .seccion-lbl,[data-theme="dark"] .split-lbl{color:var(--orange-mid,#FFB27A)!important}
+
+/* Ventas: una sola tarjeta con filas separadas como la tabla V2 */
+#hist-list{background:var(--surf);border-radius:var(--r-lg);box-shadow:inset 0 0 0 1px var(--border);overflow:hidden}
+#hist-list .hist-item{background:none!important;box-shadow:none!important;border:0!important;border-bottom:1px solid var(--border)!important;border-radius:0!important;margin:0!important}
+#hist-list .hist-item:last-child{border-bottom:0!important}
+#hist-list .hist-hdr{padding:14px 18px}
+#hist-list .hist-fecha{font-weight:700;font-size:15px}
+#hist-list .hist-total{font-weight:700;font-size:16px}
 /*CARTA_V2_END*/
 </style>
 </head>
@@ -5279,7 +5352,9 @@ function renderGastos(){
   const el=$('gastos-lista');if(!el)return;
   const lista=[...gastos].sort((a,b)=>b.fecha.localeCompare(a.fecha)||(b.hora||'').localeCompare(a.hora||''));
   if(!lista.length){el.innerHTML='<div class="empty">No hay gastos registrados</div>';return;}
-  el.innerHTML=lista.map(g=>`<div class="gasto-row">
+  const tot=lista.reduce((t,g)=>t+(Number(g.monto)||0),0);
+  el.innerHTML=`<div class="gasto-top"><span>${fmt(tot)} en ${lista.length} gasto${lista.length!==1?'s':''}</span><button type="button" class="btn-save" onclick="openGastoModal()">+ Gasto</button></div>`+'<div class="gasto-card">'+lista.map(g=>`<div class="gasto-row">
+    <div class="gasto-hora">${escapeHtml(g.hora||'')}</div>
     <div class="gasto-info">
       <div class="gasto-desc">${escapeHtml(g.desc||'Gasto')}</div>
       <div class="gasto-meta">${escapeHtml(g.fecha||'')}${g.hora?' · '+escapeHtml(g.hora):''} · ${escapeHtml(g.categoria?g.categoria[0].toUpperCase()+g.categoria.slice(1):'Otros')} · ${g.pago==='efectivo'?'Efectivo':'Transferencia'}${g.operador?' · '+escapeHtml(g.operador):''}</div>
@@ -5287,7 +5362,7 @@ function renderGastos(){
       ${renderSyncBadge(g,{localWhenNoRemoteId:true})?`<div class="gasto-sync-row">${renderSyncBadge(g,{localWhenNoRemoteId:true})}${renderSyncHelp(g,{localWhenNoRemoteId:true})}</div>`:''}
     </div>
     <div class="gasto-monto">−${fmt(g.monto)}</div>
-  </div>`).join('');
+  </div>`).join('')+'</div>';
 }
 
 // ══════════════════════════════════════════════════
@@ -18092,7 +18167,7 @@ window.__cartaComprobante=(nuevas,{estado='ok',reserva=false}={})=>{
   }
   const t=ticketDe(nuevas);ultimoTicket=t;
   const ok=estado==='ok';
-  const titulo=reserva?'Reserva cobrada':(ok?'Cobro realizado':'Cobro registrado');
+  const titulo=reserva?'Reserva cobrada':(ok?'Venta guardada':'Cobro registrado');
   const desc=t.descuento.productos+t.descuento.ticket;
   m.innerHTML=`<div class="modal-box cmp-box">
     <div class="cmp-head"><span class="cmp-ok">${svg('check',22)}</span><h2 class="modal-title" id="cmp-titulo">${titulo}</h2></div>
@@ -18107,7 +18182,7 @@ window.__cartaComprobante=(nuevas,{estado='ok',reserva=false}={})=>{
       <div class="cmp-pagos">${(t.payments||[]).map(p=>`<div>Pago · ${esc(getPaymentMethodMeta(p.metodo).label)} <b>${fm(p.monto)}</b></div>`).join('')}</div>
       <div class="cmp-foot">No válido como factura</div>
     </div>
-    <div class="modal-actions"><button type="button" class="btn-sm" data-cmp="print">${svg('print',18)} Imprimir comprobante</button><button type="button" class="btn-save" data-cmp="close">Volver a Atención</button></div>
+    <div class="modal-actions"><button type="button" class="btn-sm" data-cmp="print">${svg('print',18)} Imprimir comprobante</button><button type="button" class="btn-save" data-cmp="close">Listo</button></div>
   </div>`;
   m.onclick=e=>{const b=e.target.closest('[data-cmp]');if(b?.dataset.cmp==='close')cerrarComprobante();else if(b?.dataset.cmp==='print'&&ultimoTicket&&typeof imprimirDocumentos==='function'&&typeof htmlTicket==='function')imprimirDocumentos(htmlTicket(ultimoTicket));else if(e.target===m)cerrarComprobante();};
   m.classList.add('open');m.removeAttribute('aria-hidden');

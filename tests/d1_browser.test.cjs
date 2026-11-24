@@ -97,7 +97,7 @@ test('D1: five visible units survive an in-flight stale table refresh and immedi
       releaseOperators([]);
       await opened;
       await ejecutarCobro('Test operator','operator-test');
-      const receiptAfterConfirmedSale=document.getElementById('modal-comprobante')?.classList.contains('open')===true&&/Cobro realizado/.test(document.getElementById('modal-comprobante').innerText);
+      const receiptAfterConfirmedSale=document.getElementById('modal-comprobante')?.classList.contains('open')===true&&/Venta guardada/.test(document.getElementById('modal-comprobante').innerText);
       document.getElementById('modal-comprobante')?.classList.remove('open');
       const firstPersistedRows=persistedRows;
       const distinctLines=window.ooItemsDesdeFilas([
