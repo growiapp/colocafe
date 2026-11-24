@@ -2435,6 +2435,9 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 .acceso-p{flex:none;color:var(--ink2);font-size:12px;font-variant-numeric:tabular-nums}
 .acceso-q{flex:none;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--orange);color:#fff;font-size:11px;font-weight:700;display:inline-grid;place-items:center}
 .acceso.on{border-color:var(--orange);background:var(--surf2)}
+
+/* Descuento: el selector Porcentaje / Importe vive en el diálogo; no es el selector de medio de pago que oculta la regla de Cobrar */
+#modal-descuento .pago-grid{display:grid!important}
 /*CARTA_V2_END*/
 </style>
 </head>
@@ -3792,6 +3795,10 @@ function updateCatalogBootState(patch={}){
   if(esperaba&&!catalogIsWaitingForSupabase()&&$('modal-nueva-mesa')?.classList.contains('open')){
     renderMesaSetupProdChips();renderMesaSetupProductoGrid();
   }
+  // igual para la reserva abierta durante una actualización: sin esto la tira de accesos rápidos quedaba vacía al terminar
+  if(esperaba&&!catalogIsWaitingForSupabase()&&$('modal-reserva')?.classList.contains('open')){
+    renderReservaProdChips();renderReservaProductoGrid();
+  }
   return window.__catalogBootState;
 }
 function catalogIsWaitingForSupabase(){
@@ -4757,6 +4764,7 @@ function operadoresModoServidor(){
     return !!(client&&store&&isValidUuid(store));
   }catch(_){return false;} // la librería/cliente no está disponible: modo local
 }
+function operadoresLecturaVencida(){operadoresCargando=false;operadoresUltimaLecturaOk=false;} // la lectura no respondió a tiempo: se ofrece reintentar en vez de quedar «cargando»
 function operadoresCacheVigente(){
   // vigente = del local actual Y la última lectura salió bien: tras un fallo no se sigue validando con datos anteriores
   return Array.isArray(supabaseOperadoresCache)&&supabaseOperadoresCacheStoreId===getOperatorsStoreId()&&operadoresUltimaLecturaOk!==false;
@@ -18311,7 +18319,7 @@ function pintarCobro(){
   if(slot&&box){if(m==='mixed'){slot.appendChild(box);slot.hidden=false;}else{slot.hidden=true;if(box.parentNode===slot&&mixedHome)mixedHome.appendChild(box);}}
 }
 // Cobrar nunca ofrece a alguien que acaba de quedar inactivo: se relee la lista del local al abrir y otra vez al confirmar.
-const conTope=(p,ms)=>Promise.race([p,new Promise(r=>setTimeout(()=>r(false),ms))]); // una lectura que no responde no deja el cobro colgado
+const conTope=(p,ms)=>{let t;return Promise.race([p,new Promise(r=>{t=setTimeout(()=>{if(typeof operadoresLecturaVencida==='function')operadoresLecturaVencida();r(false);},ms);})]).finally(()=>clearTimeout(t));}; // una lectura que no responde no deja el cobro colgado
 async function refrescarOperadoresCobro(){
   if(typeof loadOperatorsFromSupabase!=='function'||typeof operadoresModoServidor!=='function'||!operadoresModoServidor())return;
   await conTope(loadOperatorsFromSupabase(),8000);

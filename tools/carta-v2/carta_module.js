@@ -339,7 +339,7 @@ function pintarCobro(){
   if(slot&&box){if(m==='mixed'){slot.appendChild(box);slot.hidden=false;}else{slot.hidden=true;if(box.parentNode===slot&&mixedHome)mixedHome.appendChild(box);}}
 }
 // Cobrar nunca ofrece a alguien que acaba de quedar inactivo: se relee la lista del local al abrir y otra vez al confirmar.
-const conTope=(p,ms)=>Promise.race([p,new Promise(r=>setTimeout(()=>r(false),ms))]); // una lectura que no responde no deja el cobro colgado
+const conTope=(p,ms)=>{let t;return Promise.race([p,new Promise(r=>{t=setTimeout(()=>{if(typeof operadoresLecturaVencida==='function')operadoresLecturaVencida();r(false);},ms);})]).finally(()=>clearTimeout(t));}; // una lectura que no responde no deja el cobro colgado
 async function refrescarOperadoresCobro(){
   if(typeof loadOperatorsFromSupabase!=='function'||typeof operadoresModoServidor!=='function'||!operadoresModoServidor())return;
   await conTope(loadOperatorsFromSupabase(),8000);

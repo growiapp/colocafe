@@ -152,6 +152,28 @@ test('F3: los descuentos siguen calculando igual (por producto y al ticket) con 
   await page.waitForFunction(() => [...document.querySelectorAll('.modal-ov.open')].length > 0, null, {timeout: 5000});
 }));
 
+test('F3 (staging): el diálogo de descuento deja elegir «Importe ($)» y el descuento al ticket por importe calcula', async () => abrir(async page => {
+  await page.evaluate(id => abrirMesa(id), MESA); await page.waitForTimeout(1000);
+  const antes = await page.evaluate(() => resumenCobro(Object.values(carrito), null).total);
+  await page.evaluate(() => abrirDescuento(null)); await page.waitForSelector('#modal-descuento.open');
+  assert.equal(await page.isVisible('#desc-tipo-monto'), true, 'la opción Importe ($) está oculta');
+  await page.click('#desc-tipo-monto'); await page.fill('#descuento-valor', '500'); await page.click('#descuento-aplicar'); await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => resumenCobro(Object.values(carrito), descuentoTicket).total), antes - 500);
+}));
+
+test('F5 (staging): una actualización del catálogo con la Nueva mesa o la Reserva abiertas no deja vacía la tira de accesos rápidos', async () => abrir(async page => {
+  await page.waitForFunction(() => !catalogIsWaitingForSupabase(), null, {timeout: 15000});
+  await page.evaluate(() => { menu.filter(p => p.active !== false).slice(0, 3).forEach((p, i) => { p.frecuente = i + 1; }); cats.forEach(c => { c.reservable = true; }); });
+  for (const [abrirFn, id] of [['abrirNuevaMesa()', '#mesa-accesos'], ['openReservaModal(null)', '#res-accesos']]) {
+    await page.evaluate(f => eval(f), abrirFn); await page.waitForTimeout(500);
+    assert.equal(await page.$$eval(id + ' .acceso', e => e.length), 3);
+    await page.evaluate(() => updateCatalogBootState({state: 'syncing'})); await page.waitForTimeout(100);
+    await page.evaluate(() => updateCatalogBootState({state: 'ready'})); await page.waitForTimeout(300);
+    assert.equal(await page.$$eval(id + ' .acceso', e => e.length), 3, 'la tira quedó vacía tras la actualización: ' + id);
+    await page.evaluate(() => document.querySelectorAll('.modal-ov.open').forEach(m => m.classList.remove('open')));
+  }
+}));
+
 // ── F4: Cobrar muestra solo operadores ACTIVOS del local, desde el servidor, sin recaer en listas históricas ──
 const abrirCobro = async page => { await page.evaluate(id => abrirMesa(id), MESA); await page.waitForSelector('#btn-confirm'); await page.click('#btn-confirm'); await page.waitForSelector('#cobro-screen:not([hidden]) .cobro-ops'); };
 const opsCobro = page => page.$$eval('.cobro-ops [data-o]', b => b.map(x => x.dataset.o));
@@ -228,9 +250,10 @@ test('F4 (revisión independiente): una verificación que nunca responde no deja
   await page.click('.btn-confirmar[data-c=confirmar]');
   assert.match(await page.$eval('.btn-confirmar[data-c=confirmar]', b => b.textContent), /Verificando/);
   await page.waitForFunction(() => /No pudimos verificar quién está activo/.test(document.getElementById('cobro-msg')?.textContent || ''), null, {timeout: 15000});
-  assert.equal(await page.$eval('.btn-confirmar[data-c=confirmar]', b => b.disabled), false, 'el botón quedó bloqueado');
   assert.match(await page.$eval('.btn-confirmar[data-c=confirmar]', b => b.textContent), /Confirmar cobro/);
-  await page.evaluate(() => { window.__DEMO_DATA.operators = window.__DEMO_DATA.operadoresOk; });   // vuelve el servidor: se puede reintentar sin recargar
+  assert.ok(await page.$('.cobro-ops [data-c="ops"]'), 'tras el tiempo de espera no se ofrece Reintentar (quedó «cargando»)');
+  await page.evaluate(() => { window.__DEMO_DATA.operators = window.__DEMO_DATA.operadoresOk; });   // vuelve el servidor
+  await page.click('.cobro-ops [data-c="ops"]'); await esperarOps(page, ['Ana', 'Bruno', 'Carla']);
   await page.click('.cobro-ops [data-o="Bruno"]');
   const antes = await page.evaluate(() => ventas.length);
   await page.click('.btn-confirmar[data-c=confirmar]');
