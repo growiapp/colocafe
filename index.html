@@ -2347,6 +2347,10 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 #hist-list .hist-hdr{padding:14px 18px}
 #hist-list .hist-fecha{font-weight:700;font-size:15px}
 #hist-list .hist-total{font-weight:700;font-size:16px}
+
+/* Ayuda "?": contraste suficiente */
+.tip-icon{background:var(--brand-ink)!important;color:#fff!important}
+[data-theme="dark"] .tip-icon{background:#F0C896!important;color:#1A1008!important}
 /*CARTA_V2_END*/
 </style>
 </head>
@@ -2567,7 +2571,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
       <div class="brand-panel-copy">
         <div class="brand-panel-kicker">Ajustes</div>
         <div class="brand-panel-title">Colo Café · operación diaria</div>
-        <div class="brand-panel-text" id="ajustes-brand-text">Usá esta sección para revisar tu cuenta, tienda activa y opciones de operación.</div>
+        <div class="brand-panel-text" id="ajustes-brand-text">Usá esta sección para revisar tu cuenta, el local activo y las opciones de operación.</div>
       </div>
       <div class="brand-panel-badge">
         <span>Soporte y evolución</span>
@@ -4519,7 +4523,7 @@ function calculatePeriodDelta(current,previous){
 function formatDeltaKpi(delta,label){
   if(!delta) return`<div class="kpi-sub">${label}</div>`;
   if(delta.type==='empty') return`<div class="kpi-sub">Sin actividad</div>`;
-  if(delta.type==='new') return`<div class="kpi-sub kpi-up">Nuevo período con ventas</div>`;
+  if(delta.type==='new') return`<div class="kpi-sub kpi-up">Sin ventas en el período anterior</div>`;
   const arrow=delta.pct>=0?'+':'';
   return`<div class="kpi-sub ${delta.pct>=0?'kpi-up':'kpi-dn'}">${arrow}${delta.pct}% ${label}</div>`;
 }
@@ -6981,7 +6985,7 @@ function renderDashboard(){
       let simpleMsg='';
       if(showLoading) simpleMsg='Actualizando dashboard…';
       else if((dashboardState?.error||'').toLowerCase().includes('sesión')) simpleMsg='Iniciá sesión para ver el dashboard sincronizado.';
-      else if((dashboardState?.error||'').toLowerCase().includes('store')) simpleMsg='Elegí una tienda activa para ver el dashboard.';
+      else if((dashboardState?.error||'').toLowerCase().includes('store')) simpleMsg='Elegí un local activo para ver los indicadores.';
       else if(useSupabase&&txP===0&&!dashboardState?.error) simpleMsg='No hay ventas para este período.';
       else if(useFallback) simpleMsg='Mostrando datos disponibles.';
       else if(dashboardSmartRangeMessage) simpleMsg=dashboardSmartRangeMessage;
@@ -6994,7 +6998,7 @@ function renderDashboard(){
   $('kpi-grid').innerHTML=`
     <div class="kpi"><div class="kpi-lbl">Ventas cobradas</div><div class="kpi-val">${fmt(totalV)}</div>${formatDeltaKpi(compDelta,compLabel)}</div>
     <div class="kpi"><div class="kpi-lbl">Gastos</div><div class="kpi-val" style="color:var(--red)">${fmt(totalG)}</div><div class="kpi-sub">${vg.length} gasto${vg.length===1?'':'s'}${pendingExpenses?` · ${pendingExpenses} pendiente${pendingExpenses===1?'':'s'}`:''}</div></div>
-    <div class="kpi"><div class="kpi-lbl">Resultado del período</div><div class="kpi-val" style="color:${ganancia>=0?'var(--green)':'var(--red)'}">${fmt(ganancia)}</div><div class="kpi-sub">ventas − gastos registrados</div></div>
+    <div class="kpi"><div class="kpi-lbl">Ventas menos gastos</div><div class="kpi-val" style="color:${ganancia>=0?'var(--green)':'var(--red)'}">${fmt(ganancia)}</div><div class="kpi-sub">No es la ganancia: no incluye costos ni sueldos</div></div>
     <div class="kpi"><div class="kpi-lbl">Ticket promedio</div><div class="kpi-val">${fmt(promP)}</div><div class="kpi-sub">${txP} venta${txP===1?'':'s'}</div></div>`;
 
   const productosVendidos=vh.reduce((sum,v)=>sum+(Number(v.cantidad)||0),0);
@@ -7061,7 +7065,7 @@ function renderDashboard(){
   if(resEl)resEl.innerHTML=`
     <div class="resultado-row"><span class="resultado-lbl">💰 Ventas</span><span class="resultado-val pos">${fmt(totalV)}</span></div>
     <div class="resultado-row"><span class="resultado-lbl">💸 Gastos</span><span class="resultado-val neg">−${fmt(totalG)}</span></div>
-    <div class="resultado-row"><span class="resultado-lbl" style="font-weight:500">Resultado del período</span><span class="resultado-val total ${ganancia>=0?'pos':'neg'}">${fmt(ganancia)}</span></div>`;
+    <div class="resultado-row"><span class="resultado-lbl" style="font-weight:500">Ventas menos gastos <small style="font-weight:400;color:var(--ink3)">(no es la ganancia)</small></span><span class="resultado-val total ${ganancia>=0?'pos':'neg'}">${fmt(ganancia)}</span></div>`;
 }
 
 // ══════════════════════════════════════════════════
@@ -7200,7 +7204,7 @@ function renderHistVentas(){
       <div class="hist-hdr" style="cursor:default">
         <div>
           <div class="hist-fecha">${canTech?`Fuente: ${sourceLabel}`:'Historial de ventas'}</div>
-          <div class="hist-meta">${tickets.length} de ${(allTickets||[]).length} tickets · total ${fmt(totalFiltrado)} · ${itemCount} ítems · ${getPaymentSummaryText(paymentTotals,{short:false})}${canTech&&error?` · ${error}`:''}${!canTech&&isFallback?' · Mostrando datos disponibles.':''}</div>
+          <div class="hist-meta">${tickets.length} de ${(allTickets||[]).length} ventas · total ${fmt(totalFiltrado)} · ${itemCount} ítem${itemCount===1?'':'s'} · ${getPaymentSummaryText(paymentTotals,{short:false})}${canTech&&error?` · ${error}`:''}${!canTech&&isFallback?' · Mostrando datos disponibles.':''}</div>
         </div>
         <div class="row" style="gap:8px;flex-wrap:wrap">
           <button class="btn ghost" type="button" onclick="copyHistorySummary()">Copiar resumen</button>
@@ -7222,7 +7226,7 @@ function renderHistVentas(){
           <div>
             <div class="hist-fecha">${fmtShort(d)}${t.hora?` · ${t.hora}`:''}</div>
             <div class="hist-meta">${originLabel} · ${tipoLabel(t.tipo||'salon')}${t.mesa?` · ${t.mesa}`:''}${t.operador?` · ${t.operador}`:''}${t.source&&showTechSource?` · ${t.source}`:''}</div>
-            <div class="hist-meta">${pagosTxt} · ${t.itemCount||((t.items||[]).length)} ítems</div>
+            <div class="hist-meta">${pagosTxt} · ${(n=>n===1?'1 ítem':n+' ítems')(t.itemCount||((t.items||[]).length))}</div>
           </div>
           <div class="hist-right"><span class="hist-total">${fmt(t.total||0)}</span><span class="hist-arr" id="ha-${i}">▾</span></div>
         </div>
@@ -7456,7 +7460,7 @@ function renderClientesTab(){
   el.innerHTML=lista.map(c=>`<div class="cliente-row" onclick="openClienteModal('${c.id}')">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div class="cliente-nombre">${c.nombre}</div>
-      <div class="cliente-visitas">${(c.visitas||[]).length} visitas</div>
+      <div class="cliente-visitas">${(c.visitas||[]).length} visita${(c.visitas||[]).length===1?'':'s'}</div>
     </div>
     <div class="cliente-meta">${[c.telefono,c.email,c.alergias?'⚠ '+c.alergias:''].filter(Boolean).join(' · ')}</div>
     ${c.preferencias?`<div style="font-size:11px;color:var(--blue);margin-top:3px">★ ${c.preferencias}</div>`:''}
@@ -8116,7 +8120,7 @@ if(config.webappUrl){loadFromSheets();}
     wrap.innerHTML=`
       <div class="acc-head" onclick="toggleAccordion('supabase')">
         <div class="acc-title">Cuenta</div>
-        <div class="acc-meta" id="acc-supabase-meta">Acceso y tienda activa</div>
+        <div class="acc-meta" id="acc-supabase-meta">Acceso y local activo</div>
       </div>
       <div class="acc-body" id="acc-supabase-body">
         <div id="sb-tech-config-adj">
@@ -11629,7 +11633,7 @@ if(config.webappUrl){loadFromSheets();}
 
   window.syncLocalCatalogToSupabase=async function(){
     if(!hasCatalogSupabaseReady()){
-      showToast('Configurá la conexión y la tienda activa primero.');
+      showToast('Primero iniciá sesión y elegí el local activo.');
       return;
     }
     setCatalogLoadState('syncing');
@@ -11741,7 +11745,7 @@ if(config.webappUrl){loadFromSheets();}
   window.debugCatalogWritePermissions=async function(){
     if(!hasCatalogSupabaseReady()){
       console.warn('[debugCatalogWritePermissions] Supabase no configurado o sin store activa');
-      showToast('Configurá la conexión y la tienda activa primero.');
+      showToast('Primero iniciá sesión y elegí el local activo.');
       return;
     }
     const client=getCatalogSupabaseClient();
@@ -12448,7 +12452,7 @@ if(config.webappUrl){loadFromSheets();}
     }catch(err){
       console.error('[Customers sync failed]',err);
       setCrState('error',err.message||String(err));
-      showToast('Clientes guardados en este dispositivo. Se enviarán solos cuando vuelva la conexión.');
+      showToast('Clientes guardados en este dispositivo. Todavía no llegaron al servidor: volvé a guardar cuando haya conexión.');
     }
   };
   window.saveReservationToSupabase=async function(reservation,opts={}){
@@ -12560,7 +12564,7 @@ if(config.webappUrl){loadFromSheets();}
     }catch(err){
       console.error('[Reservations sync failed]',err);
       setCrState('error',err.message||String(err));
-      showToast('Reservas guardadas en este dispositivo. Se enviarán solas cuando vuelva la conexión.');
+      showToast('Reservas guardadas en este dispositivo. Todavía no llegaron al servidor: volvé a guardar cuando haya conexión.');
       return {ok:false,total:reservas.length,synced:0,failed:reservas.length,errors:[err?.message||String(err)]};
     }
   };
@@ -13067,7 +13071,7 @@ if(config.webappUrl){loadFromSheets();}
       el.innerHTML=lista.map(c=>`<div class="cliente-row" onclick="openClienteModal('${c.id}')">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div class="cliente-nombre">${c.nombre}</div>
-          <div class="cliente-visitas">${customerVisitCount(c)} visitas</div>
+          <div class="cliente-visitas">${customerVisitCount(c)} visita${customerVisitCount(c)===1?'':'s'}</div>
         </div>
         <div class="cliente-meta">${[c.telefono,c.email,c.alergias?'⚠ '+c.alergias:''].filter(Boolean).join(' · ')}</div>
         ${c.preferencias?`<div style="font-size:11px;color:var(--blue);margin-top:3px">★ ${c.preferencias}</div>`:''}
@@ -13497,7 +13501,7 @@ if(config.webappUrl){loadFromSheets();}
     }catch(err){
       console.error('[Expenses sync failed]',err);
       setExpensesState('error',err?.message||String(err));
-      showToast('Gastos guardados en este dispositivo. Se enviarán solos cuando vuelva la conexión.');
+      showToast('Gastos guardados en este dispositivo. Todavía no llegaron al servidor: volvé a guardar cuando haya conexión.');
       return {ok:false,total:gastos.length,synced:0,failed:gastos.length,errors:[err?.message||String(err)]};
     }
   };
@@ -18181,7 +18185,7 @@ window.__cartaComprobante=(nuevas,{estado='ok',reserva=false}={})=>{
   const desc=t.descuento.productos+t.descuento.ticket;
   m.innerHTML=`<div class="modal-box cmp-box">
     <div class="cmp-head"><span class="cmp-ok">${svg('check',22)}</span><h2 class="modal-title" id="cmp-titulo">${titulo}</h2></div>
-    <p class="cmp-sub">${ok?'La venta quedó guardada.':'La venta quedó registrada. El cierre de la mesa está pendiente de sincronizar y se reintenta solo.'}</p>
+    <p class="cmp-sub">${ok?'La venta quedó guardada.':'La venta quedó registrada. Falta confirmar en el servidor el cierre de la mesa: seguilo en Operaciones pendientes.'}</p>
     <div class="ticket cmp-ticket">
       <div class="cmp-t1">${esc(typeof nombreComercio==='function'?nombreComercio():'Colo Café')}</div>
       <div class="cmp-t2">${esc(t.fecha||'')}${t.hora?` · ${esc(t.hora)}`:''} · ${esc(tipoLabel(t.tipo||'salon'))}${t.mesa?` · ${esc(t.mesa)}`:''}</div>
