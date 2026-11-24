@@ -6992,10 +6992,10 @@ function renderDashboard(){
 
   // KPIs
   $('kpi-grid').innerHTML=`
-    <div class="kpi"><div class="kpi-lbl">Total ventas</div><div class="kpi-val">${fmt(totalV)}</div>${formatDeltaKpi(compDelta,compLabel)}</div>
-    <div class="kpi"><div class="kpi-lbl">Gastos</div><div class="kpi-val" style="color:var(--red)">${fmt(totalG)}</div><div class="kpi-sub">${vg.length} registros${pendingExpenses?` · ${pendingExpenses} pendiente${pendingExpenses===1?'':'s'}`:''}</div></div>
-    <div class="kpi"><div class="kpi-lbl">Ganancia neta</div><div class="kpi-val" style="color:${ganancia>=0?'var(--green)':'var(--red)'}">${fmt(ganancia)}</div><div class="kpi-sub">ventas − gastos</div></div>
-    <div class="kpi"><div class="kpi-lbl">Ticket promedio</div><div class="kpi-val">${fmt(promP)}</div><div class="kpi-sub">${txP} transacciones</div></div>`;
+    <div class="kpi"><div class="kpi-lbl">Ventas cobradas</div><div class="kpi-val">${fmt(totalV)}</div>${formatDeltaKpi(compDelta,compLabel)}</div>
+    <div class="kpi"><div class="kpi-lbl">Gastos</div><div class="kpi-val" style="color:var(--red)">${fmt(totalG)}</div><div class="kpi-sub">${vg.length} gasto${vg.length===1?'':'s'}${pendingExpenses?` · ${pendingExpenses} pendiente${pendingExpenses===1?'':'s'}`:''}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Resultado del período</div><div class="kpi-val" style="color:${ganancia>=0?'var(--green)':'var(--red)'}">${fmt(ganancia)}</div><div class="kpi-sub">ventas − gastos registrados</div></div>
+    <div class="kpi"><div class="kpi-lbl">Ticket promedio</div><div class="kpi-val">${fmt(promP)}</div><div class="kpi-sub">${txP} venta${txP===1?'':'s'}</div></div>`;
 
   const productosVendidos=vh.reduce((sum,v)=>sum+(Number(v.cantidad)||0),0);
   const prodRevenue={};vh.forEach(v=>{const key=v.producto||'Sin producto';prodRevenue[key]=(prodRevenue[key]||0)+money2(v.total);});
@@ -7061,7 +7061,7 @@ function renderDashboard(){
   if(resEl)resEl.innerHTML=`
     <div class="resultado-row"><span class="resultado-lbl">💰 Ventas</span><span class="resultado-val pos">${fmt(totalV)}</span></div>
     <div class="resultado-row"><span class="resultado-lbl">💸 Gastos</span><span class="resultado-val neg">−${fmt(totalG)}</span></div>
-    <div class="resultado-row"><span class="resultado-lbl" style="font-weight:500">Ganancia neta</span><span class="resultado-val total ${ganancia>=0?'pos':'neg'}">${fmt(ganancia)}</span></div>`;
+    <div class="resultado-row"><span class="resultado-lbl" style="font-weight:500">Resultado del período</span><span class="resultado-val total ${ganancia>=0?'pos':'neg'}">${fmt(ganancia)}</span></div>`;
 }
 
 // ══════════════════════════════════════════════════
@@ -12448,7 +12448,7 @@ if(config.webappUrl){loadFromSheets();}
     }catch(err){
       console.error('[Customers sync failed]',err);
       setCrState('error',err.message||String(err));
-      showToast('Clientes guardados. Falló la sincronización con el servidor.');
+      showToast('Clientes guardados en este dispositivo. Se enviarán solos cuando vuelva la conexión.');
     }
   };
   window.saveReservationToSupabase=async function(reservation,opts={}){
@@ -12560,7 +12560,7 @@ if(config.webappUrl){loadFromSheets();}
     }catch(err){
       console.error('[Reservations sync failed]',err);
       setCrState('error',err.message||String(err));
-      showToast('Reservas guardadas. Falló la sincronización con el servidor.');
+      showToast('Reservas guardadas en este dispositivo. Se enviarán solas cuando vuelva la conexión.');
       return {ok:false,total:reservas.length,synced:0,failed:reservas.length,errors:[err?.message||String(err)]};
     }
   };
@@ -12571,7 +12571,7 @@ if(config.webappUrl){loadFromSheets();}
   function warnCrSupabaseFailure(kind,err){
     console.warn(`[Customers/Reservations sync failed] ${kind}`,err);
     setCrState('error',err?.message||String(err));
-    showToast('No se pudo guardar en el servidor. Reintentá en unos segundos.');
+    showToast('No pudimos guardar los cambios. Esperá unos segundos y volvé a intentar.');
   }
   function scheduleCrLoad(){ setTimeout(()=>window.reloadCustomersReservationsFromSupabase?.(true),250); }
   window.probeCustomersReservationsSupabase=async function(){
@@ -13497,7 +13497,7 @@ if(config.webappUrl){loadFromSheets();}
     }catch(err){
       console.error('[Expenses sync failed]',err);
       setExpensesState('error',err?.message||String(err));
-      showToast('Gastos guardados. Falló la sincronización con el servidor.');
+      showToast('Gastos guardados en este dispositivo. Se enviarán solos cuando vuelva la conexión.');
       return {ok:false,total:gastos.length,synced:0,failed:gastos.length,errors:[err?.message||String(err)]};
     }
   };
@@ -18064,6 +18064,7 @@ function msgCobro(t){const m=$('cobro-msg');if(m){m.textContent=t||'';}}
 function pintarCobro(){
   const sc=$('cobro-screen');if(!sc)return;
   firmaVista=firmaCobro();
+  { const cx=$('mixed-payments-box'); if(cx&&sc.contains(cx)&&mixedHome) mixedHome.appendChild(cx); } // el repintado no debe destruir los campos del pago mixto
   const items=Object.values(carrito||{}).filter(i=>Number(i.qty)>0),total=typeof totalCobroActual==='function'?totalCobroActual():0;
   const cant=items.reduce((s,i)=>s+(Number(i.qty)||0),0),nombre=destinoCobro(),esRes=String(mesaActivaId||'').startsWith('reserva_');
   const m=medioActual(),ops=(typeof operadores!=='undefined'?operadores:[]).filter(Boolean);
@@ -18121,7 +18122,9 @@ async function confirmarCobro(btn){
     await confirmarOperadorCobro();                     // el cobro real, con su firma y su confirmación
     if($('modal-operador-cobro').classList.contains('open'))cerrarModalOperadorCobro();
   }catch(err){msgCobro('No pudimos completar el cobro. Reintentá.');}
-  finally{cobrando=false;tabC().classList.remove('cobro-auto');if(!$('cobro-screen').hidden){btn.disabled=false;btn.textContent=txt;}}
+  finally{cobrando=false;tabC().classList.remove('cobro-auto');
+    const sc=$('cobro-screen');
+    if(sc&&!sc.hidden){const vivo=sc.querySelector('.btn-confirmar');if(vivo){vivo.disabled=false;vivo.textContent=`Confirmar cobro · ${fm(typeof totalCobroActual==='function'?totalCobroActual():0)}`;}}}
 }
 function montarCobro(){
   if($('cobro-screen'))return;

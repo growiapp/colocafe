@@ -66,6 +66,19 @@ test('V2: el Cobro refresca el detalle si el pedido cambia y no cobra con el det
   await page.evaluate(() => { window.__ventasAntes = ventas.length; const k = Object.keys(carrito)[0]; carrito[k].qty = Number(carrito[k].qty) + 1; renderCart(); });
   await page.evaluate(() => document.querySelector('.btn-confirmar[data-c=confirmar]').click());
   assert.equal(await page.evaluate(() => ventas.length), await page.evaluate(() => window.__ventasAntes));
+  // tras el rechazo el botón vigente queda disponible para reintentar
+  await page.waitForFunction(() => { const b = document.querySelector('.btn-confirmar[data-c=confirmar]'); return b && !b.disabled; });
+}));
+
+test('V2: un cambio del pedido con pago mixto abierto conserva los campos del pago', async () => abrir(async page => {
+  await page.evaluate(id => abrirMesa(id), MESA);
+  await page.waitForSelector('#btn-confirm');
+  await page.click('#btn-confirm');
+  await page.click('[data-m="mixed"]');
+  await page.waitForSelector('#cobro-mixto-slot #mixed-payments-box');
+  await page.evaluate(() => { const k = Object.keys(carrito)[0]; carrito[k].qty = Number(carrito[k].qty) + 1; renderCart(); });
+  await page.waitForSelector('#cobro-msg:not(:empty)');
+  assert.equal(await page.$$eval('#cobro-screen #mixed-payments-box', n => n.length), 1);
 }));
 
 test('V2: Negocio muestra indicadores reales y turnos del servidor simulado', async () => abrir(async page => {

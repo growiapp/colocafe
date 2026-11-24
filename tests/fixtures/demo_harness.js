@@ -49,7 +49,7 @@ const aplicar=()=>{
   window.__contextoCuenta={loading:false,loggedIn:true,nombre:'Caja Palermo',rol:'operator',userId:U,storeId:S,store:{id:S,name:'Colo Café · Palermo'},storeCount:2};
   window.__turnoVerificado={userId:U,storeId:S,abierto:true,id:'demo-shift'};
   window.getOpenOrdersSyncState=()=>({ready:true,state:'ok',hasSupabaseRead:true});
-  window.getActiveStoreName=()=> 'Colo Café · Palermo';
+  window.getActiveStoreName=()=> 'Colo Café · Palermo';window.getDashboardState=()=>null;
   try{renderContextoGlobal();}catch(_){}
   return true;
 };
