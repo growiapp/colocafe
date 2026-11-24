@@ -12452,7 +12452,7 @@ if(config.webappUrl){loadFromSheets();}
     }catch(err){
       console.error('[Customers sync failed]',err);
       setCrState('error',err.message||String(err));
-      showToast('Clientes guardados en este dispositivo. Todavía no llegaron al servidor: volvé a guardar cuando haya conexión.');
+      showToast('No pudimos enviar los clientes al servidor. Siguen pendientes en este dispositivo y no hace falta cargarlos de nuevo; reintentá más tarde.');
     }
   };
   window.saveReservationToSupabase=async function(reservation,opts={}){
@@ -12564,7 +12564,7 @@ if(config.webappUrl){loadFromSheets();}
     }catch(err){
       console.error('[Reservations sync failed]',err);
       setCrState('error',err.message||String(err));
-      showToast('Reservas guardadas en este dispositivo. Todavía no llegaron al servidor: volvé a guardar cuando haya conexión.');
+      showToast('No pudimos enviar las reservas al servidor. Siguen pendientes en este dispositivo y no hace falta cargarlas de nuevo; reintentá más tarde.');
       return {ok:false,total:reservas.length,synced:0,failed:reservas.length,errors:[err?.message||String(err)]};
     }
   };
@@ -13501,7 +13501,7 @@ if(config.webappUrl){loadFromSheets();}
     }catch(err){
       console.error('[Expenses sync failed]',err);
       setExpensesState('error',err?.message||String(err));
-      showToast('Gastos guardados en este dispositivo. Todavía no llegaron al servidor: volvé a guardar cuando haya conexión.');
+      showToast('No pudimos enviar los gastos al servidor. Siguen pendientes en este dispositivo y no hace falta cargarlos de nuevo; reintentá más tarde.');
       return {ok:false,total:gastos.length,synced:0,failed:gastos.length,errors:[err?.message||String(err)]};
     }
   };
