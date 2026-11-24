@@ -55,7 +55,7 @@ test('V2: el Cobro refresca el detalle si el pedido cambia y no cobra con el det
   await page.click('#btn-confirm');
   const antes = await page.$$eval('.cobro-tk .tk-lines li', l => l.map(x => x.innerText.replace(/\s+/g, ' ')));
   const totalAntes = await page.$eval('.cobro-tk .tk-total b', e => e.innerText);
-  await page.evaluate(() => { const k = Object.keys(carrito)[0]; carrito[k].qty = Number(carrito[k].qty) + 1; renderCart(); });
+  await page.evaluate(() => { changeQty(Object.keys(carrito)[0], 1); });
   await page.waitForFunction(t => document.querySelector('.cobro-tk .tk-total b').innerText !== t, totalAntes);
   const despues = await page.$$eval('.cobro-tk .tk-lines li', l => l.map(x => x.innerText.replace(/\s+/g, ' ')));
   assert.notDeepEqual(despues, antes);
@@ -63,7 +63,7 @@ test('V2: el Cobro refresca el detalle si el pedido cambia y no cobra con el det
   const boton = await page.$eval('.btn-confirmar[data-c=confirmar]', e => e.textContent);
   assert.ok(boton.endsWith(await page.$eval('.cobro-tk .tk-total b', e => e.innerText)), boton);
   await page.click('[data-o]');
-  await page.evaluate(() => { window.__ventasAntes = ventas.length; const k = Object.keys(carrito)[0]; carrito[k].qty = Number(carrito[k].qty) + 1; renderCart(); });
+  await page.evaluate(() => { window.__ventasAntes = ventas.length; changeQty(Object.keys(carrito)[0], 1); });
   await page.evaluate(() => document.querySelector('.btn-confirmar[data-c=confirmar]').click());
   assert.equal(await page.evaluate(() => ventas.length), await page.evaluate(() => window.__ventasAntes));
   // tras el rechazo el botón vigente queda disponible para reintentar
@@ -76,7 +76,7 @@ test('V2: un cambio del pedido con pago mixto abierto conserva los campos del pa
   await page.click('#btn-confirm');
   await page.click('[data-m="mixed"]');
   await page.waitForSelector('#cobro-mixto-slot #mixed-payments-box');
-  await page.evaluate(() => { const k = Object.keys(carrito)[0]; carrito[k].qty = Number(carrito[k].qty) + 1; renderCart(); });
+  await page.evaluate(() => { changeQty(Object.keys(carrito)[0], 1); });
   await page.waitForSelector('#cobro-msg:not(:empty)');
   assert.equal(await page.$$eval('#cobro-screen #mixed-payments-box', n => n.length), 1);
 }));
