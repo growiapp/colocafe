@@ -2502,7 +2502,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
           <div class="mesa-h1" id="mesa-titulo"></div>
           <div id="mesa-tipo-badge" class="mesa-tipo-badge"></div>
           <button class="btn-sm" onclick="abrirComandaMesa()" style="font-size:11px;padding:5px 10px">Comanda</button>
-          <button class="btn-sm primary" onclick="openProdRapidoModal()" style="font-size:11px;padding:5px 10px">+ Producto</button>
+          <button class="btn-sm primary" data-solo-admin onclick="openProdRapidoModal()" style="font-size:11px;padding:5px 10px">+ Producto</button>
         </div>
         <div class="frecuentes" id="carga-frecuentes"></div>
         <div class="cat-chips" id="carga-cats"></div>
@@ -2679,7 +2679,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
         <div id="itab-body-cats">
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
             <input class="inv-search" style="flex:1" id="cat-search" type="search" placeholder="Buscar categoría…" oninput="renderCatMgr()">
-            <button class="btn-sm primary" onclick="addCat()">+ Nueva</button>
+            <button class="btn-sm primary" data-solo-admin onclick="addCat()">+ Nueva</button>
           </div>
           <div class="cat-mgr" id="cat-mgr"></div>
         </div>
@@ -2687,7 +2687,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
         <div id="itab-body-prods" style="display:none">
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
             <input class="inv-search" style="flex:1" id="prod-search" type="search" placeholder="Buscar producto…" oninput="renderMenuAdm()">
-            <button class="btn-sm primary" onclick="openProdRapidoModal('ajustes')">+ Producto</button>
+            <button class="btn-sm primary" data-solo-admin onclick="openProdRapidoModal('ajustes')">+ Producto</button>
           </div>
           <div id="menu-adm"></div>
         </div>
@@ -7391,8 +7391,11 @@ function pendientesComanda(items,envios){
 }
 const ordenSectores=secs=>secs.sort((a,b)=>(a==='cafeteria'?0:1)-(b==='cafeteria'?0:1));
 // porSector: {sector:[{cantidad,producto,variantes,nota}]}; titulos: encabezado de cada sector.
+// Sin turno abierto, la comanda lleva a la persona con sesión iniciada (nunca el texto genérico de «Sesión activa»).
+function operadorComanda(target){return turno&&turno.abierto?(target?.operator_name||turno.operador||nombreSesion()||''):(nombreSesion()||target?.operator_name||'');} // con turno abierto no cambia; sin turno, quien envía (no quien abrió la mesa)
+function nombreSesion(){const c=window.__contextoCuenta;return c?.loggedIn&&c.nombre&&c.nombre!=='Sesión activa'?c.nombre:'';}
 function htmlComanda(target,porSector,{titulos={},momento=new Date(),operador}={}){
-  const quien=operador??(target?.operator_name||(turno&&turno.abierto?turno.operador:'')||'');
+  const quien=operador??operadorComanda(target);
   const cuando=`${getLocalDateString(momento)} ${getLocalTimeString(momento)}`;
   const unidades=n=>`${n} ${n===1?'unidad':'unidades'}`;
   return ordenSectores(Object.keys(porSector||{}).filter(s=>porSector[s]?.length)).map(sec=>{
@@ -7483,7 +7486,7 @@ async function marcarComandaEnviada(){
   const client=window.__coloSupabaseClient||window.getSupabaseClient?.(),storeId=window.getActiveStoreId?.();
   const secs=ordenSectores(Object.keys(est.mostrado));if(!secs.length||!client||!storeId)return;
   const boton=$('comanda-enviar');boton.disabled=true;
-  const operador=est.target?.operator_name||(turno&&turno.abierto?turno.operador:'')||null;
+  const operador=operadorComanda(est.target)||null;
   let problema='';
   for(const sec of secs){
     const seq=Math.max(0,...est.envios.filter(e=>e.sector===sec).map(e=>Number(e.seq)||0))+1;
@@ -7649,8 +7652,12 @@ function renderAjustes(){
   const gsLegacyNote=$('gs-legacy-note'); if(gsLegacyNote) gsLegacyNote.style.display=canTech?'block':'none';
   window.renderTechnicalSupportPanel?.();
 }
+// Solo la interfaz: el servidor (RLS) ya rechaza el alta/edición de catálogo para el operador. Rol desconocido (sin sesión) = no se oculta nada.
+function puedeEditarCatalogo(){const r=String(window.getSupabaseActiveRole?.()||window.getActiveStoreRole?.()||'').toLowerCase();return !r||r==='owner'||r==='admin';}
+function aplicarPermisosCatalogo(){const ok=puedeEditarCatalogo();document.querySelectorAll('[data-solo-admin]').forEach(b=>{b.style.display=ok?'':'none';});return ok;}
 function renderCatMgr(){
   const el=$('cat-mgr');if(!el)return;
+  const edita=aplicarPermisosCatalogo();
   if(catalogIsWaitingForSupabase()){
     el.innerHTML='<div class="empty">Cargando datos…</div>';
     return;
@@ -7665,10 +7672,10 @@ function renderCatMgr(){
       <span style="flex:1;font-size:13px;font-weight:500">${c.name}</span>
       <span style="font-size:11px;color:var(--ink3)">${c.seccion==='cafeteria'?'☕':'🍳'}</span>
       ${c.reservable?'<span style="font-size:11px;color:var(--ink3)" title="Permite reserva">📋</span>':'<span style="width:18px"></span>'}
-      <div class="icon-btn" onclick="openCatModal(${c._i})" title="Editar">
+      ${edita?`<div class="icon-btn" onclick="openCatModal(${c._i})" title="Editar">
         <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2l3 3L5 14H2v-3L11 2z"/></svg>
       </div>
-      <button class="cat-del" onclick="pedirConfirm('¿Eliminar ${c.name}?',()=>deleteCat(${c._i}))">×</button>
+      <button class="cat-del" onclick="pedirConfirm('¿Eliminar ${c.name}?',()=>deleteCat(${c._i}))">×</button>`:''}
     </div>`).join('');
 }
 function toggleCP(i){document.querySelectorAll('.color-picker-wrap').forEach((el,j)=>{if(j!==i)el.classList.remove('open');});document.getElementById('cp-'+i)?.classList.toggle('open');}
@@ -7741,6 +7748,7 @@ function toggleProdIlimitado(id,checked){const p=menu.find(x=>sameId(x.id,id));i
 function renderMenuAdm(){
   if(activeMenuTab==='rapidos')renderAccesosRapidos();
   const el=$('menu-adm');if(!el)return;
+  const edita=aplicarPermisosCatalogo();
   if(catalogIsWaitingForSupabase()){
     el.innerHTML='<div class="empty">Cargando datos…</div>';
     return;
@@ -7763,10 +7771,10 @@ function renderMenuAdm(){
       ${stockEtiqueta(p)}
     </div>
     <label class="ilim-toggle"><input type="checkbox" ${p.ilimitado?'checked':''} onchange="toggleProdIlimitado('${p.id}',this.checked)"> ∞</label>
-    <div class="icon-btn" onclick="openProdModal('${p.id}')" title="Editar">
+    ${edita?`<div class="icon-btn" onclick="openProdModal('${p.id}')" title="Editar">
       <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2l3 3L5 14H2v-3L11 2z"/></svg>
     </div>
-    <button class="cat-del" onclick="pedirEliminarProductoInline('${p.id}')" title="Eliminar">×</button>
+    <button class="cat-del" onclick="pedirEliminarProductoInline('${p.id}')" title="Eliminar">×</button>`:''}
   </div>`;}).join('');
 }
 
@@ -14877,6 +14885,7 @@ if(config.webappUrl){loadFromSheets();}
   let salesPreviewLastReadAt='';
   let salesPreviewLastError='';
   let salesPreviewResult=null;
+  let salesPreviewSeq=0,salesPreviewAppliedSeq=0; // «gana la lectura más nueva»: una lectura vieja que llega tarde (p. ej. tras vencer su espera) no pisa el estado compartido
   let historyPreviewLastReadAt='';
   let historyPreviewLastError='';
   let historyPreviewResult=null;
@@ -14904,7 +14913,7 @@ if(config.webappUrl){loadFromSheets();}
   let salesAutoSyncLastRunAt=0;
   const SALES_AUTO_SYNC_COOLDOWN_MS=30000;
   const HISTORY_REFRESH_STALE_MS=45000;
-  const DASHBOARD_REFRESH_STALE_MS=45000;
+  const DASHBOARD_REFRESH_STALE_MS=15000;
 
   window.isValidUuid=window.isValidUuid||function isValidUuid(value){
     return typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -15054,6 +15063,7 @@ if(config.webappUrl){loadFromSheets();}
     return null;
   }
   let dashboardVisiblePrevPeriodTotal=null;
+  let dashboardLastAttemptMs=0; // último intento de lectura (también si falla): evita reintentos en ráfaga ante un error persistente
   let dashboardVisiblePrevPeriodLabel='';
   function setDashboardState({source='pending',rows=[],tickets=[],itemsCount=0,paymentsCount=0,total=0,lastReadAt='',error='',loading=false,range=null,prevPeriodTotal=undefined,prevPeriodLabel=undefined}={}){
     dashboardVisibleSource=source;
@@ -15594,6 +15604,7 @@ if(config.webappUrl){loadFromSheets();}
     }
   }
   window.loadSalesFromSupabasePreview=async function(opts={}){
+    const mySeq=++salesPreviewSeq;
     const storeId=getSalesStoreId();
     const client=getSalesSupabaseClient();
     salesPreviewLastError='';
@@ -15649,6 +15660,10 @@ if(config.webappUrl){loadFromSheets();}
       paymentRows.forEach(payment=>{(paymentMap[payment.sale_id]||(paymentMap[payment.sale_id]=[])).push(payment);});
       const comparableRows=filteredSales.flatMap(sale=>mapSupabaseSaleToComparableLocalRows(sale,itemMap[sale.id]||[],paymentMap[sale.id]||[]));
       const salesTotal=money2(filteredSales.reduce((sum,s)=>sum+(Number(s.total_amount)||0),0));
+      if(mySeq<salesPreviewAppliedSeq){ // ya se aplicó una lectura más nueva: este resultado es solo para quien lo pidió, no toca el estado compartido
+        return {opts:{...opts,range},sales:filteredSales,items:itemRows,payments:paymentRows,comparableRows,partialWarnings,comparison:null,obsoleta:true};
+      }
+      salesPreviewAppliedSeq=mySeq;
       salesPreviewCounts={sales:filteredSales.length,items:itemRows.length,payments:paymentRows.length,total:salesTotal};
       salesPreviewLastReadAt=stampSalesMoment();
       salesPreviewLastError=partialWarnings.length?'No pudimos actualizar el detalle completo. Reintentá.':'';
@@ -15668,6 +15683,7 @@ if(config.webappUrl){loadFromSheets();}
       }
       return salesPreviewResult;
     }catch(err){
+      if(mySeq<salesPreviewAppliedSeq) return null; // una lectura más nueva ya está aplicada: el error de esta no debe pisar su estado
       salesPreviewLastError=err?.message||String(err);
       console.error('[Sales preview read failed]',{
         message:err?.message||String(err),
@@ -15999,6 +16015,7 @@ if(config.webappUrl){loadFromSheets();}
   window.reloadDashboardFromSupabase=async function({silent=false,forceRefresh=true,range=null}={}){
     const appliedRange=range||((typeof dashRango==='function')?dashRango():{desde:today(),hasta:today()});
     if(dashboardVisibleLoading) return null;
+    dashboardLastAttemptMs=Date.now();
     if(!hasSalesSupabaseReady()){
       const local=buildLocalDashboardDataset(appliedRange);
       setDashboardState({...local,lastReadAt:dashboardVisibleLastReadAt||'',error:'Dashboard en modo local/fallback',loading:false});
@@ -16127,6 +16144,7 @@ if(config.webappUrl){loadFromSheets();}
   window.ensureDashboardSource=async function({range=null,forceRefresh=false}={}){
     const appliedRange=range||((typeof dashRango==='function')?dashRango():{desde:today(),hasta:today()});
     if(dashboardVisibleLoading) return;
+    if(!forceRefresh && hasSalesSupabaseReady() && dashboardVisibleSource!=='supabase' && Date.now()-dashboardLastAttemptMs<DASHBOARD_REFRESH_STALE_MS && dashboardVisibleRange.desde===appliedRange.desde && dashboardVisibleRange.hasta===appliedRange.hasta) return; // la última lectura falló hace poco: no se repite en ráfaga
     if(hasSalesSupabaseReady()){
       if(forceRefresh || dashboardVisibleSource!=='supabase' || dashboardVisibleRange.desde!==appliedRange.desde || dashboardVisibleRange.hasta!==appliedRange.hasta || isStaleRead(dashboardVisibleLastReadMs,DASHBOARD_REFRESH_STALE_MS)){
         await reloadDashboardFromSupabase({silent:true,forceRefresh:true,range:appliedRange});
@@ -16136,6 +16154,17 @@ if(config.webappUrl){loadFromSheets();}
     const local=buildLocalDashboardDataset(appliedRange);
     setDashboardState({...local,lastReadAt:dashboardVisibleLastReadAt||'',error:'Dashboard en modo local/fallback',loading:false});
   };
+  // Refresco automático de Reportes: UN solo temporizador global (idempotente), cada 60 s y solo si Reportes está activo y el documento visible.
+  // Reutiliza ensureDashboardSource (umbral de 15 s, freno de errores y no pisa una carga en curso); sin Realtime.
+  window.__refrescoAutomaticoReportes=function(){
+    if(document.visibilityState!=='visible'||activeTab!=='dashboard'||dashboardVisibleLoading)return false;
+    window.ensureDashboardSource?.().catch?.(()=>{});return true;
+  };
+  window.__instalarRefrescoReportes=function(){
+    if(!window.__dashAutoTimer)window.__dashAutoTimer=setInterval(()=>window.__refrescoAutomaticoReportes(),60000);
+    return window.__dashAutoTimer;
+  };
+  window.__instalarRefrescoReportes();
   async function resolveSaleProductId(row,client,storeId,cache){
     cache=cache||{};
     const direct=row?._product_sb_id;
@@ -18033,7 +18062,11 @@ let sel=null;                // id de la mesa seleccionada
 const tabC=()=>$('tab-carga'),vmesas=()=>$('view-mesas'),vped=()=>$('view-pedido');
 const idMesa=m=>String(getMesaOpenOrderId(m));
 const mesaDe=id=>(mesas||[]).find(m=>idMesa(m)===String(id));
-const pend=new Map(),envPorMesa=new Map();let pendAt=0,pendBusy=false;
+const pend=new Map(),envPorMesa=new Map(),pendConocidas=new Set();let pendAt=0,pendBusy=false,pendIntento=0,pendTimer=0,pendPendiente=false;
+const contarPend=m=>Object.values(pendientesComanda(m.items,envPorMesa.get(idMesa(m))||[])).reduce((s,l)=>s+l.reduce((a,x)=>a+Math.abs(Number(x.cantidad)||0),0),0);
+// Sin red: con las comandas ya leídas, un cambio de la mesa se refleja al momento. Si aparece una mesa aún no leída, se lee ya.
+const faltanLeer=()=>(mesas||[]).some(m=>{const i=idMesa(m);return UUID_RE.test(i)&&!pendConocidas.has(i);}); // alguna mesa con id de servidor aún sin sus comandas
+function recalcPend(){let nueva=false;(mesas||[]).forEach(m=>{const i=idMesa(m);if(pendConocidas.has(i)||!UUID_RE.test(i))pend.set(i,contarPend(m));else nueva=true;});return nueva;}
 let cart=null,cartHome=null,resBloque=null,resHome=null;
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Solo las comandas de las mesas abiertas de este local, en lotes de 50 mesas y páginas de 1000 filas: el historial de mesas cerradas no cuenta ni topa la consulta.
@@ -18050,22 +18083,21 @@ async function leerComandas(client,storeId,ids){
   }
   return out;
 }
-async function cargarPend(force){
-  if(pendBusy)return;if(!force&&Date.now()-pendAt<20000)return;
+async function cargarPend(force,necesaria){
+  if(pendBusy){if(necesaria)pendPendiente=true;return;} // la lectura que una mesa nueva necesita y choca con otra en curso no se pierde: se repite al terminar
+  if(!force&&Date.now()-pendAt<20000)return;
   const client=(window.__coloSupabaseClient||window.getSupabaseClient?.()),storeId=(typeof config!=='undefined'&&config?.activeStoreId)||'';
   if(!client||!storeId||typeof pendientesComanda!=='function')return;
-  pendBusy=true;
+  pendBusy=true;pendIntento=Date.now();
   try{
     const ids=[...new Set((mesas||[]).map(idMesa).filter(i=>UUID_RE.test(i)))];
     const data=ids.length?await leerComandas(client,storeId,ids):[];
     const por=new Map();data.forEach(d=>{if(!por.has(d.open_order_id))por.set(d.open_order_id,[]);por.get(d.open_order_id).push(d);});
     pend.clear();envPorMesa.clear();por.forEach((v,k)=>envPorMesa.set(String(k),v));
-    (mesas||[]).forEach(m=>{
-      const p=pendientesComanda(m.items,por.get(idMesa(m))||[]);
-      pend.set(idMesa(m),Object.values(p).reduce((s,l)=>s+l.reduce((a,x)=>a+Math.abs(Number(x.cantidad)||0),0),0));
-    });
+    pendConocidas.clear();ids.forEach(x=>pendConocidas.add(x));
+    (mesas||[]).forEach(m=>pend.set(idMesa(m),contarPend(m)));
     pendAt=Date.now();pintarMesas();actualizarBotonComanda();pintarCabecera();
-  }catch(_){}finally{pendBusy=false;}
+  }catch(_){}finally{pendBusy=false;if(pendPendiente){pendPendiente=false;if(faltanLeer())setTimeout(()=>cargarPend(true,true),Math.max(0,5000-(Date.now()-pendIntento))+50);}}
 }
 function pintarMesas(){
   const cont=$('mesas-container');if(!cont)return;
@@ -18176,7 +18208,9 @@ function montarAtencion(){
     const c=e.target.closest?.('.mesa-card[data-mesa]');if(!c||e.target!==c)return;
     e.preventDefault();c.click();
   });
-  new MutationObserver(()=>{if(sel&&!mesaDe(sel)&&modo==='panel')irLista();pintarMesas();pintarCabecera();cargarPend(false);}).observe(cont,{childList:true});
+  new MutationObserver(()=>{if(sel&&!mesaDe(sel)&&modo==='panel')irLista();const nueva=recalcPend();pintarMesas();actualizarBotonComanda();pintarCabecera();
+    // mesa nueva aún no leída: se lee ya, o apenas venza el freno de 5 s (si no, su etiqueta quedaría sin calcular hasta otro cambio de la lista)
+    if(nueva){const espera=5000-(Date.now()-pendIntento);if(espera<=0)cargarPend(true,true);else if(!pendTimer)pendTimer=setTimeout(()=>{pendTimer=0;if(faltanLeer())cargarPend(true,true);},espera+50);}else cargarPend(false);}).observe(cont,{childList:true});
   window.matchMedia('(min-width:1024px)').addEventListener('change',()=>{if(modo==='panel'&&!escritorio())irDetalle();colocar();});
   const cr=$('cart-rows');if(cr)new MutationObserver(()=>{anotarCarrito();actualizarBotonComanda();}).observe(cr,{childList:true});
   const ctot=$('cart-total');if(ctot)new MutationObserver(anotarCarrito).observe(ctot,{childList:true,characterData:true,subtree:true});

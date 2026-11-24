@@ -197,3 +197,171 @@ test('V2: «N sin enviar» no se contamina con historial de mesas cerradas, otro
     };
   });
 }));
+
+test('V2: «N sin enviar» se actualiza al instante al cambiar la mesa, sin nueva lectura de red', async () => abrir(async page => {
+  await page.waitForFunction(() => window.__DEMO_LOG.some(q => q.t === 'open_order_dispatches'));
+  await page.waitForTimeout(2500);
+  assert.deepEqual(await tagsMesas(page), ESPERADO);
+  const lecturas = () => page.evaluate(() => window.__DEMO_LOG.filter(q => q.t === 'open_order_dispatches').length);
+  const antes = await lecturas();
+  const tocada = await page.evaluate(() => {
+    const m = mesas.find(x => x.nombre === 'Mesa 4'); const it = Object.values(m.items).find(i => Number(i.qty) > 0);
+    it.qty = Number(it.qty) + 1; renderMesasSection(); return !!it;
+  });
+  assert.ok(tocada);
+  await page.waitForFunction(() => [...document.querySelectorAll('.mesa-card')].some(c => /3 sin enviar/.test(c.innerText) && /Mesa 4/.test(c.innerText)), null, {timeout: 1500});
+  assert.equal(await lecturas(), antes, 'el cambio local no debe pedir una lectura nueva');
+}));
+
+test('V2: la comanda sin turno abierto lleva a la persona con sesión, no un texto genérico ni vacío', async () => abrir(async page => {
+  const r = await page.evaluate(() => {
+    const porSector = {cafeteria: [{cantidad: 1, producto: 'Latte', variantes: [], nota: ''}]};
+    const viejo = turno; turno = {...turno, abierto: false, operador: ''};
+    window.__contextoCuenta = {loggedIn: true, nombre: 'Ana Pérez'};
+    const con = htmlComanda({}, porSector);
+    window.__contextoCuenta = {loggedIn: true, nombre: 'Sesión activa'};
+    const generico = htmlComanda({}, porSector);
+    turno = viejo;
+    return {con, generico, nombreSesion: nombreSesion()};
+  });
+  assert.match(r.con, /Ana Pérez/);
+  assert.doesNotMatch(r.generico, /Sesión activa/);
+  assert.equal(r.nombreSesion, '');
+}));
+
+test('V2: Reportes vuelve a leer el servidor si los datos tienen más de 15 s', async () => abrir(async page => {
+  const r = await page.evaluate(() => ({ttl: typeof DASHBOARD_REFRESH_STALE_MS === 'undefined' ? null : DASHBOARD_REFRESH_STALE_MS}));
+  assert.ok(r.ttl === null || r.ttl <= 15000, String(r.ttl)); // la constante vive en un ámbito interno: se comprueba también en el código
+  assert.match(fs.readFileSync(path.join(root, 'index.html'), 'utf8'), /DASHBOARD_REFRESH_STALE_MS=15000;/);
+}));
+
+test('V2: Reportes no reintenta en ráfaga tras un error de lectura (guarda de último intento presente en la ruta real)', async () => {
+  const h = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  // la lectura registra su intento (también si falla) y la carga automática se frena durante 15 s si la fuente no es Supabase y el rango no cambió
+  assert.match(h, /dashboardLastAttemptMs=Date\.now\(\);\r?\n\s+if\(!hasSalesSupabaseReady\(\)\)/);
+  assert.match(h, /!forceRefresh && hasSalesSupabaseReady\(\) && dashboardVisibleSource!=='supabase' && Date\.now\(\)-dashboardLastAttemptMs<DASHBOARD_REFRESH_STALE_MS/);
+});
+
+test('V2: sin turno la comanda lleva a quien envía (no a quien abrió la mesa); con turno abierto no cambia', async () => abrir(async page => {
+  const r = await page.evaluate(() => {
+    const viejo = turno, v = {}; const ses = n => { window.__contextoCuenta = {loggedIn: true, nombre: n}; };
+    turno = {...turno, abierto: false, operador: ''}; ses('Ana');
+    v.sinTurno = operadorComanda({operator_name: 'Luis'});            // quien envía
+    ses('Sesión activa'); v.sinTurnoSinNombre = operadorComanda({operator_name: 'Luis'}); // sin nombre de sesión: el de la mesa
+    turno = {...viejo, abierto: true, operador: 'Beto'}; ses('Ana');
+    v.conTurno = operadorComanda({operator_name: 'Luis'});            // como antes: el de la mesa
+    v.conTurnoMesaVacia = operadorComanda({});                        // como antes: el del turno
+    turno = viejo; return v;
+  });
+  assert.deepEqual(r, {sinTurno: 'Ana', sinTurnoSinNombre: 'Luis', conTurno: 'Luis', conTurnoMesaVacia: 'Beto'});
+}));
+
+test('V2: una mesa nueva que aparece justo tras una lectura de comandas se lee al vencer el freno, sin esperar otro cambio', async () => abrir(async page => {
+  await page.waitForFunction(() => window.__DEMO_LOG.some(q => q.t === 'open_order_dispatches'));
+  await page.waitForTimeout(2500);
+  const lecturas = () => page.evaluate(() => window.__DEMO_LOG.filter(q => q.t === 'open_order_dispatches').length);
+  const agregar = (id, n) => page.evaluate(([i, nombre]) => { const nueva = JSON.parse(JSON.stringify(mesas[0])); nueva.id = i; nueva._sb_id = i; delete nueva.open_order_id; nueva.nombre = nombre; mesas.push(nueva); renderMesasSection(); }, [id, n]);
+  const c0 = await lecturas();
+  await agregar('0000dead-0000-4000-8000-00000000beef', 'Mesa Nueva A');       // mesa nueva: lectura inmediata
+  await page.waitForFunction(n => window.__DEMO_LOG.filter(q => q.t === 'open_order_dispatches').length > n, c0, {timeout: 4000});
+  const c1 = await lecturas();
+  await agregar('0000dead-0000-4000-8000-00000000cafe', 'Mesa Nueva B');       // otra mesa nueva a menos de 5 s de la lectura anterior
+  await page.waitForFunction(n => window.__DEMO_LOG.filter(q => q.t === 'open_order_dispatches').length > n, c1, {timeout: 8000}); // se lee al vencer el freno (≈5 s), no a los 20 s
+}));
+
+test('V2: una lectura de comandas forzada que choca con otra en curso no se pierde (se repite al terminar)', async () => abrir(async page => {
+  await page.waitForFunction(() => window.__DEMO_LOG.some(q => q.t === 'open_order_dispatches'));
+  await page.waitForTimeout(2500);
+  // la lectura de comandas tarda 6 s: la mesa B aparece mientras se lee la A y su temporizador (5 s) vence con la lectura A todavía ocupada
+  await page.evaluate(() => { const c = window.__coloSupabaseClient; const orig = c.from.bind(c); c.from = t => { const b = orig(t); if (t === 'open_order_dispatches') { const th = b.then.bind(b); b.then = (res, rej) => { window.__enCurso = (window.__enCurso || 0) + 1; return new Promise(r => setTimeout(r, 6000)).then(() => th(res, rej)); }; } return b; }; });
+  const lecturas = () => page.evaluate(() => window.__DEMO_LOG.filter(q => q.t === 'open_order_dispatches').length);
+  const agregar = (id, n) => page.evaluate(([i, nombre]) => { const nueva = JSON.parse(JSON.stringify(mesas[0])); nueva.id = i; nueva._sb_id = i; delete nueva.open_order_id; nueva.nombre = nombre; mesas.push(nueva); renderMesasSection(); }, [id, n]);
+  const c0 = await lecturas();
+  await agregar('0000dead-0000-4000-8000-00000000aaaa', 'Mesa Lenta A');
+  await page.waitForFunction(() => window.__enCurso >= 1, null, {timeout: 8000}); // la lectura de A ya está en curso (tarda 6 s)
+  await agregar('0000dead-0000-4000-8000-00000000bbbb', 'Mesa Lenta B');
+  await page.waitForFunction(n => window.__DEMO_LOG.filter(q => q.t === 'open_order_dispatches').length >= n + 2, c0, {timeout: 22000}); // A y luego la repetición por B
+}));
+
+test('V2: refresco automático de Reportes: un solo temporizador y solo con Reportes activo y documento visible', async () => abrir(async page => {
+  const r = await page.evaluate(async () => {
+    const out = {};
+    out.mismoTemporizador = window.__instalarRefrescoReportes() === window.__dashAutoTimer && window.__instalarRefrescoReportes() === window.__instalarRefrescoReportes();
+    goTab('carga'); await new Promise(r => setTimeout(r, 600));
+    let n = 0; const orig = window.ensureDashboardSource; window.ensureDashboardSource = () => { n++; return Promise.resolve(); };
+    out.enOtraPestana = window.__refrescoAutomaticoReportes(); out.llamadasOtra = n;
+    goTab('dashboard'); await new Promise(r => setTimeout(r, 800)); n = 0;
+    out.activoVisible = window.__refrescoAutomaticoReportes(); out.llamadasActivo = n;
+    Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => 'hidden'}); n = 0;
+    out.oculto = window.__refrescoAutomaticoReportes(); out.llamadasOculto = n;
+    delete document.visibilityState; n = 0;
+    out.alVolver = window.__refrescoAutomaticoReportes(); out.llamadasAlVolver = n;
+    window.ensureDashboardSource = orig; return out;
+  });
+  assert.deepEqual(r, {mismoTemporizador: true, enOtraPestana: false, llamadasOtra: 0, activoVisible: true, llamadasActivo: 1, oculto: false, llamadasOculto: 0, alVolver: true, llamadasAlVolver: 1});
+  // el temporizador real es de 60 s (se comprueba en el código, no esperando un minuto)
+  assert.match(fs.readFileSync(path.join(root, 'index.html'), 'utf8'), /setInterval\(\(\)=>window\.__refrescoAutomaticoReportes\(\),60000\)/);
+}));
+
+// ── Carrera señalada por la revisión independiente: una lectura de ventas ABANDONADA (venció su espera) que llega tarde no debe pisar el estado compartido ──
+test('V2: una lectura de ventas lenta que llega fuera de orden no pisa la lectura más nueva (caché de comparación)', async () => abrir(async page => {
+  const r = await page.evaluate(async () => {
+    const c = window.__coloSupabaseClient; const orig = c.from.bind(c); let n = 0, soltar;
+    const usuario = {id: '00000000-0000-4000-8000-0000000000aa'}; c.auth = {getSession: async () => ({data: {session: {user: usuario}}, error: null}), getUser: async () => ({data: {user: usuario}, error: null})}; // sesión mínima: el arnés no la trae
+    // la PRIMERA lectura de ventas queda colgada y, al soltarla, devuelve una lista VACÍA (dato viejo/incompleto)
+    c.from = t => { const b = t === 'sales' ? orig(t).eq('shift_id', '50000000-0000-4000-8000-000000000001') : orig(t); /* el arnés solo responde 'sales' con filtro de turno */ if (t === 'sales' && ++n === 1) { b.then = (res, rej) => new Promise(r => { soltar = r; }).then(() => Promise.resolve({data: [], error: null}).then(res, rej)); } return b; };
+    const rango = {allDates: true, limit: false, forceRefresh: true, silent: true};
+    const A = window.loadSalesFromSupabasePreview(rango);          // lectura A: colgada
+    await new Promise(r => setTimeout(r, 300));
+    const B = await window.loadSalesFromSupabasePreview(rango);    // lectura B (más nueva): termina bien
+    const antes = (await window.compareLocalSalesVsSupabase()).supabase.tickets;
+    soltar(); await A; await new Promise(r => setTimeout(r, 300));  // A llega tarde, con datos vacíos
+    const despues = (await window.compareLocalSalesVsSupabase()).supabase.tickets;
+    return {ticketsDeB: B?.comparableRows?.length > 0, antes, despues};
+  });
+  assert.ok(r.ticketsDeB, 'la lectura B debe traer ventas');
+  assert.ok(r.antes > 0, 'la comparación debe ver las ventas de B');
+  assert.equal(r.despues, r.antes, 'la lectura vieja que llega tarde pisó la comparación: ' + JSON.stringify(r));
+}));
+
+// ── Escenarios dirigidos del refresco de Reportes: cargas simultáneas, cambio de pestaña y de foco, y errores de red ──
+const prepararVentas = (modo, ms) => page => page.evaluate(([modo, ms]) => {
+  const c = window.__coloSupabaseClient; const orig = c.from.bind(c); const u = {id: '00000000-0000-4000-8000-0000000000aa'};
+  c.auth = {getSession: async () => ({data: {session: {user: u}}, error: null}), getUser: async () => ({data: {user: u}, error: null})};
+  window.__ventasLecturas = 0;
+  c.from = t => { const b = t === 'sales' ? orig(t).eq('shift_id', '50000000-0000-4000-8000-000000000001') : orig(t);
+    ['gte', 'lte', 'gt', 'lt', 'neq', 'order', 'is', 'not'].forEach(m => { if (typeof b[m] !== 'function') b[m] = () => b; }); // el arnés solo trae eq/in/range/limit
+    if (t === 'sales') { const th = b.then.bind(b); b.then = (res, rej) => { window.__ventasLecturas++; return new Promise(r => setTimeout(r, ms)).then(() => modo === 'error' ? Promise.resolve({data: null, error: {message: 'sin red (prueba)'}}).then(res, rej) : th(res, rej)); }; }
+    return b; };
+}, [modo, ms]);
+
+test('V2: Reportes no acumula cargas simultáneas (temporizador, entrada a la pestaña, foco y recarga manual a la vez = una sola carga real)', async () => abrir(async page => {
+  await prepararVentas('ok', 900)(page);
+  const r = await page.evaluate(async () => {
+    // se mide cuántas llamadas a la recarga del tablero hacen una carga REAL (duran ≥ 500 ms por la demora simulada) frente a las que se descartan al instante
+    const orig = window.reloadDashboardFromSupabase; const llamadas = [];
+    window.reloadDashboardFromSupabase = function () { const t0 = Date.now(); const p = orig.apply(this, arguments); llamadas.push(p.then(() => Date.now() - t0)); return p; };
+    goTab('carga'); await new Promise(r => setTimeout(r, 100));
+    const a = window.reloadDashboardFromSupabase({silent: true, forceRefresh: true});             // carga en curso
+    goTab('dashboard'); window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('visibilitychange'));
+    const b = window.reloadDashboardFromSupabase({silent: true, forceRefresh: true});             // recarga manual simultánea
+    window.__refrescoAutomaticoReportes(); window.__refrescoAutomaticoReportes();                  // dos ticks del temporizador
+    goTab('carga'); await new Promise(r => setTimeout(r, 50)); goTab('dashboard');                 // cambio de pestaña con la carga en curso
+    await a; await b; await new Promise(r => setTimeout(r, 2500));
+    const duraciones = await Promise.all(llamadas);
+    return {reales: duraciones.filter(d => d >= 500).length, total: duraciones.length};
+  });
+  assert.equal(r.reales, 1, 'cargas reales simultáneas: ' + JSON.stringify(r));
+}));
+
+test('V2: Reportes con error de lectura persistente no reintenta en ráfaga (ticks, foco y cambios de pestaña seguidos = sin lecturas nuevas)', async () => abrir(async page => {
+  await prepararVentas('error', 50)(page);
+  const r = await page.evaluate(async () => {
+    await window.reloadDashboardFromSupabase({silent: true, forceRefresh: true});              // falla
+    const tras = window.__ventasLecturas;
+    for (let i = 0; i < 4; i++) { goTab('carga'); await new Promise(r => setTimeout(r, 120)); goTab('dashboard'); window.__refrescoAutomaticoReportes(); await new Promise(r => setTimeout(r, 400)); }
+    return {tras, despues: window.__ventasLecturas};
+  });
+  assert.ok(r.tras >= 1);
+  assert.equal(r.despues, r.tras, 'hubo reintentos dentro de los 15 s del freno: ' + JSON.stringify(r));
+}));

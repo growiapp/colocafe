@@ -141,7 +141,11 @@ let sel=null;                // id de la mesa seleccionada
 const tabC=()=>$('tab-carga'),vmesas=()=>$('view-mesas'),vped=()=>$('view-pedido');
 const idMesa=m=>String(getMesaOpenOrderId(m));
 const mesaDe=id=>(mesas||[]).find(m=>idMesa(m)===String(id));
-const pend=new Map(),envPorMesa=new Map();let pendAt=0,pendBusy=false;
+const pend=new Map(),envPorMesa=new Map(),pendConocidas=new Set();let pendAt=0,pendBusy=false,pendIntento=0,pendTimer=0,pendPendiente=false;
+const contarPend=m=>Object.values(pendientesComanda(m.items,envPorMesa.get(idMesa(m))||[])).reduce((s,l)=>s+l.reduce((a,x)=>a+Math.abs(Number(x.cantidad)||0),0),0);
+// Sin red: con las comandas ya leídas, un cambio de la mesa se refleja al momento. Si aparece una mesa aún no leída, se lee ya.
+const faltanLeer=()=>(mesas||[]).some(m=>{const i=idMesa(m);return UUID_RE.test(i)&&!pendConocidas.has(i);}); // alguna mesa con id de servidor aún sin sus comandas
+function recalcPend(){let nueva=false;(mesas||[]).forEach(m=>{const i=idMesa(m);if(pendConocidas.has(i)||!UUID_RE.test(i))pend.set(i,contarPend(m));else nueva=true;});return nueva;}
 let cart=null,cartHome=null,resBloque=null,resHome=null;
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Solo las comandas de las mesas abiertas de este local, en lotes de 50 mesas y páginas de 1000 filas: el historial de mesas cerradas no cuenta ni topa la consulta.
@@ -158,22 +162,21 @@ async function leerComandas(client,storeId,ids){
   }
   return out;
 }
-async function cargarPend(force){
-  if(pendBusy)return;if(!force&&Date.now()-pendAt<20000)return;
+async function cargarPend(force,necesaria){
+  if(pendBusy){if(necesaria)pendPendiente=true;return;} // la lectura que una mesa nueva necesita y choca con otra en curso no se pierde: se repite al terminar
+  if(!force&&Date.now()-pendAt<20000)return;
   const client=(window.__coloSupabaseClient||window.getSupabaseClient?.()),storeId=(typeof config!=='undefined'&&config?.activeStoreId)||'';
   if(!client||!storeId||typeof pendientesComanda!=='function')return;
-  pendBusy=true;
+  pendBusy=true;pendIntento=Date.now();
   try{
     const ids=[...new Set((mesas||[]).map(idMesa).filter(i=>UUID_RE.test(i)))];
     const data=ids.length?await leerComandas(client,storeId,ids):[];
     const por=new Map();data.forEach(d=>{if(!por.has(d.open_order_id))por.set(d.open_order_id,[]);por.get(d.open_order_id).push(d);});
     pend.clear();envPorMesa.clear();por.forEach((v,k)=>envPorMesa.set(String(k),v));
-    (mesas||[]).forEach(m=>{
-      const p=pendientesComanda(m.items,por.get(idMesa(m))||[]);
-      pend.set(idMesa(m),Object.values(p).reduce((s,l)=>s+l.reduce((a,x)=>a+Math.abs(Number(x.cantidad)||0),0),0));
-    });
+    pendConocidas.clear();ids.forEach(x=>pendConocidas.add(x));
+    (mesas||[]).forEach(m=>pend.set(idMesa(m),contarPend(m)));
     pendAt=Date.now();pintarMesas();actualizarBotonComanda();pintarCabecera();
-  }catch(_){}finally{pendBusy=false;}
+  }catch(_){}finally{pendBusy=false;if(pendPendiente){pendPendiente=false;if(faltanLeer())setTimeout(()=>cargarPend(true,true),Math.max(0,5000-(Date.now()-pendIntento))+50);}}
 }
 function pintarMesas(){
   const cont=$('mesas-container');if(!cont)return;
@@ -284,7 +287,9 @@ function montarAtencion(){
     const c=e.target.closest?.('.mesa-card[data-mesa]');if(!c||e.target!==c)return;
     e.preventDefault();c.click();
   });
-  new MutationObserver(()=>{if(sel&&!mesaDe(sel)&&modo==='panel')irLista();pintarMesas();pintarCabecera();cargarPend(false);}).observe(cont,{childList:true});
+  new MutationObserver(()=>{if(sel&&!mesaDe(sel)&&modo==='panel')irLista();const nueva=recalcPend();pintarMesas();actualizarBotonComanda();pintarCabecera();
+    // mesa nueva aún no leída: se lee ya, o apenas venza el freno de 5 s (si no, su etiqueta quedaría sin calcular hasta otro cambio de la lista)
+    if(nueva){const espera=5000-(Date.now()-pendIntento);if(espera<=0)cargarPend(true,true);else if(!pendTimer)pendTimer=setTimeout(()=>{pendTimer=0;if(faltanLeer())cargarPend(true,true);},espera+50);}else cargarPend(false);}).observe(cont,{childList:true});
   window.matchMedia('(min-width:1024px)').addEventListener('change',()=>{if(modo==='panel'&&!escritorio())irDetalle();colocar();});
   const cr=$('cart-rows');if(cr)new MutationObserver(()=>{anotarCarrito();actualizarBotonComanda();}).observe(cr,{childList:true});
   const ctot=$('cart-total');if(ctot)new MutationObserver(anotarCarrito).observe(ctot,{childList:true,characterData:true,subtree:true});

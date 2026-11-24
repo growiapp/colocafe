@@ -63,3 +63,23 @@ for (const rol of ['owner', 'admin', 'operator']) {
     await page.waitForSelector('#tab-dashboard.active .kpi-grid');
   }));
 }
+
+for (const rol of ['owner', 'admin', 'operator']) {
+  test(`roles (simulado): el Menú muestra edición de catálogo solo a dueño y administración: ${rol}`, async () => abrir(async page => {
+    await page.evaluate(r => { window.getSupabaseActiveRole = () => r; window.getActiveStoreRole = () => r; catalogIsWaitingForSupabase = () => false; renderMenuAdm(); renderCatMgr(); }, rol);
+    const admin = rol !== 'operator';
+    const n = await page.evaluate(() => ({
+      prodEdit: document.querySelectorAll('#menu-adm .prod-adm-row .icon-btn, #menu-adm .prod-adm-row .cat-del').length,
+      filas: document.querySelectorAll('#menu-adm .prod-adm-row').length,
+      catEdit: document.querySelectorAll('#cat-mgr .cat-mgr-row .icon-btn, #cat-mgr .cat-mgr-row .cat-del').length,
+      altas: [...document.querySelectorAll('[data-solo-admin]')].map(b => getComputedStyle(b).display === 'none')
+    }));
+    assert.ok(n.filas > 0 && n.altas.length === 3, JSON.stringify(n));
+    assert.equal(n.prodEdit > 0, admin);
+    assert.equal(n.catEdit > 0, admin);
+    assert.ok(n.altas.every(h => h === !admin), JSON.stringify(n));
+  }));
+}
+test('roles: sin rol conocido (sin sesión) no se oculta nada', async () => abrir(async page => {
+  assert.equal(await page.evaluate(() => { window.getSupabaseActiveRole = () => ''; window.getActiveStoreRole = () => ''; return puedeEditarCatalogo(); }), true);
+}));
