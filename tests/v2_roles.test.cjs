@@ -46,7 +46,7 @@ for (const rol of ['owner', 'admin', 'operator']) {
     await page.evaluate(r => { window.getSupabaseActiveRole = () => r; window.getActiveStoreRole = () => r; }, rol);
     const admin = rol !== 'operator';
     // la navegación no depende del rol: los cuatro destinos están para todos
-    assert.deepEqual(await page.$$eval('.nav-btn', b => b.filter(x => x.offsetParent).map(x => x.innerText.trim())), ['Caja', 'Reportes', 'Clientes', 'Administración']);
+    assert.deepEqual(await page.$$eval('.nav-btn', b => b.filter(x => x.offsetParent).map(x => x.innerText.trim())), ['Caja', 'Reportes', 'Clientes', 'Gestión']);
     assert.equal(await page.evaluate(() => isSupabaseAdminRole()), admin);
     // "+ Nuevo operador" en el selector del cobro solo para dueño y administración
     assert.equal(await page.evaluate(() => getOperadoresOpts(true).includes('__nuevo__')), admin);

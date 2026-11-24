@@ -43,7 +43,7 @@ async function abrir(fn) {
 
 test('V2: demo completa, navegación y sin red a Supabase', async () => abrir(async (page, externos) => {
   const nav = await page.$$eval('.nav-btn', b => b.filter(x => x.offsetParent).map(x => x.innerText.trim()));
-  assert.deepEqual(nav, ['Caja', 'Reportes', 'Clientes', 'Administración']);
+  assert.deepEqual(nav, ['Caja', 'Reportes', 'Clientes', 'Gestión']);
   assert.equal(await page.$$eval('.mesa-card', t => t.length), 6);
   assert.ok(!externos.some(u => /supabase\.co/.test(u)), externos.join(','));
   assert.equal(await page.$eval('#ctx-sync', e => e.innerText.trim()), 'Al día');

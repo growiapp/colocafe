@@ -2805,7 +2805,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
   <button class="nav-btn active" data-tab="carga"><span class="nav-icon" data-ic="cup"></span><span class="nav-lbl">Caja</span></button>
   <button class="nav-btn" data-tab="dashboard"><span class="nav-icon" data-ic="bars"></span><span class="nav-lbl">Reportes</span></button>
   <button class="nav-btn" data-tab="clientes"><span class="nav-icon" data-ic="users"></span><span class="nav-lbl">Clientes</span></button>
-  <button class="nav-btn" data-tab="ajustes"><span class="nav-icon" data-ic="clip"></span><span class="nav-lbl">Administración</span></button>
+  <button class="nav-btn" data-tab="ajustes"><span class="nav-icon" data-ic="clip"></span><span class="nav-lbl">Gestión</span></button>
   <button class="nav-btn" data-tab="historial" hidden aria-hidden="true" tabindex="-1"></button>
 </nav>
 <div class="app-update-banner" id="app-update-banner" role="status" aria-live="polite">
@@ -18302,7 +18302,7 @@ window.__cartaComprobante=(nuevas,{estado='ok',reserva=false}={})=>{
 
 // ── Encabezados de página para Clientes y Gestión ──
 function titulos(){
-  [['tab-clientes','Clientes'],['tab-ajustes','Administración']].forEach(([id,t])=>{const el=$(id);if(el&&!el.querySelector(':scope > .ph-title')){const h=document.createElement('h1');h.className='ph-title ph-page';h.textContent=t;el.insertBefore(h,el.firstChild);}});
+  [['tab-clientes','Clientes'],['tab-ajustes','Gestión']].forEach(([id,t])=>{const el=$(id);if(el&&!el.querySelector(':scope > .ph-title')){const h=document.createElement('h1');h.className='ph-title ph-page';h.textContent=t;el.insertBefore(h,el.firstChild);}});
 }
 
 // ── Encabezado: una sola barra (local · fecha · turno · datos · usuario) ──
