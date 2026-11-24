@@ -198,6 +198,45 @@ test('F4: si falla la lectura de operadores no se recurre a datos viejos: se inf
   assert.equal(await page.$eval('.btn-confirmar[data-c=confirmar]', b => b.disabled), false);
 }));
 
+test('F4 (revisión independiente): una lectura que falla DESPUÉS de una carga exitosa invalida la lista: no se cobra con datos anteriores', async () => abrir(async page => {
+  await abrirCobro(page); await esperarOps(page, ['Ana', 'Bruno', 'Carla']);
+  await page.click('.cobro-ops [data-o="Ana"]');
+  await page.evaluate(() => { window.__DEMO_DATA.operadoresOk = window.__DEMO_DATA.operators; window.__DEMO_DATA.operators = {__error: {code: 'PGRST000', message: 'caída transitoria'}}; });
+  const antes = await page.evaluate(() => ventas.length);
+  await page.click('.btn-confirmar[data-c=confirmar]');
+  await page.waitForFunction(() => /No pudimos verificar quién está activo/.test(document.getElementById('cobro-msg')?.textContent || ''), null, {timeout: 12000});
+  assert.equal(await page.evaluate(() => ventas.length), antes, 'cobró con una lista que no se pudo verificar');
+  assert.equal(await page.evaluate(() => estadoOperadores()), 'no_disponible');
+  assert.deepEqual(await opsCobro(page), [], 'se siguieron ofreciendo operadores de la caché anterior');
+  await page.evaluate(() => { window.__DEMO_DATA.operators = window.__DEMO_DATA.operadoresOk; });   // vuelve la red: se puede reintentar
+  await page.click('.cobro-ops [data-c="ops"]'); await esperarOps(page, ['Ana', 'Bruno', 'Carla']);
+}));
+
+test('F4 (revisión independiente): tabla de operadores inexistente (42P01) = lectura no disponible: no habilita la lista local', async () => abrir(async page => {
+  await page.evaluate(() => { operadores.push('Juancito'); window.__DEMO_DATA.operators = {__error: {code: '42P01', message: 'relation "operators" does not exist'}}; });
+  await abrirCobro(page);
+  await page.waitForFunction(() => /No pudimos leer las personas activas/.test(document.querySelector('.cobro-ops')?.innerText || ''), null, {timeout: 8000});
+  assert.deepEqual(await opsCobro(page), []);
+  assert.equal(await page.$eval('.btn-confirmar[data-c=confirmar]', b => b.disabled), true);
+  assert.equal(await page.evaluate(() => estadoOperadores()), 'no_disponible');
+}));
+
+test('F4 (revisión independiente): una verificación que nunca responde no deja Cobrar colgado (tope de tiempo y botón restaurado)', async () => abrir(async page => {
+  await abrirCobro(page); await esperarOps(page, ['Ana', 'Bruno', 'Carla']);
+  await page.click('.cobro-ops [data-o="Bruno"]');
+  await page.evaluate(() => { window.__DEMO_DATA.operadoresOk = window.__DEMO_DATA.operators; window.__DEMO_DATA.operators = '__cuelga'; });
+  await page.click('.btn-confirmar[data-c=confirmar]');
+  assert.match(await page.$eval('.btn-confirmar[data-c=confirmar]', b => b.textContent), /Verificando/);
+  await page.waitForFunction(() => /No pudimos verificar quién está activo/.test(document.getElementById('cobro-msg')?.textContent || ''), null, {timeout: 15000});
+  assert.equal(await page.$eval('.btn-confirmar[data-c=confirmar]', b => b.disabled), false, 'el botón quedó bloqueado');
+  assert.match(await page.$eval('.btn-confirmar[data-c=confirmar]', b => b.textContent), /Confirmar cobro/);
+  await page.evaluate(() => { window.__DEMO_DATA.operators = window.__DEMO_DATA.operadoresOk; });   // vuelve el servidor: se puede reintentar sin recargar
+  await page.click('.cobro-ops [data-o="Bruno"]');
+  const antes = await page.evaluate(() => ventas.length);
+  await page.click('.btn-confirmar[data-c=confirmar]');
+  await page.waitForFunction(n => ventas.length > n, antes, {timeout: 15000});   // y se puede volver a confirmar y cobrar
+}));
+
 test('F4: sin Supabase (modo local) se usa la lista local de siempre', async () => abrir(async page => {
   // todo en una sola evaluación: el arnés restablece su cliente cada segundo
   const r = await page.evaluate(() => { const antes = window.getSupabaseClient; window.getSupabaseClient = () => null; try { return {estado: estadoOperadores(), nombres: getActiveOperators().map(o => o.name)}; } finally { window.getSupabaseClient = antes; } });

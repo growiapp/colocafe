@@ -339,9 +339,10 @@ function pintarCobro(){
   if(slot&&box){if(m==='mixed'){slot.appendChild(box);slot.hidden=false;}else{slot.hidden=true;if(box.parentNode===slot&&mixedHome)mixedHome.appendChild(box);}}
 }
 // Cobrar nunca ofrece a alguien que acaba de quedar inactivo: se relee la lista del local al abrir y otra vez al confirmar.
+const conTope=(p,ms)=>Promise.race([p,new Promise(r=>setTimeout(()=>r(false),ms))]); // una lectura que no responde no deja el cobro colgado
 async function refrescarOperadoresCobro(){
   if(typeof loadOperatorsFromSupabase!=='function'||typeof operadoresModoServidor!=='function'||!operadoresModoServidor())return;
-  await loadOperatorsFromSupabase();
+  await conTope(loadOperatorsFromSupabase(),8000);
   const sc=$('cobro-screen');if(sc&&!sc.hidden&&!cobrando)pintarCobro();
 }
 function abrirCobro(){
@@ -362,11 +363,11 @@ async function confirmarCobro(btn){
   if(!opElegido){msgCobro('Elegí quién atendió.');return;}
   if(typeof operadoresModoServidor==='function'&&operadoresModoServidor()){ // verificación fresca: ¿sigue activa esa persona en este local?
     cobrando=true;const b0=btn.textContent;btn.disabled=true;btn.textContent='Verificando…';
-    try{await loadOperatorsFromSupabase();}catch(_){}
-    cobrando=false;btn.textContent=b0;
-    if(estadoOperadores()!=='ok'){pintarCobro();msgCobro('No pudimos verificar quién está activo. Reintentá.');return;}
+    let leida=false;
+    try{leida=await conTope(loadOperatorsFromSupabase(),8000)===true;}catch(_){leida=false;}
+    finally{cobrando=false;btn.textContent=b0;btn.disabled=false;}
+    if(!leida||estadoOperadores()!=='ok'){pintarCobro();msgCobro('No pudimos verificar quién está activo. Reintentá.');return;}
     if(!getActiveOperators().some(o=>o.name===opElegido)){opElegido='';pintarCobro();msgCobro('Esa persona ya no está disponible. Elegí otra.');return;}
-    btn.disabled=false;
   }
   let ps;try{ps=getCurrentPaymentState();}catch(_){ps={valido:true};}
   if(!ps.valido){msgCobro(ps.mensaje||'Revisá los pagos antes de cobrar.');return;}

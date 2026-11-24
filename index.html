@@ -3768,7 +3768,7 @@ window.F0B={
 };
 let supabaseOperadoresCache=null; // null=sin cargar, []=cargado vacío, [...]= con datos
 let supabaseOperadoresCacheStoreId=null;
-let operadoresCargando=false,operadoresSinTabla=false; // estado de la lectura de operadores del local
+let operadoresCargando=false,operadoresUltimaLecturaOk=null; // null=aún sin leer; false=la última lectura FALLÓ (la caché ya no vale para cobrar)
 
 window.__catalogBootState={
   state:'booting',
@@ -4752,14 +4752,14 @@ function getOperatorsStoreId(){
 // sin esos datos la lista queda vacía y se informa (estadoOperadores()) en lugar de recaer en la lista local histórica, que acumula nombres
 // de bajas, renombres y turnos antiguos. Solo sin Supabase (modo local) se usa la lista local.
 function operadoresModoServidor(){
-  if(operadoresSinTabla)return false;
   try{
     const client=window.getSupabaseClient?.(),store=getOperatorsStoreId();
     return !!(client&&store&&isValidUuid(store));
   }catch(_){return false;} // la librería/cliente no está disponible: modo local
 }
 function operadoresCacheVigente(){
-  return Array.isArray(supabaseOperadoresCache)&&supabaseOperadoresCacheStoreId===getOperatorsStoreId();
+  // vigente = del local actual Y la última lectura salió bien: tras un fallo no se sigue validando con datos anteriores
+  return Array.isArray(supabaseOperadoresCache)&&supabaseOperadoresCacheStoreId===getOperatorsStoreId()&&operadoresUltimaLecturaOk!==false;
 }
 function estadoOperadores(){
   if(!operadoresModoServidor())return 'local';
@@ -4801,20 +4801,19 @@ async function loadOperatorsFromSupabase(){
   try{
     const client=window.getSupabaseClient?.();
     const storeId=getOperatorsStoreId();
-    if(!client||!storeId||!isValidUuid(storeId)){logOperatorsDiag('load skipped: missing client/store',{storeId});return false;}
+    if(!client||!storeId||!isValidUuid(storeId)){logOperatorsDiag('load skipped: missing client/store',{storeId});operadoresUltimaLecturaOk=false;return false;}
     const {data:sess}=await client.auth.getSession();
-    if(!sess?.session){logOperatorsDiag('load skipped: no session',{storeId});return false;}
+    if(!sess?.session){logOperatorsDiag('load skipped: no session',{storeId});operadoresUltimaLecturaOk=false;return false;}
     const {data,error}=await client.from('operators')
       .select('id,name,normalized_name,active,role,metadata')
       .eq('store_id',storeId)
       .order('name',{ascending:true});
     if(error){
-      if(error.code==='42P01'){operadoresSinTabla=true;return false;} // la tabla no existe: este local opera con la lista local
-      throw error;
+      throw error; // incluida la tabla inexistente (42P01): es una lectura NO disponible; no se cae a la lista local
     }
     supabaseOperadoresCache=data||[];
     supabaseOperadoresCacheStoreId=storeId;
-    operadoresSinTabla=false;
+    operadoresUltimaLecturaOk=true;
     // La lista local sigue al servidor (altas, bajas y reactivaciones): no se acumulan nombres de operadores dados de baja.
     const sbNames=[...new Set((supabaseOperadoresCache||[]).filter(op=>op.active!==false).map(op=>op.name))];
     operadores=sbNames;
@@ -4822,7 +4821,8 @@ async function loadOperatorsFromSupabase(){
     logOperatorsDiag('loaded',{storeId,count:supabaseOperadoresCache.length,activeCount:sbNames.length});
     return true;
   }catch(err){
-    if((err?.code||'')!=='42P01') logOperatorsDiag('load error',err);
+    logOperatorsDiag('load error',err);
+    operadoresUltimaLecturaOk=false;
     return false;
   }finally{operadoresCargando=false;}
 }
@@ -18311,9 +18311,10 @@ function pintarCobro(){
   if(slot&&box){if(m==='mixed'){slot.appendChild(box);slot.hidden=false;}else{slot.hidden=true;if(box.parentNode===slot&&mixedHome)mixedHome.appendChild(box);}}
 }
 // Cobrar nunca ofrece a alguien que acaba de quedar inactivo: se relee la lista del local al abrir y otra vez al confirmar.
+const conTope=(p,ms)=>Promise.race([p,new Promise(r=>setTimeout(()=>r(false),ms))]); // una lectura que no responde no deja el cobro colgado
 async function refrescarOperadoresCobro(){
   if(typeof loadOperatorsFromSupabase!=='function'||typeof operadoresModoServidor!=='function'||!operadoresModoServidor())return;
-  await loadOperatorsFromSupabase();
+  await conTope(loadOperatorsFromSupabase(),8000);
   const sc=$('cobro-screen');if(sc&&!sc.hidden&&!cobrando)pintarCobro();
 }
 function abrirCobro(){
@@ -18334,11 +18335,11 @@ async function confirmarCobro(btn){
   if(!opElegido){msgCobro('Elegí quién atendió.');return;}
   if(typeof operadoresModoServidor==='function'&&operadoresModoServidor()){ // verificación fresca: ¿sigue activa esa persona en este local?
     cobrando=true;const b0=btn.textContent;btn.disabled=true;btn.textContent='Verificando…';
-    try{await loadOperatorsFromSupabase();}catch(_){}
-    cobrando=false;btn.textContent=b0;
-    if(estadoOperadores()!=='ok'){pintarCobro();msgCobro('No pudimos verificar quién está activo. Reintentá.');return;}
+    let leida=false;
+    try{leida=await conTope(loadOperatorsFromSupabase(),8000)===true;}catch(_){leida=false;}
+    finally{cobrando=false;btn.textContent=b0;btn.disabled=false;}
+    if(!leida||estadoOperadores()!=='ok'){pintarCobro();msgCobro('No pudimos verificar quién está activo. Reintentá.');return;}
     if(!getActiveOperators().some(o=>o.name===opElegido)){opElegido='';pintarCobro();msgCobro('Esa persona ya no está disponible. Elegí otra.');return;}
-    btn.disabled=false;
   }
   let ps;try{ps=getCurrentPaymentState();}catch(_){ps={valido:true};}
   if(!ps.valido){msgCobro(ps.mensaje||'Revisá los pagos antes de cobrar.');return;}
