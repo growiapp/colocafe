@@ -2055,6 +2055,225 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 .mesa-total{color:var(--ink)}
 .kpi .kpi-lbl,.kpi-lbl{color:var(--ink2)!important}
 :root{--ff-mono:'DM Sans',system-ui,sans-serif}
+
+/* ═══ Encabezado V2: una sola barra oscura ═══ */
+:root{--ctx-h:0px}
+.header{flex-wrap:nowrap;align-items:center;height:var(--header-top)}
+.header .ctx-bar{display:none}
+#ctx-local{margin-left:0}
+#ctx-local .ctx-v{display:inline-flex;align-items:center;gap:6px}
+#ctx-local .ctx-v::after{content:'';width:14px;height:14px;background:currentColor;opacity:.75;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center/contain no-repeat}
+.header-right{margin-left:auto;gap:2px;flex:none}
+.header-right .turno-pill,.header-right .gs-pill{display:none!important}
+.header-right .ctx-item,[data-theme="dark"] .header-right .ctx-item{flex-direction:row;align-items:center;gap:7px;min-height:44px;padding:0 12px;border-radius:999px;background:transparent;color:var(--on-frame);flex:none}
+.header-right .ctx-item:hover{background:rgba(255,241,220,.08)}
+.header-right .ctx-k{color:var(--on-frame-2);font-weight:600;font-size:14px}
+.header-right .ctx-v{color:var(--on-frame);font-weight:700;font-size:14px;white-space:nowrap}
+#ctx-turno::before{content:'';width:8px;height:8px;border-radius:50%;background:#7FD6A2;flex:none}
+#ctx-turno[data-estado="aviso"],#ctx-sync[data-estado="aviso"]{background:#F4C06A!important;color:#2A1206}
+#ctx-turno[data-estado="error"],#ctx-sync[data-estado="error"]{background:#FF9C92!important;color:#2A1206}
+#ctx-turno[data-estado="aviso"]::before,#ctx-turno[data-estado="error"]::before{background:#2A1206}
+#ctx-turno[data-estado="aviso"] .ctx-k,#ctx-turno[data-estado="aviso"] .ctx-v,#ctx-sync[data-estado="aviso"] .ctx-v,#ctx-turno[data-estado="error"] .ctx-k,#ctx-turno[data-estado="error"] .ctx-v,#ctx-sync[data-estado="error"] .ctx-v{color:#2A1206}
+#ctx-turno .ctx-v,#ctx-sync .ctx-v{color:var(--on-frame)}
+#ctx-turno[data-estado="ok"] .ctx-v,#ctx-sync[data-estado="ok"] .ctx-v{color:var(--on-frame)}
+#ctx-sync .ctx-k{display:none}
+#ctx-sync .ic{flex:none}
+#ctx-cuenta{padding:0 6px 0 4px!important}
+#ctx-cuenta .ctx-k,#ctx-cuenta .ctx-v{display:none}
+#ctx-cuenta .av{width:34px;height:34px;border-radius:50%;background:var(--on-frame);color:var(--frame);display:grid;place-items:center;font-weight:700;font-size:13px;flex:none}
+#ctx-cuenta .who-t{display:flex;flex-direction:column;line-height:1.15;text-align:left}
+#ctx-cuenta .who-t b{font-size:14px;color:var(--on-frame)}#ctx-cuenta .who-t span{font-size:12px;color:var(--on-frame-2)}
+#ctx-cuenta[data-estado="aviso"]{background:#F4C06A!important}#ctx-cuenta[data-estado="aviso"] .who-t b,#ctx-cuenta[data-estado="aviso"] .who-t span{color:#2A1206}
+.header-right .theme-toggle{order:5}
+@media (max-width:1100px){.header-date-full{display:none}}
+@media (max-width:767px){
+  .header-right .ctx-item{padding:0 8px}
+  #ctx-turno .ctx-k{display:none}
+  #ctx-sync .ctx-v{display:none}
+  #ctx-cuenta .who-t{display:none}
+  #ctx-local .ctx-v{font-size:18px}
+  .header-right .theme-toggle{display:none}
+}
+@media (max-width:767px) and (min-width:360px){#ctx-turno .ctx-k{display:inline}}
+
+/* ═══ Atención V2: grilla de dos columnas ═══ */
+.mesa-actions .btn-sm.primary{display:none}
+.mesa-card{cursor:pointer}
+@media (min-width:1024px){
+  #tab-carga.atn-v2.active{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:24px;align-items:start;max-width:1560px;margin:0 auto;padding:0 12px}
+  #tab-carga.atn-v2>#view-mesas{grid-column:1;grid-row:1;min-width:0}
+  #tab-carga.atn-v2>#view-mesas>div:first-child{max-width:none!important;margin:0!important;padding-left:0!important;padding-right:0!important}
+  #tab-carga.atn-v2>.atn-side{grid-column:2;grid-row:1;position:sticky;top:calc(var(--header-h) + 14px);min-width:0;padding-top:12px}
+}
+.atn-side[hidden]{display:none!important}
+#atn-slot-res .ventas-section-title{margin-top:0}
+#tab-carga.atn-panel>#view-pedido{display:none!important}
+#atn-slot-cart.tk{padding:22px 20px 24px}
+#atn-slot-cart .tk-more{margin-top:14px}
+#atn-slot-cart .tk-more .btn-sm{width:100%}
+#atn-slot-cart .carga-right{position:static;width:auto;display:block}
+#atn-slot-cart .carrito-wrap{background:transparent!important;filter:none!important;-webkit-mask:none!important;mask:none!important;padding:0!important;box-shadow:none!important;border-radius:0!important;display:flex;flex-direction:column}
+#atn-slot-cart .cart-rows,#atn-slot-cart .cart-empty{order:1}
+#atn-slot-cart .cart-desglose{order:2}
+#atn-slot-cart .cart-hdr{order:3;margin-top:14px;padding-top:12px;border-top:1.5px solid var(--ink);display:flex;align-items:baseline;justify-content:space-between}
+#atn-slot-cart .cart-title{font-family:'DM Sans',sans-serif;font-size:13px;font-weight:400;color:var(--ink2)}
+#atn-slot-cart .divider{order:4}
+#atn-slot-cart .pago-lbl{order:5;font-size:12px}
+#atn-slot-cart .pago-grid{order:6}
+#atn-slot-cart .pago-mixed-box{order:7}
+#atn-slot-cart .btn-confirmar{order:8;margin-top:12px}
+.mesa-card[aria-busy="true"]{opacity:.65;cursor:progress}
+
+/* ═══ Fidelidad: fila del título, encabezado, reservas ═══ */
+.ph-row{display:flex;align-items:flex-end;justify-content:space-between;gap:12px 16px;flex-wrap:wrap;margin-bottom:18px}
+.ph-row .ph-title{margin:0}
+.ph-row>div{display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:auto!important;grid-template-columns:none!important}
+.solo-hora .ctx-v{font-size:0!important}
+.solo-hora .ctx-v::after{content:attr(data-hora);font-size:14px;font-weight:700;color:var(--on-frame)}
+#ctx-cuenta .who-t span:empty{display:none}
+.alert-banner{padding:8px 14px;font-size:13px}
+#stock-alerts{margin-bottom:6px}
+.reserva-card{display:grid!important;grid-template-columns:auto 1fr;gap:4px 16px;align-items:start;padding:14px 16px}
+.res-time{font-family:'Alfa Slab One',Georgia,serif;font-size:22px;line-height:1.1;color:var(--ink);min-width:56px;padding-top:2px}
+.reserva-info{min-width:0}
+.reserva-mainline{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.reserva-cliente{font-weight:700;font-size:16px;font-family:'DM Sans',sans-serif}
+.reserva-estado{font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;border-radius:999px;padding:3px 10px;text-transform:capitalize}
+.reserva-estado.confirmada{background:var(--green-bg);color:var(--green)}
+.reserva-estado.pendiente{background:var(--surf2);color:var(--ink2)}
+.reserva-meta-line{font-size:13px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:4px 6px;margin-top:2px}
+.reserva-nota{font-size:13px;color:var(--amber);margin-top:4px}
+.reserva-actions{display:flex;gap:8px;margin-top:10px}
+.reserva-actions .btn-sm{min-height:40px;padding:0 14px;font-size:14px}
+#atn-slot-res .ventas-section-title{font-size:19px}
+#view-mesas>div:first-child>.ventas-section-title:first-of-type{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;margin:0}
+#view-mesas .ventas-header{margin-bottom:16px}
+#stock-alerts{margin-top:14px}
+@media (min-width:1024px){
+  #view-mesas>div:first-child{padding:22px 28px 40px!important}
+  #tab-carga.atn-v2>#view-mesas>div:first-child{padding:22px 0 40px!important}
+  #tab-carga.atn-v2{padding-left:28px;padding-right:28px}
+  #tab-carga.atn-v2>.atn-side{padding-top:22px}
+}
+
+/* ═══ Mesa: cabecera, catálogo y pedido como en V2 ═══ */
+#view-pedido .carga-layout{max-width:1560px;padding:22px 28px;gap:24px}
+@media (min-width:1024px){#view-pedido .carga-layout{grid-template-columns:minmax(0,1fr) 380px}}
+#view-pedido .carga-left>div:first-child{display:grid!important;grid-template-columns:auto 1fr auto auto;grid-template-areas:"back back back back" "title sub com add";align-items:center;gap:4px 14px;margin-bottom:18px!important}
+#view-pedido .carga-left>div:first-child .back{grid-area:back;justify-self:start;margin-left:-8px}
+#view-pedido .carga-left>div:first-child #mesa-titulo{grid-area:title;flex:none}
+#view-pedido .carga-left>div:first-child #mesa-tipo-badge{grid-area:sub;justify-self:start;background:none;padding:0;border:0;font:400 14px 'DM Sans',sans-serif;color:var(--ink2);border-radius:0}
+#view-pedido .carga-left>div:first-child button[onclick="abrirComandaMesa()"]{grid-area:com}
+#view-pedido .carga-left>div:first-child button[onclick="openProdRapidoModal()"]{grid-area:add}
+#view-pedido .carga-left>div:first-child .btn-sm:not(.back){min-height:48px;padding:0 20px;font-size:16px!important}
+.chip-dot{display:none}
+#carga-prod-search,.inv-search{width:100%!important;padding-left:44px;background:var(--surf) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236B5243' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E") 14px center/20px no-repeat}
+[data-theme="dark"] #carga-prod-search,[data-theme="dark"] .inv-search{background-color:var(--surf);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23CDB096' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E")}
+.prod-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+.prod-card,[data-theme="dark"] .prod-card{display:flex;flex-direction:column;justify-content:space-between;gap:10px;min-height:92px;padding:14px;text-align:left;position:relative}
+.prod-card .cat-dot{display:none}
+.prod-name{font-weight:600;font-size:15px;line-height:1.2;color:var(--ink)}
+.prod-price{font-weight:700;font-size:15px;color:var(--ink)}
+.prod-card.in-cart,[data-theme="dark"] .prod-card.in-cart{background:var(--brand-soft);box-shadow:inset 0 0 0 1.5px var(--brand)}
+.prod-badge{position:absolute!important;top:auto!important;left:auto!important;right:12px!important;bottom:12px!important;background:var(--brand);color:var(--on-brand);font-weight:700;font-size:12px;border-radius:999px;padding:2px 9px;min-width:0;width:auto;height:auto}
+.prod-badge::before{content:'×'}
+
+.carrito-wrap{display:flex;flex-direction:column}
+.cart-head2{order:0;display:flex;align-items:center;justify-content:space-between;gap:10px;padding-bottom:12px;border-bottom:1.5px solid var(--ink);margin-bottom:6px}
+.cart-head2 .t{font-family:'Alfa Slab One',Georgia,serif;font-size:24px;line-height:1.1}
+.cart-head2 .tag[hidden]{display:none}
+#atn-slot-body .cart-head2{display:none}
+.cart-hdr .cart-title{display:none}
+.cart-rows,.cart-empty{order:1}
+.cart-desglose{order:2}
+.cart-hdr{order:3;display:block!important;margin-top:14px;padding-top:12px;border-top:1.5px solid var(--ink)}
+.cart-total{display:flex!important;justify-content:space-between;align-items:baseline;width:100%;font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:34px}
+.cart-total::before{content:attr(data-lbl);font:400 14px 'DM Sans',sans-serif;color:var(--ink2)}
+.divider{order:4}.pago-lbl{order:5}.pago-grid{order:6}.pago-mixed-box{order:7}.btn-confirmar{order:8}
+.cart-row{display:grid!important;grid-template-columns:auto minmax(0,1fr) auto auto;grid-template-areas:"qty name sub del";align-items:center;gap:0 14px;padding:12px 0;border-top:1px solid var(--border)}
+.cart-row:first-child{border-top:0}
+.cart-row .qty-wrap{grid-area:qty;display:flex;align-items:center;border:1.5px solid var(--border2);border-radius:10px;overflow:hidden;background:var(--surf)}
+.cart-row .c-name-wrap{grid-area:name;min-width:0}
+.cart-row .c-sub{grid-area:sub;font-weight:700;font-size:16px;font-variant-numeric:tabular-nums}
+.cart-row>.qty-btn{grid-area:del;width:36px;height:36px;border:0;background:transparent;color:var(--ink2)!important;font-size:18px;border-radius:8px;margin:0!important}
+.cart-row>.qty-btn:hover{background:var(--surf2)}
+.qty-wrap .qty-btn{border:0;background:transparent;min-width:38px;width:38px;height:42px;font-size:18px;border-radius:0}
+.qty-wrap input.qty-n{width:34px;text-align:center;border:0;background:transparent;font-weight:700;font-size:15px;color:var(--ink)}
+.c-name{font-weight:500;font-size:15px}
+.c-env{font-size:12px;font-weight:700;line-height:1.3}
+.c-env.ok{color:var(--ink2);font-weight:400}.c-env.pend{color:var(--brand-ink)}
+.c-desc{background:none!important;border:0!important;box-shadow:none!important;padding:0!important;min-height:0!important;font-size:12px;font-weight:700;color:var(--brand-ink);text-decoration:underline;cursor:pointer;border-radius:0}
+.cart-desglose .c-desc{display:block;margin:8px 0 2px;font-size:14px;text-decoration:none}
+@media (max-width:767px){#view-pedido .carga-left>div:first-child{grid-template-columns:1fr auto;grid-template-areas:"back back" "title title" "sub sub" "com add"}#view-pedido .carga-layout{padding:14px}}
+#view-pedido .carga-left>div:first-child{align-items:end!important}
+#view-pedido .carga-left>div:first-child #mesa-tipo-badge{padding-bottom:6px}
+#view-pedido .carga-left>div:first-child button[onclick="openProdRapidoModal()"],[data-theme="dark"] #view-pedido .carga-left>div:first-child button[onclick="openProdRapidoModal()"]{background:var(--surf);color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--border2)}
+@media (min-width:1024px){#view-pedido .carga-right{margin-top:104px}}
+.cart-row{grid-template-columns:auto minmax(0,1fr) auto auto;gap:0 10px}
+.qty-wrap .qty-btn{min-width:30px;width:30px}
+.qty-wrap input.qty-n{width:28px}
+.cart-row>.qty-btn{width:30px;height:30px}
+.cart-row .c-desc:not(.on){max-height:0;overflow:hidden;opacity:0;transition:opacity .12s}
+.cart-row:hover .c-desc,.cart-row:focus-within .c-desc{max-height:24px;opacity:1}
+@media (hover:none){.cart-row .c-desc:not(.on){max-height:24px;opacity:1}}
+
+/* ═══ Pantalla de Cobro V2 ═══ */
+.pago-lbl,.pago-grid{display:none!important}
+#tab-carga.cobro-abierto>:not(#cobro-screen){display:none!important}
+.cobro-screen{max-width:1560px;margin:0 auto;padding:22px 28px 40px}
+.cobro-screen[hidden]{display:none}
+.cobro-screen .back{margin-bottom:4px}
+.cobro-screen .ph-row{align-items:baseline;margin-bottom:20px}
+.cobro-sub{color:var(--ink2);font-size:14px;margin:0}
+.cobro-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:24px;align-items:start}
+@media (min-width:1024px){.cobro-grid{grid-template-columns:minmax(0,1fr) 380px}}
+.cobro-main{background:var(--surf);border-radius:var(--r-lg);padding:22px;box-shadow:var(--e1),inset 0 0 0 1px var(--border)}
+.sec2{font:700 15px 'DM Sans',sans-serif;margin:0 0 10px;color:var(--ink)}
+.cobro-main .sec2:not(:first-child){margin-top:22px}
+.cobro-medios{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.cobro-medios button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:76px;border-radius:var(--r);background:var(--surf);box-shadow:inset 0 0 0 1.5px var(--border2);color:var(--ink);font:700 16px 'DM Sans',sans-serif;cursor:pointer;border:0}
+.cobro-medios button:hover{background:var(--surf2)}
+.cobro-medios button[aria-checked="true"]{background:var(--frame);color:var(--on-frame);box-shadow:none}
+[data-theme="dark"] .cobro-medios button[aria-checked="true"]{background:var(--on-frame);color:var(--frame)}
+.cobro-ops{display:flex;flex-wrap:wrap;gap:10px}
+.cobro-ops button{min-height:48px;padding:0 20px;border-radius:999px;background:var(--surf);box-shadow:inset 0 0 0 1.5px var(--border2);color:var(--ink);font:700 16px 'DM Sans',sans-serif;border:0;cursor:pointer}
+.cobro-ops button small{font-weight:600;font-size:12px;opacity:.85;margin-left:6px}
+.cobro-ops button[aria-checked="true"]{background:var(--frame);color:var(--on-frame);box-shadow:none}
+[data-theme="dark"] .cobro-ops button[aria-checked="true"]{background:var(--on-frame);color:var(--frame)}
+.hint{font-size:13px;color:var(--ink2);margin:10px 0 0}
+.cobro-msg{min-height:20px;margin:14px 0 6px;color:var(--red);font-weight:700;font-size:14px}
+.cobro-main .btn-confirmar{width:100%;min-height:60px;font-size:18px;margin-top:4px}
+.cobro-main .btn-confirmar[disabled]{opacity:.7}
+#cobro-mixto-slot{margin-top:14px}
+#cobro-mixto-slot .pago-mixed-box,#cobro-screen .pago-mixed-box{display:block!important}
+.cobro-tk{padding:22px 20px 24px}
+.cobro-tk .tk-total{margin-top:16px}
+.cobro-auto #modal-operador-cobro{opacity:0!important;pointer-events:none!important}
+@media (max-width:767px){.cobro-screen{padding:14px}.cobro-medios{gap:8px}.cobro-medios button{min-height:68px;font-size:14px}}
+.cobro-screen .ph-row{justify-content:flex-start;gap:6px 14px;align-items:baseline}
+.cobro-tk h2{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:24px;line-height:1.1;margin:0}
+.cobro-tk .tk-sub{margin-top:2px}
+
+/* ═══ Resultados: "Parte del día" + columna de gráficos ═══ */
+#tab-dashboard .dash-layout{max-width:1560px;padding:8px 28px 40px}
+@media (min-width:1024px){
+  #tab-dashboard .dash-layout{display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr);gap:0 24px;align-items:start}
+  #tab-dashboard .dash-filtros,#tab-dashboard #dash-source-status{grid-column:1/-1}
+  #tab-dashboard .kpi-grid{grid-column:1;grid-row:3}
+  #tab-dashboard .seccion-split{grid-column:1;grid-row:4}
+  #tab-dashboard .dash-grid{grid-column:2;grid-row:3/span 3;margin-top:0}
+}
+#tab-dashboard .kpi-grid{--tooth:9px;display:block;position:relative;background:var(--surf);padding:22px 20px 24px;margin-bottom:18px;filter:drop-shadow(0 10px 22px rgba(43,29,22,.14));
+  -webkit-mask:radial-gradient(circle at 50% 0,#0000 calc(var(--tooth)/2),#000 calc(var(--tooth)/2 + .5px)) top/var(--tooth) 51% repeat-x,radial-gradient(circle at 50% 100%,#0000 calc(var(--tooth)/2),#000 calc(var(--tooth)/2 + .5px)) bottom/var(--tooth) 51% repeat-x;
+  mask:radial-gradient(circle at 50% 0,#0000 calc(var(--tooth)/2),#000 calc(var(--tooth)/2 + .5px)) top/var(--tooth) 51% repeat-x,radial-gradient(circle at 50% 100%,#0000 calc(var(--tooth)/2),#000 calc(var(--tooth)/2 + .5px)) bottom/var(--tooth) 51% repeat-x}
+[data-theme="dark"] #tab-dashboard .kpi-grid{filter:none}
+#tab-dashboard .kpi-grid::before{content:'Parte del día';display:block;font-family:'Alfa Slab One',Georgia,serif;font-size:24px;padding-bottom:10px;border-bottom:1.5px solid var(--ink);margin-bottom:6px}
+#tab-dashboard .kpi{display:grid;grid-template-columns:1fr auto;gap:0 12px;align-items:baseline;background:transparent;border:0;box-shadow:none;border-radius:0;padding:12px 0;border-bottom:1px solid var(--border)}
+#tab-dashboard .kpi:last-child{border-bottom:0}
+#tab-dashboard .kpi .kpi-lbl{text-transform:none;letter-spacing:0;font-size:15px;font-weight:400;margin:0}
+#tab-dashboard .kpi .kpi-val{font:700 17px 'DM Sans',sans-serif;text-align:right;color:var(--ink)}
+#tab-dashboard .kpi>:nth-child(n+3){grid-column:1/-1;font-size:12px;color:var(--ink2)}
+.kpi .kpi-lbl{color:var(--ink2)!important}
 /*CARTA_V2_END*/
 </style>
 </head>
@@ -4708,7 +4927,7 @@ function renderContextoGlobal(){
   else if(!cuenta.storeId)setCtxItem('ctx-sync','Sin local','Sin local activo no se sincroniza. Tocá para elegir uno.','aviso',abrirCuenta);
   else if(oo.state==='error')setCtxItem('ctx-sync','Error de conexión','No pudimos leer los datos del servidor. Tocá para reintentar.','error',()=>{window.triggerOORefresh?.('manual');showToast('Reintentando la conexión con el servidor…');});
   else if(s.slow.length||s.hidden.length||oo.state==='syncing'||!oo.ready||!oo.hasSupabaseRead)setCtxItem('ctx-sync','Sincronizando…','Sincronizando con el servidor. No hace falta hacer nada.');
-  else setCtxItem('ctx-sync','Sin pendientes','Sin operaciones pendientes en este dispositivo.','ok');
+  else setCtxItem('ctx-sync','Al día','Sin operaciones pendientes en este dispositivo.','ok');
 }
 window.addEventListener('online',renderContextoGlobal);
 window.addEventListener('offline',renderContextoGlobal);
@@ -5278,13 +5497,16 @@ function renderReservasSection(){
     const syncRecord={...r,_sync_status:r._sync_status||(isReservationPending(r)?'pending':'')};
     const syncBadge=renderSyncBadge(syncRecord,{localWhenNoRemoteId:true});
     const status=String(r.estado||'pendiente');
+    const nProd=(r.items||[]).reduce((s,i)=>s+(Number(i.qty)||0),0);
     const meta=[
-      `<span class="mesa-tipo-badge ${tipoBadgeClass(r.tipo||'salon')}">${tipoLabel(r.tipo||'salon')}</span>`,
-      `<span>${escapeHtml(r.hora||'Sin hora')}</span>`,
-      `<span>${escapeHtml(r.fecha?formatDateDDMMYYYY(r.fecha):'Sin fecha')}</span>`,
+      `<span>${escapeHtml(tipoLabel(r.tipo||'salon'))}</span>`,
+      `<span>${nProd>0?`${nProd} producto${nProd!==1?'s':''}`:'Sin productos'}</span>`,
+      total>0?`<span>${fmt(total)}</span>`:'',
+      r.fecha&&r.fecha!==today()?`<span>${escapeHtml(formatDateDDMMYYYY(r.fecha))}</span>`:'',
       reminder!=='Sin recordatorio'?`<span>${escapeHtml(reminder)}</span>`:''
     ].filter(Boolean).join('<span class="reserva-meta-dot">·</span>');
     return `<div class="reserva-card mobile-card ${r.estado||'pendiente'}">
+      <div class="res-time">${escapeHtml(r.hora||'—')}</div>
       <div class="reserva-info" style="flex:1;min-width:0">
         <div class="reserva-mainline">
           <div class="reserva-cliente">${escapeHtml(r.nombre||'Sin nombre')}</div>
@@ -5292,8 +5514,6 @@ function renderReservasSection(){
         </div>
         <div class="reserva-meta-line">${meta}</div>
         ${syncBadge?`<div class="reserva-sync-row">${syncBadge}${renderSyncHelp(syncRecord,{localWhenNoRemoteId:true})}</div>`:''}
-        ${prods?`<div class="reserva-items">${escapeHtml(prods)}</div>`:''}
-        ${total>0?`<div class="reserva-total">${fmt(total)}</div>`:''}
         ${r.nota?`<div class="reserva-nota">${escapeHtml(r.nota)}</div>`:''}
         <div class="reserva-actions mobile-actions">
           <button class="btn-sm" onclick="openReservaModal('${escapeJsArg(r.id)}')">Editar</button>
@@ -5329,7 +5549,7 @@ function renderOrderItemRows(cart,{changeFn,removeFn,descFn}){
     const varsStr=getCartItemVariantsText(item);
     const safeKey=key.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     const descTxt=item.desc?`Desc. ${textoDescuento(item.desc)} −${fmt(money2(carritoItemBruto(item)-sub))}`:'';
-    return `<div class="cart-row">
+    return `<div class="cart-row" data-key="${escapeAttr(key)}" data-prod="${escapeAttr(item.prodId)}" data-qty="${Number(item.qty)||0}">
       <div class="c-name-wrap">
         <div class="c-name">${name}</div>
         ${varsStr?`<div class="c-mods">${varsStr}</div>`:''}
@@ -6355,7 +6575,7 @@ function renderCart(){
     bc.textContent=etiquetaBotonCobro();
   }
 }
-function etiquetaBotonCobro(){return cobroVisibleEnCurso()?'Cerrando…':String(mesaActivaId||'').startsWith('reserva_')?'Cobrar reserva':'Cerrar y cobrar';}
+function etiquetaBotonCobro(){return cobroVisibleEnCurso()?'Cerrando…':String(mesaActivaId||'').startsWith('reserva_')?'Cobrar reserva':`Cobrar ${fmt(totalCobroActual())}`;}
 function cobroVisibleEnCurso(){
   if(!cobrosEnCurso.size)return false;
   const m=mesaActivaId&&!String(mesaActivaId).startsWith('reserva_')?findMesaByAnyId(mesaActivaId):null;
@@ -17509,6 +17729,12 @@ const IC={
   ban:'<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
   check:'<path d="M20 6 9 17l-5-5"/>',
   x:'<path d="M18 6 6 18M6 6l12 12"/>',
+  cloud:'<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
+  cloudok:'<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/><path d="m9 13 2 2 4-4"/>',
+  cloudoff:'<path d="m2 2 20 20"/><path d="M5.78 5.78A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.31-.2"/><path d="M21.5 15.4A4.5 4.5 0 0 0 17.5 10h-1.79A7 7 0 0 0 10 5"/>',
+  cash:'<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>',
+  bank:'<path d="M3 22h18"/><path d="M6 18v-7M10 18v-7M14 18v-7M18 18v-7"/><path d="m12 2 8 5H4Z"/>',
+  split:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M12 5v14"/>',
   print:'<path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 9V3h12v6"/><rect x="6" y="14" width="12" height="8"/>'
 };
 const svg=(n,s=20)=>`<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${IC[n]||''}</svg>`;
@@ -17570,7 +17796,7 @@ const fm=n=>typeof fmt==='function'?fmt(n):'$'+Math.round(Number(n)||0).toLocale
 const hh=ts=>{try{return new Date(ts).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});}catch(_){return '';}};
 async function renderTurnos(){
   const box=$('turnos-lista');if(!box)return;
-  const client=window.getSupabaseClient?.(),storeId=(typeof config!=='undefined'&&config?.activeStoreId)||'';
+  const client=(window.__coloSupabaseClient||window.getSupabaseClient?.()),storeId=(typeof config!=='undefined'&&config?.activeStoreId)||'';
   if(!client||!storeId){box.innerHTML='<div class="empty-v2"><b>Los turnos se consultan en el servidor.</b><span>Iniciá sesión y elegí un local para ver sus turnos.</span></div>';return;}
   box.innerHTML='<div class="empty-v2"><span>Cargando turnos…</span></div>';
   const d=new Date();d.setDate(d.getDate()-6);const desde=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -17598,33 +17824,37 @@ function envolverGoTab(){
   nuevo.__carta=true;window.goTab=nuevo;
 }
 
-// ── Atención: selección de mesa y panel lateral con el pedido ──
+// ── Atención V2: tarjetas + columna derecha (reservas, o el pedido real de la mesa elegida) ──
+// El pedido de la columna derecha ES el carrito real de la app (mismas funciones, versiones y conflictos): solo cambia dónde se muestra.
 const escritorio=()=>window.matchMedia('(min-width:1024px)').matches;
-let sel=null;
+let modo='lista';            // 'lista' | 'panel' | 'detalle'
+let sel=null;                // id de la mesa seleccionada
+const tabC=()=>$('tab-carga'),vmesas=()=>$('view-mesas'),vped=()=>$('view-pedido');
 const idMesa=m=>String(getMesaOpenOrderId(m));
-const mesaSel=()=>sel?(mesas||[]).find(m=>idMesa(m)===sel):null;
-const pend=new Map();let pendAt=0,pendBusy=false;
+const mesaDe=id=>(mesas||[]).find(m=>idMesa(m)===String(id));
+const pend=new Map(),envPorMesa=new Map();let pendAt=0,pendBusy=false;
+let cart=null,cartHome=null,resBloque=null,resHome=null;
 async function cargarPend(force){
   if(pendBusy)return;if(!force&&Date.now()-pendAt<20000)return;
-  const client=window.getSupabaseClient?.(),storeId=(typeof config!=='undefined'&&config?.activeStoreId)||'';
+  const client=(window.__coloSupabaseClient||window.getSupabaseClient?.()),storeId=(typeof config!=='undefined'&&config?.activeStoreId)||'';
   if(!client||!storeId||typeof pendientesComanda!=='function')return;
   pendBusy=true;
   try{
     const {data,error}=await client.from('open_order_dispatches').select('open_order_id,sector,lines').eq('store_id',storeId).limit(1000);
     if(error)return;
     const por=new Map();(data||[]).forEach(d=>{if(!por.has(d.open_order_id))por.set(d.open_order_id,[]);por.get(d.open_order_id).push(d);});
-    pend.clear();
+    pend.clear();envPorMesa.clear();por.forEach((v,k)=>envPorMesa.set(String(k),v));
     (mesas||[]).forEach(m=>{
       const p=pendientesComanda(m.items,por.get(idMesa(m))||[]);
       pend.set(idMesa(m),Object.values(p).reduce((s,l)=>s+l.reduce((a,x)=>a+Math.abs(Number(x.cantidad)||0),0),0));
     });
-    pendAt=Date.now();pintarMesas();actualizarBotonComanda();
+    pendAt=Date.now();pintarMesas();actualizarBotonComanda();pintarCabecera();
   }catch(_){}finally{pendBusy=false;}
 }
 function pintarMesas(){
   const cont=$('mesas-container');if(!cont)return;
   cont.querySelectorAll('.mesa-card[data-mesa]').forEach(c=>{
-    const id=c.dataset.mesa,esSel=sel&&id===sel&&escritorio();
+    const id=c.dataset.mesa,esSel=modo==='panel'&&sel&&id===sel;
     if(esSel)c.setAttribute('aria-current','true');else c.removeAttribute('aria-current');
     let tags=c.querySelector('.mesa-tags');
     const n=pend.get(id)||0;
@@ -17637,43 +17867,92 @@ function pintarMesas(){
 function actualizarBotonComanda(){
   const b=document.querySelector('#view-pedido button[onclick="abrirComandaMesa()"]');if(!b)return;
   const n=pend.get(String(typeof mesaActivaId!=='undefined'?mesaActivaId:''))||0;
-  b.textContent=n>0?`Comanda · ${n} sin enviar`:'Comanda';
+  const t=n>0?`Comanda · ${n} sin enviar`:'Comanda';if(b.textContent!==t)b.textContent=t;
+  const tg=document.querySelector('.cart-head2 .tag');if(tg){tg.hidden=!(n>0);const x=`${n} sin enviar`;if(tg.textContent!==x)tg.textContent=x;}
 }
-function lineas(m){
-  return Object.values(m.items||{}).filter(i=>Number(i.qty)>0).map(i=>{const p=findProductById(i.prodId);return{n:p?.name||String(i.prodId),q:Number(i.qty),v:(i.vars||[]).map(x=>x.nombre).join(', '),t:carritoItemTotal(i),nota:i.nota};});
+function anotarCarrito(){
+  const id=String(typeof mesaActivaId!=='undefined'?mesaActivaId:''),tiene=pendAt>0&&id&&!id.startsWith('reserva_');
+  document.querySelectorAll('#cart-rows .cart-row').forEach(r=>{
+    const del=r.querySelector('.qty-wrap .qty-btn[title="Eliminar"]');if(del&&del.parentNode!==r)r.appendChild(del);
+    if(!tiene||r.querySelector('.c-env'))return;
+    const item=typeof carrito!=='undefined'?carrito[r.dataset.key]:null;if(!item||typeof firmaComanda!=='function')return;
+    const f=firmaComanda(item),q=Number(item.qty)||0;
+    const env=(envPorMesa.get(id)||[]).reduce((t,d)=>t+(d.lines||[]).filter(l=>l.firma===f).reduce((a,l)=>a+(Number(l.cantidad)||0),0),0);
+    const d=document.createElement('div');d.className='c-env '+(env>=q?'ok':'pend');d.textContent=env>=q?'Enviado':(env>0?`Enviado ${env} de ${q}`:'Sin enviar');
+    r.querySelector('.c-name')?.after(d);
+  });
+  const ct=$('cart-total');
+  if(ct&&typeof carrito!=='undefined'){const n=Object.values(carrito).reduce((t,i)=>t+(Number(i.qty)||0),0),l=`Total · ${n} producto${n!==1?'s':''}`;if(ct.dataset.lbl!==l)ct.dataset.lbl=l;}
+  const wrap=document.querySelector('.carrito-wrap');
+  if(wrap&&!wrap.querySelector('.cart-head2')){const h=document.createElement('div');h.className='cart-head2';h.innerHTML='<span class="t">Pedido</span><span class="tag warn" hidden></span>';wrap.insertBefore(h,wrap.firstChild);}
+  const sub=$('mesa-tipo-badge'),m=id&&!id.startsWith('reserva_')?mesaDe(id):null;
+  if(sub&&m){const mins=m.apertura?Math.max(0,Math.round((Date.now()-new Date(m.apertura).getTime())/60000)):null,t=`${tipoLabel(m.tipo||'salon')}${mins!==null?` · abierta hace ${mins} min`:''}`;if(sub.textContent!==t)sub.textContent=t;}
 }
-function panel(){
+function pintarCabecera(){
+  const h=$('atn-head');if(!h||modo!=='panel')return;
+  const m=mesaDe(sel);if(!m){h.innerHTML='';return;}
+  const n=pend.get(idMesa(m))||0,mins=m.apertura?Math.max(0,Math.round((Date.now()-new Date(m.apertura).getTime())/60000)):null;
+  const html=`<div class="tk-head"><h2>${esc(m.nombre||'Mesa')}</h2>${n>0?`<span class="tag warn">${n} sin enviar</span>`:''}<button type="button" class="tk-x" data-act="cerrar" aria-label="Cerrar el pedido y volver a la lista">${svg('x',20)}</button></div>
+    <div class="tk-sub">${esc(tipoLabel(m.tipo||'salon'))}${mins!==null?` · abierta hace ${mins} min`:''}</div>`;
+  if(h.innerHTML!==html)h.innerHTML=html;
+}
+function aside(){
   let a=$('atn-side');
-  if(!a){a=document.createElement('aside');a.id='atn-side';a.className='atn-side';a.setAttribute('aria-label','Pedido de la mesa seleccionada');a.hidden=true;$('view-mesas')?.appendChild(a);
-    a.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;const m=mesaSel();if(!m&&b.dataset.act!=='cerrar')return;
-      if(b.dataset.act==='cerrar'){sel=null;pintarPanel();pintarMesas();}
-      else if(b.dataset.act==='abrir')abrirMesa(idMesa(m));
-      else if(b.dataset.act==='cobrar'){abrirMesa(idMesa(m));setTimeout(()=>{const c=$('btn-confirm');if(c&&!c.disabled)c.click();},350);}});}
+  if(!a){
+    a=document.createElement('aside');a.id='atn-side';a.className='atn-side';a.setAttribute('aria-label','Reservas y pedido');
+    a.innerHTML='<div id="atn-slot-res"></div><div id="atn-slot-cart" class="tk" hidden><div id="atn-head"></div><div id="atn-slot-body"></div><div class="tk-more"><button type="button" class="btn-sm" data-act="abrir">Agregar productos</button></div></div>';
+    tabC().appendChild(a);
+    a.addEventListener('click',async e=>{const b=e.target.closest('[data-act]');if(!b)return;
+      if(b.dataset.act==='cerrar')await volverAMesas();
+      else if(b.dataset.act==='abrir'){vmesas().style.display='none';irDetalle();}});
+  }
   return a;
 }
-function pintarPanel(){
-  const a=panel(),vm=$('view-mesas'),m=mesaSel();
-  if(!m||!escritorio()){a.hidden=true;vm?.classList.remove('has-aside');return;}
-  const ls=lineas(m),total=ls.reduce((s,l)=>s+l.t,0),cant=ls.reduce((s,l)=>s+l.q,0),n=pend.get(idMesa(m))||0;
-  const mins=m.apertura?Math.max(0,Math.round((Date.now()-new Date(m.apertura).getTime())/60000)):null;
-  a.hidden=false;vm?.classList.add('has-aside');
-  a.innerHTML=`<div class="tk">
-    <div class="tk-head"><h2>${esc(m.nombre||'Mesa')}</h2>${n>0?`<span class="tag warn">${n} sin enviar</span>`:''}<button type="button" class="tk-x" data-act="cerrar" aria-label="Cerrar panel">${svg('x',20)}</button></div>
-    <div class="tk-sub">${esc(tipoLabel(m.tipo||'salon'))}${mins!==null?` · abierta hace ${mins} min`:''}</div>
-    ${ls.length?`<ul class="tk-lines">${ls.map(l=>`<li><span class="q">${l.q}×</span><span class="n">${esc(l.n)}${l.v?`<small>${esc(l.v)}</small>`:''}${l.nota?`<small>${esc(l.nota)}</small>`:''}</span><span class="v">${fm(l.t)}</span></li>`).join('')}</ul>`:'<p class="tk-vacio">Todavía no agregaste productos.</p>'}
-    <div class="tk-total"><span>Total · ${cant} producto${cant!==1?'s':''}</span><b>${fm(total)}</b></div>
-    <div class="tk-actions"><button type="button" class="btn-sm" data-act="abrir">Abrir pedido</button><button type="button" class="btn-confirmar" data-act="cobrar"${ls.length?'':' disabled'}>Cobrar ${fm(total)}</button></div>
-  </div>`;
+function colocar(){
+  const a=aside(),res=$('atn-slot-res'),cs=$('atn-slot-cart'),body=$('atn-slot-body');
+  const lat=escritorio();
+  const lado=lat&&modo!=='detalle';
+  tabC().classList.toggle('atn-v2',lado);
+  if(resBloque){
+    if(lat&&modo!=='panel'&&modo!=='detalle'){if(resBloque.parentNode!==res)res.appendChild(resBloque);}
+    else if(resBloque.parentNode!==resHome.parent)resHome.parent.insertBefore(resBloque,resHome.next);
+  }
+  if(modo==='panel'&&lat){cs.hidden=false;if(cart.parentNode!==body)body.appendChild(cart);}
+  else{cs.hidden=true;if(cart.parentNode!==cartHome)cartHome.appendChild(cart);}
+  a.hidden=!lado;
+  tabC().classList.toggle('atn-panel',modo==='panel'&&lat);
+  const ct=document.querySelector('#view-pedido .cart-title,#atn-slot-body .cart-title');if(ct){const w=modo==='panel'&&lat?'Total':'Pedido';if(ct.textContent!==w)ct.textContent=w;}
 }
-function seleccionar(id){sel=(sel===id)?null:id;pintarPanel();pintarMesas();}
+function irPanel(id){modo='panel';sel=String(id);vmesas().style.display='block';colocar();pintarMesas();pintarCabecera();}
+function irDetalle(){modo='detalle';colocar();pintarMesas();}
+function irLista(){modo='lista';sel=null;colocar();pintarMesas();}
+async function seleccionar(id){
+  const abierta=vped().style.display==='block';
+  if(abierta&&modo==='panel'&&sel===String(id)){await volverAMesas();return;}
+  if(abierta)await volverAMesas();            // guarda y cierra la mesa anterior con la lógica real
+  const tarjeta=document.querySelector(`.mesa-card[data-mesa="${CSS.escape(String(id))}"]`);tarjeta?.setAttribute('aria-busy','true');
+  try{await abrirMesa(id);}finally{tarjeta?.removeAttribute('aria-busy');}   // validaciones, conflictos y carga del pedido: las de siempre
+  if(vped().style.display==='block'&&String(mesaActivaId)===String(id))irPanel(id);
+}
 function montarAtencion(){
   const cont=$('mesas-container');if(!cont||cont.dataset.carta)return;cont.dataset.carta='1';
-  panel();
-  // En escritorio, tocar la tarjeta selecciona; los botones de la tarjeta siguen entrando o reintentando como antes.
+  cart=document.querySelector('#view-pedido .carga-right');cartHome=cart?.parentNode;
+  // Bloque de reservas: se puede mover a la columna derecha sin tocar su render
+  const t=document.querySelector('#view-mesas .ventas-section-title[style*="margin-top"]');
+  if(t&&$('reservas-container')){
+    resBloque=document.createElement('section');resBloque.id='reservas-bloque';
+    const parent=t.parentNode,next=t.nextSibling;
+    resBloque.append(t,$('reservas-container'),$('reservas-empty'));
+    resHome={parent,next:null};parent.appendChild(resBloque);
+  }
+  const h1=$('atn-title'),vh=document.querySelector('#view-mesas .ventas-header'),acc=vh?.lastElementChild;
+  if(h1&&acc&&!h1.parentNode.classList.contains('ph-row')){const row=document.createElement('div');row.className='ph-row';h1.parentNode.insertBefore(row,h1);row.append(h1,acc);}
+  const sa=$('stock-alerts');if(sa&&cont.parentNode&&!sa.dataset.moved){sa.dataset.moved='1';cont.insertAdjacentElement('afterend',sa);}
+  aside();colocar();
   cont.addEventListener('click',e=>{
-    if(!escritorio())return;
+    if(!escritorio()||!cart)return;
     const c=e.target.closest('.mesa-card[data-mesa]');if(!c||e.target.closest('button,.mesa-close,a'))return;
-    if(c.querySelector('button.btn-sm:not(.primary)'))return; // cobro con cierre pendiente: conserva su reintento
+    if(c.querySelector('button.btn-sm:not(.primary)'))return;
     e.stopPropagation();e.preventDefault();seleccionar(c.dataset.mesa);
   },true);
   cont.addEventListener('keydown',e=>{
@@ -17681,12 +17960,105 @@ function montarAtencion(){
     const c=e.target.closest?.('.mesa-card[data-mesa]');if(!c||e.target!==c)return;
     e.preventDefault();c.click();
   });
-  new MutationObserver(()=>{
-    if(sel&&!mesaSel()){sel=null;}
-    pintarMesas();pintarPanel();cargarPend(false);
-  }).observe(cont,{childList:true});
-  window.matchMedia('(min-width:1024px)').addEventListener('change',()=>{pintarPanel();pintarMesas();});
-  const vp=$('view-pedido');if(vp)new MutationObserver(actualizarBotonComanda).observe(vp,{attributes:true,attributeFilter:['style']});
+  new MutationObserver(()=>{if(sel&&!mesaDe(sel)&&modo==='panel')irLista();pintarMesas();pintarCabecera();cargarPend(false);}).observe(cont,{childList:true});
+  window.matchMedia('(min-width:1024px)').addEventListener('change',()=>{if(modo==='panel'&&!escritorio())irDetalle();colocar();});
+  const cr=$('cart-rows');if(cr)new MutationObserver(()=>{anotarCarrito();actualizarBotonComanda();}).observe(cr,{childList:true});
+  const ctot=$('cart-total');if(ctot)new MutationObserver(anotarCarrito).observe(ctot,{childList:true,characterData:true,subtree:true});
+  anotarCarrito();
+  const vp=vped();
+  if(vp)new MutationObserver(()=>{
+    anotarCarrito();actualizarBotonComanda();
+    if(vp.style.display==='none'){if(modo!=='lista')irLista();}
+    else if(modo==='lista')irDetalle();
+  }).observe(vp,{attributes:true,attributeFilter:['style']});
+  const vm=vmesas();
+  if(vm)new MutationObserver(()=>{if(modo==='panel'&&vm.style.display==='none')irDetalle();}).observe(vm,{attributes:true,attributeFilter:['style']});
+}
+
+// ── Pantalla de Cobro V2: medio de pago + quién atendió + resumen ──
+// Es un frente de la lógica real: elige el medio con setPago(), y al confirmar ejecuta cerrarMesaOReserva() y confirmarOperadorCobro()
+// en sucesión (misma firma de cobro, mismas validaciones y mismos contratos de confirmación).
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let opElegido='';
+let mixedHome=null;
+const medioActual=()=>{try{const ps=getCurrentPaymentState();return ps.payment_mode==='mixed'?'mixed':((ps.pagos&&ps.pagos[0]?.metodo)==='transferencia'?'transferencia':'ef');}catch(_){return 'ef';}};
+function destinoCobro(){try{const t=getCurrentVentaTarget();return t?.nombre||t?.cliente||'Mesa';}catch(_){return 'Mesa';}}
+function msgCobro(t){const m=$('cobro-msg');if(m){m.textContent=t||'';}}
+function pintarCobro(){
+  const sc=$('cobro-screen');if(!sc)return;
+  const items=Object.values(carrito||{}).filter(i=>Number(i.qty)>0),total=typeof totalCobroActual==='function'?totalCobroActual():0;
+  const cant=items.reduce((s,i)=>s+(Number(i.qty)||0),0),nombre=destinoCobro(),esRes=String(mesaActivaId||'').startsWith('reserva_');
+  const m=medioActual(),ops=(typeof operadores!=='undefined'?operadores:[]).filter(Boolean);
+  const ultimo=(typeof ultimoOperadorCobro!=='undefined'&&ultimoOperadorCobro&&ultimoOperadorCobro.mesa===String(mesaActivaId))?ultimoOperadorCobro.op:'';
+  if(!opElegido||!ops.includes(opElegido))opElegido=ultimo&&ops.includes(ultimo)?ultimo:'';
+  const medios=[['ef','Efectivo','cash'],['transferencia','Transferencia','bank'],['mixed','Mixto','split']];
+  sc.innerHTML=`<button type="button" class="btn-sm back" data-c="volver">‹ ${esc(nombre)}</button>
+  <div class="ph-row"><h1 class="ph-title">${esRes?'Cobrar reserva':'Cobrar'} ${esc(nombre)}</h1><p class="cobro-sub">Revisá el medio y quién atendió.</p></div>
+  <div class="cobro-grid">
+    <div class="cobro-main">
+      <h2 class="sec2">Medio de pago</h2>
+      <div class="cobro-medios" role="radiogroup" aria-label="Medio de pago">${medios.map(([k,l,ic])=>`<button type="button" role="radio" aria-checked="${k===m}" data-m="${k}">${svg(ic,22)}<span>${l}</span></button>`).join('')}</div>
+      <div id="cobro-mixto-slot"></div>
+      <h2 class="sec2">Quién atendió</h2>
+      <div class="cobro-ops" role="radiogroup" aria-label="Quién atendió">${ops.length?ops.map(o=>`<button type="button" role="radio" aria-checked="${o===opElegido}" data-o="${esc(o)}">${esc(o)}${o===ultimo?' <small>última vez</small>':''}</button>`).join(''):'<span class="hint">No hay personas cargadas. Pedile a administración que las agregue.</span>'}</div>
+      ${ultimo?'<p class="hint">Se propone la última persona elegida en este dispositivo.</p>':''}
+      <p id="cobro-msg" class="cobro-msg" role="alert"></p>
+      <button type="button" class="btn-confirmar" data-c="confirmar">Confirmar cobro · ${fm(total)}</button>
+    </div>
+    <aside class="tk cobro-tk"><h2>${esc(nombre)}</h2><div class="tk-sub">${esRes?'Reserva':esc(tipoLabel((mesaDe(mesaActivaId)||{}).tipo||'salon'))+((mesaDe(mesaActivaId)||{}).apertura?` · abierta hace ${Math.max(0,Math.round((Date.now()-new Date(mesaDe(mesaActivaId).apertura).getTime())/60000))} min`:'')}</div>
+      <ul class="tk-lines">${items.map(i=>{const p=findProductById(i.prodId);return `<li><span class="q">${Number(i.qty)}×</span><span class="n">${esc(p?.name||i.prodId)}</span><span class="v">${fm(carritoItemTotal(i))}</span></li>`;}).join('')}</ul>
+      <div class="tk-total"><span>Total · ${cant} producto${cant!==1?'s':''}</span><b>${fm(total)}</b></div></aside>
+  </div>`;
+  const slot=$('cobro-mixto-slot'),box=$('mixed-payments-box');
+  if(slot&&box){if(m==='mixed'){slot.appendChild(box);slot.hidden=false;}else{slot.hidden=true;if(box.parentNode===slot&&mixedHome)mixedHome.appendChild(box);}}
+}
+function abrirCobro(){
+  const sc=$('cobro-screen');if(!sc)return;
+  if(!Object.values(carrito||{}).some(i=>Number(i.qty)>0)){showToast('El pedido está vacío');return;}
+  if(!mixedHome)mixedHome=$('mixed-payments-box')?.parentNode||null;
+  pintarCobro();sc.hidden=false;tabC().classList.add('cobro-abierto');window.scrollTo(0,0);
+  setTimeout(()=>sc.querySelector('[data-m][aria-checked="true"]')?.focus(),30);
+}
+function cerrarCobro(){
+  const sc=$('cobro-screen');if(!sc||sc.hidden)return;
+  const box=$('mixed-payments-box');if(box&&mixedHome&&box.parentNode!==mixedHome)mixedHome.appendChild(box);
+  sc.hidden=true;tabC().classList.remove('cobro-abierto','cobro-auto');
+}
+async function confirmarCobro(btn){
+  if(!opElegido){msgCobro('Elegí quién atendió.');return;}
+  let ps;try{ps=getCurrentPaymentState();}catch(_){ps={valido:true};}
+  if(!ps.valido){msgCobro(ps.mensaje||'Revisá los pagos antes de cobrar.');return;}
+  msgCobro('');const txt=btn.textContent;btn.disabled=true;btn.textContent='Cobrando…';tabC().classList.add('cobro-auto');
+  try{
+    await cerrarMesaOReserva();                         // valida y abre el diálogo real del operador
+    const modal=$('modal-operador-cobro');
+    for(let i=0;i<50&&!modal.classList.contains('open');i++)await sleep(100);
+    if(!modal.classList.contains('open')){msgCobro('No pudimos iniciar el cobro. Revisá el aviso y volvé a intentar.');return;}
+    const s=$('cobro-operador-sel');
+    if(![...s.options].some(o=>o.value===opElegido)){cerrarModalOperadorCobro();msgCobro('Esa persona ya no está disponible. Elegí otra.');return;}
+    s.value=opElegido;s.dispatchEvent(new Event('change',{bubbles:true}));
+    await confirmarOperadorCobro();                     // el cobro real, con su firma y su confirmación
+    if($('modal-operador-cobro').classList.contains('open'))cerrarModalOperadorCobro();
+  }catch(err){msgCobro('No pudimos completar el cobro. Reintentá.');}
+  finally{tabC().classList.remove('cobro-auto');if(!$('cobro-screen').hidden){btn.disabled=false;btn.textContent=txt;}}
+}
+function montarCobro(){
+  if($('cobro-screen'))return;
+  const sc=document.createElement('section');sc.id='cobro-screen';sc.className='cobro-screen';sc.hidden=true;sc.setAttribute('aria-label','Cobro');tabC().appendChild(sc);
+  document.addEventListener('click',e=>{
+    const b=e.target.closest('#btn-confirm');if(!b)return;
+    e.preventDefault();e.stopImmediatePropagation();if(!b.disabled)abrirCobro();
+  },true);
+  sc.addEventListener('click',e=>{
+    const x=e.target.closest('[data-m],[data-o],[data-c]');if(!x)return;
+    if(x.dataset.m){try{setPago(x.dataset.m);}catch(_){}pintarCobro();sc.querySelector(`[data-m="${x.dataset.m}"]`)?.focus();}
+    else if(x.dataset.o){opElegido=x.dataset.o;pintarCobro();sc.querySelector(`[data-o="${CSS.escape(opElegido)}"]`)?.focus();}
+    else if(x.dataset.c==='volver')cerrarCobro();
+    else if(x.dataset.c==='confirmar')confirmarCobro(x);
+  });
+  sc.addEventListener('keydown',e=>{if(e.key==='Escape')cerrarCobro();});
+  const vp=vped();if(vp)new MutationObserver(()=>{if(vp.style.display==='none')cerrarCobro();}).observe(vp,{attributes:true,attributeFilter:['style']});
+  const ct=$('cart-total');if(ct)new MutationObserver(()=>{if(!sc.hidden){const t=sc.querySelector('.btn-confirmar');if(t&&!t.disabled&&typeof totalCobroActual==='function')t.textContent=`Confirmar cobro · ${fm(totalCobroActual())}`;}}).observe(ct,{childList:true,characterData:true,subtree:true});
 }
 
 // ── Cobro: resumen dentro del diálogo del operador ──
@@ -17747,11 +18119,37 @@ function titulos(){
   [['tab-clientes','Clientes'],['tab-ajustes','Gestión']].forEach(([id,t])=>{const el=$(id);if(el&&!el.querySelector(':scope > .ph-title')){const h=document.createElement('h1');h.className='ph-title ph-page';h.textContent=t;el.insertBefore(h,el.firstChild);}});
 }
 
+// ── Encabezado: una sola barra (local · fecha · turno · datos · usuario) ──
+function montarEncabezado(){
+  const hr=document.querySelector('.header-right');if(!hr||hr.dataset.v2)return;
+  const t=$('ctx-turno'),s=$('ctx-sync'),c=$('ctx-cuenta'),th=$('theme-toggle');if(!t||!s||!c)return;
+  hr.dataset.v2='1';
+  [t,s,th,c].forEach(e=>e&&hr.appendChild(e));
+  s.insertBefore(Object.assign(document.createElement('span'),{innerHTML:svg('cloud',18),className:'ic-sync'}),s.firstChild);
+  const fecha=$('hoy-lbl');
+  if(fecha){const f=()=>{const x=fecha.textContent.replace(/\s+\d{1,2}:\d{2}$/,'');if(fecha.textContent!==x)fecha.textContent=x;};f();new MutationObserver(f).observe(fecha,{childList:true,characterData:true,subtree:true});}
+  const tv=t.querySelector('.ctx-v');
+  if(tv){const hora=()=>{const m=/^Abierto (\d{1,2}:\d{2})$/.exec(tv.textContent.trim());t.classList.toggle('solo-hora',!!m);if(m)tv.dataset.hora=m[1];else delete tv.dataset.hora;};hora();new MutationObserver(hora).observe(tv,{childList:true,characterData:true,subtree:true});}
+  const ico=s.querySelector('.ic-sync');
+  const nube=()=>{const e=s.dataset.estado;const h=svg(e==='ok'?'cloudok':(e==='error'?'cloudoff':'cloud'),18);if(ico&&ico.innerHTML!==h)ico.innerHTML=h;};nube();new MutationObserver(nube).observe(s,{attributes:true,attributeFilter:['data-estado']});
+  const av=document.createElement('span');av.className='av';const who=document.createElement('span');who.className='who-t';who.innerHTML='<b></b><span></span>';
+  c.insertBefore(who,c.firstChild);c.insertBefore(av,c.firstChild);
+  const ini=n=>{const p=String(n||'').trim().split(/\s+/).filter(Boolean);return (p.length>1?p[0][0]+p[1][0]:(p[0]||'?').slice(0,2)).toUpperCase();};
+  const pintar=()=>{
+    const nombre=c.querySelector('.ctx-v')?.textContent||'',k=(c.querySelector('.ctx-k')?.textContent||'').replace(/^Cuenta\s*·?\s*/i,'');
+    const rol=k?k.charAt(0).toUpperCase()+k.slice(1):'';
+    const sesion=!/^(Iniciar sesión|Cargando)/i.test(nombre);
+    const set=(el,v)=>{if(el.textContent!==v)el.textContent=v;};
+    set(av,sesion?ini(nombre):'?');set(who.firstChild,nombre);set(who.lastChild,sesion?rol:'');
+  };
+  pintar();new MutationObserver(pintar).observe(c,{childList:true,subtree:true,characterData:true});
+}
 function iniciar(){
-  iconosNav();titulos();montarResultados();montarAtencion();envolverGoTab();
+  montarEncabezado();montarCobro();iconosNav();titulos();montarResultados();montarAtencion();envolverGoTab();
   iconize(document.body);
   let t=null;new MutationObserver(()=>{clearTimeout(t);t=setTimeout(()=>{iconosNav();iconize(document.body);},120);}).observe(document.body,{childList:true,subtree:true,characterData:true});
   cargarPend(true);
+  setInterval(()=>{if(document.visibilityState==='visible')cargarPend(false);},6000);setTimeout(()=>cargarPend(true),1500);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(iniciar,0));else setTimeout(iniciar,0);
 })();
