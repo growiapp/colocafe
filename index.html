@@ -5793,6 +5793,7 @@ function updateMesaSetupTotals(){
   const el=$('mesa-total-footer');if(el)el.textContent=total;
 }
 function renderMesaSetupProductoGrid(){
+  renderAccesosRapidosEn('mesa-accesos',{carro:mesaSetupCarrito,handler:'addItemMesaSetup'}); // primero: no depende de la categoría ni del buscador
   const el=$('mesa-prod-grid');if(!el)return;
   if(catalogIsWaitingForSupabase()){el.innerHTML=renderCatalogLoadingMessage();return;}
   const list=getSetupProductList({searchId:'mesa-prod-search',catId:catMesaSetup});
@@ -5809,7 +5810,6 @@ function renderMesaSetupProductoGrid(){
     </button>`;
   }).join('');
   attachProductCardHandlers(el,'addItemMesaSetup');
-  renderAccesosRapidosEn('mesa-accesos',{carro:mesaSetupCarrito,handler:'addItemMesaSetup'});
   updateMesaSetupTotals();
 }
 function addItemMesaSetup(id){
@@ -6973,6 +6973,7 @@ function updateReservaTotals(){
   ['res-total-footer'].forEach(id=>{const el=$(id);if(el)el.textContent=total;});
 }
 function renderReservaProductoGrid(){
+  renderAccesosRapidosEn('res-accesos',{carro:reservaCarrito,handler:'addItemReserva',reservableOnly:true}); // primero: no depende de la categoría ni del buscador
   const el=$('res-prod-grid');if(!el)return;
   const list=getSetupProductList({searchId:'res-prod-search',catId:catReserva,reservableOnly:true});
   if(!list.length){el.innerHTML='<div class="empty" style="grid-column:1/-1">Sin productos</div>';updateReservaTotals();return;}
@@ -6988,7 +6989,6 @@ function renderReservaProductoGrid(){
     </div>`;
   }).join('');
   attachProductCardHandlers(el,'addItemReserva');
-  renderAccesosRapidosEn('res-accesos',{carro:reservaCarrito,handler:'addItemReserva',reservableOnly:true});
   updateReservaTotals();
 }
 function addItemReserva(id){
