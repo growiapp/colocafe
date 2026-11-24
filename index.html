@@ -2420,6 +2420,10 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 @media (max-width:380px){.nav-btn .nav-lbl{font-size:10px;letter-spacing:-.02em}#tab-dashboard .res-head .seg button{padding:0 9px;font-size:13px}.dash-filtro-chip{padding:0 11px}}
 @media (max-width:480px){#tab-dashboard .dash-filtros{display:flex;flex-wrap:wrap;width:100%;justify-self:stretch;overflow:visible}#tab-dashboard .dash-filtros .dash-filtro-chip{flex:1 1 auto;justify-content:center}#tab-dashboard .dash-filtros .dash-fecha-range{flex:1 1 100%}}
 @media (min-width:768px){#tab-historial .res-head{max-width:1480px;padding:0 28px}#tab-historial .hist-layout,#tab-historial .subtab-bar{max-width:1480px;padding-left:28px;padding-right:28px}}
+#tab-clientes>.ph-title,#tab-ajustes>.ph-title{padding-left:0;padding-right:0}
+.nav-btn .nav-lbl{font-size:10.5px;letter-spacing:-.01em}
+#tab-ajustes a{color:var(--brand-ink)}
+.inv-search,#carga-prod-search{background-repeat:no-repeat!important;background-position:14px center!important;background-size:20px!important}
 /*CARTA_V2_END*/
 </style>
 </head>
@@ -7100,7 +7104,7 @@ function renderDashboard(){
   }
   const maxV=Math.max(...barras.map(x=>x.v),1);
   const barTtl=$('bar-chart-titulo');if(barTtl)barTtl.textContent=barTitulo;
-  const barNota=$('bar-nota');if(barNota)barNota.textContent=barNotaTxt;
+  const barNota=$('bar-nota');if(barNota)barNota.textContent=maxV<=1&&!barras.some(x=>x.v>0)?'Todavía no hay ventas en este período.':barNotaTxt;
   const conMonto=barras.length<=12;
   $('bar-semana').classList.toggle('densa',barras.length>12);
   $('bar-semana').innerHTML=barras.map(x=>`<div class="bar-col" style="gap:3px">
@@ -7114,7 +7118,7 @@ function renderDashboard(){
   const maxC=top[0]?.c||1;
   $('top-list').innerHTML=top.length?top.map((t,i)=>`<div class="top-row"><span class="top-rank">${i+1}</span><span class="top-name">${t.n}</span>
     <div class="top-bar-bg"><div class="top-bar-fill" style="width:${Math.round(t.c/maxC*100)}%"></div></div>
-    <span class="top-cnt">${t.c} ud. · ${fmt(t.rev)}</span></div>`).join(''):'<div style="font-size:12px;color:var(--ink3);padding:12px;text-align:center">Sin datos</div>';
+    <span class="top-cnt">${t.c} ud. · ${fmt(t.rev)}</span></div>`).join(''):'<div style="font-size:13px;color:var(--ink2);padding:12px 0">Todavía no hay ventas en este período.</div>';
 
   // Últimas ventas del período
   const recientes=[...ticketGroups].sort((x,y)=>`${y.ref?.fecha||''} ${y.ref?.hora||''}`.localeCompare(`${x.ref?.fecha||''} ${x.ref?.hora||''}`)).slice(0,5);
@@ -7123,7 +7127,7 @@ function renderDashboard(){
     const r=g.ref||{};
     const medios=getVisualTicketPayments(g).map(p=>getPaymentMethodMeta(p.metodo).label).join(' + ')||'Sin pagos';
     const donde=r.mesa||tipoLabel(r.tipo||'salon');
-    return `<div class="recent-row"><span class="rc-h">${r.fecha&&r.fecha!==today()?`${fmtShort(parseLocalDateSafe(r.fecha))} · `:''}${escapeHtml(r.hora||'—')}</span><span class="rc-d">${escapeHtml(donde)} · ${escapeHtml(medios)}</span><span class="rc-t">${fmt(g.total)}</span></div>`;}).join(''):'<div style="font-size:12px;color:var(--ink3);padding:12px;text-align:center">Todavía no hay ventas en este período.</div>';
+    return `<div class="recent-row"><span class="rc-h">${r.fecha&&r.fecha!==today()?`${fmtShort(parseLocalDateSafe(r.fecha))} · `:''}${escapeHtml(r.hora||'—')}</span><span class="rc-d">${escapeHtml(donde)} · ${escapeHtml(medios)}</span><span class="rc-t">${fmt(g.total)}</span></div>`;}).join(''):'<div style="font-size:13px;color:var(--ink2);padding:12px 0">Todavía no hay ventas en este período.</div>';
 
   // Cobros por medio
   const paymentTotals=getVentasPaymentTotals(vh);
