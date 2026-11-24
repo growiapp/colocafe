@@ -2393,7 +2393,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
       <div id="setup-banner"></div>
       <div class="pending-ops-banner" id="caja-pending-banner"></div>
       <!-- Header con filtros y botones -->
-      <h1 class="ph-title" id="atn-title">Atención</h1>
+      <h1 class="ph-title" id="atn-title">Pedidos</h1>
       <div class="ventas-header">
         <div class="cat-chips" id="ventas-filtro-chips" style="margin-bottom:0"></div>
         <div style="display:flex;gap:8px;flex-shrink:0">
@@ -2419,7 +2419,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
     <div class="carga-layout">
       <div class="carga-left">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-          <button class="btn-sm back" onclick="volverAMesas()">‹ Atención</button>
+          <button class="btn-sm back" onclick="volverAMesas()">‹ Pedidos</button>
           <div class="mesa-h1" id="mesa-titulo"></div>
           <div id="mesa-tipo-badge" class="mesa-tipo-badge"></div>
           <button class="btn-sm" onclick="abrirComandaMesa()" style="font-size:11px;padding:5px 10px">Comanda</button>
@@ -2721,10 +2721,10 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 
 <!-- BOTTOM NAV -->
 <nav class="bottom-nav" id="bottom-nav" aria-label="Secciones">
-  <button class="nav-btn active" data-tab="carga"><span class="nav-icon" data-ic="cup"></span><span class="nav-lbl">Atención</span></button>
-  <button class="nav-btn" data-tab="dashboard"><span class="nav-icon" data-ic="bars"></span><span class="nav-lbl">Resultados</span></button>
+  <button class="nav-btn active" data-tab="carga"><span class="nav-icon" data-ic="cup"></span><span class="nav-lbl">Pedidos</span></button>
+  <button class="nav-btn" data-tab="dashboard"><span class="nav-icon" data-ic="bars"></span><span class="nav-lbl">Negocio</span></button>
   <button class="nav-btn" data-tab="clientes"><span class="nav-icon" data-ic="users"></span><span class="nav-lbl">Clientes</span></button>
-  <button class="nav-btn" data-tab="ajustes"><span class="nav-icon" data-ic="clip"></span><span class="nav-lbl">Gestión</span></button>
+  <button class="nav-btn" data-tab="ajustes"><span class="nav-icon" data-ic="clip"></span><span class="nav-lbl">Administrar</span></button>
   <button class="nav-btn" data-tab="historial" hidden aria-hidden="true" tabindex="-1"></button>
 </nav>
 <div class="app-update-banner" id="app-update-banner" role="status" aria-live="polite">
@@ -17844,7 +17844,7 @@ function montarResultados(){
   ['tab-dashboard','tab-historial'].forEach(id=>{
     const t=$(id);if(!t||t.querySelector(':scope > .res-head'))return;
     const h=document.createElement('div');h.className='res-head';
-    h.innerHTML=`<h1 class="ph-title">Resultados</h1><div class="seg" role="group" aria-label="Secciones de Resultados">${RES.map(([k,l])=>`<button type="button" data-r="${k}" aria-pressed="${k===resActual}">${l}</button>`).join('')}</div>`;
+    h.innerHTML=`<h1 class="ph-title">Negocio</h1><div class="seg" role="group" aria-label="Secciones de Negocio">${RES.map(([k,l])=>`<button type="button" data-r="${k}" aria-pressed="${k===resActual}">${l}</button>`).join('')}</div>`;
     h.addEventListener('click',e=>{const b=e.target.closest('[data-r]');if(b)irResultados(b.dataset.r);});
     t.insertBefore(h,t.firstChild);
   });
@@ -18056,11 +18056,14 @@ function montarAtencion(){
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let opElegido='';
 let mixedHome=null;
+let firmaVista='',cobrando=false;
+const firmaCobro=()=>{try{const m=(typeof mesaDe==='function'&&mesaDe(mesaActivaId))||{};return JSON.stringify([m._items_version??null,Object.entries(carrito||{}).filter(([,i])=>Number(i.qty)>0).map(([k,i])=>[k,Number(i.qty),i.desc||i.descuento||null,typeof carritoItemTotal==='function'?carritoItemTotal(i):0]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))),typeof totalCobroActual==='function'?totalCobroActual():0]);}catch(_){return '';}};
 const medioActual=()=>{try{const ps=getCurrentPaymentState();return ps.payment_mode==='mixed'?'mixed':((ps.pagos&&ps.pagos[0]?.metodo)==='transferencia'?'transferencia':'ef');}catch(_){return 'ef';}};
 function destinoCobro(){try{const t=getCurrentVentaTarget();return t?.nombre||t?.cliente||'Mesa';}catch(_){return 'Mesa';}}
 function msgCobro(t){const m=$('cobro-msg');if(m){m.textContent=t||'';}}
 function pintarCobro(){
   const sc=$('cobro-screen');if(!sc)return;
+  firmaVista=firmaCobro();
   const items=Object.values(carrito||{}).filter(i=>Number(i.qty)>0),total=typeof totalCobroActual==='function'?totalCobroActual():0;
   const cant=items.reduce((s,i)=>s+(Number(i.qty)||0),0),nombre=destinoCobro(),esRes=String(mesaActivaId||'').startsWith('reserva_');
   const m=medioActual(),ops=(typeof operadores!=='undefined'?operadores:[]).filter(Boolean);
@@ -18078,7 +18081,7 @@ function pintarCobro(){
       <div class="cobro-ops" role="radiogroup" aria-label="Quién atendió">${ops.length?ops.map(o=>`<button type="button" role="radio" aria-checked="${o===opElegido}" data-o="${esc(o)}">${esc(o)}${o===ultimo?' <small>última vez</small>':''}</button>`).join(''):'<span class="hint">No hay personas cargadas. Pedile a administración que las agregue.</span>'}</div>
       ${ultimo?'<p class="hint">Se propone la última persona elegida en este dispositivo.</p>':''}
       <p id="cobro-msg" class="cobro-msg" role="alert"></p>
-      <button type="button" class="btn-confirmar" data-c="confirmar">Confirmar cobro · ${fm(total)}</button>
+      <button type="button" class="btn-confirmar" data-c="confirmar"${cobrando?' disabled':''}>Confirmar cobro · ${fm(total)}</button>
     </div>
     <aside class="tk cobro-tk"><h2>${esc(nombre)}</h2><div class="tk-sub">${esRes?'Reserva':esc(tipoLabel((mesaDe(mesaActivaId)||{}).tipo||'salon'))+((mesaDe(mesaActivaId)||{}).apertura?` · abierta hace ${Math.max(0,Math.round((Date.now()-new Date(mesaDe(mesaActivaId).apertura).getTime())/60000))} min`:'')}</div>
       <ul class="tk-lines">${items.map(i=>{const p=findProductById(i.prodId);return `<li><span class="q">${Number(i.qty)}×</span><span class="n">${esc(p?.name||i.prodId)}</span><span class="v">${fm(carritoItemTotal(i))}</span></li>`;}).join('')}</ul>
@@ -18100,10 +18103,12 @@ function cerrarCobro(){
   sc.hidden=true;tabC().classList.remove('cobro-abierto','cobro-auto');
 }
 async function confirmarCobro(btn){
+  if(cobrando)return;
   if(!opElegido){msgCobro('Elegí quién atendió.');return;}
   let ps;try{ps=getCurrentPaymentState();}catch(_){ps={valido:true};}
   if(!ps.valido){msgCobro(ps.mensaje||'Revisá los pagos antes de cobrar.');return;}
-  msgCobro('');const txt=btn.textContent;btn.disabled=true;btn.textContent='Cobrando…';tabC().classList.add('cobro-auto');
+  if(firmaCobro()!==firmaVista){pintarCobro();msgCobro('El pedido cambió. Revisá el detalle y volvé a confirmar.');return;}
+  cobrando=true;msgCobro('');const txt=btn.textContent;btn.disabled=true;btn.textContent='Cobrando…';tabC().classList.add('cobro-auto');
   try{
     await cerrarMesaOReserva();                         // valida y abre el diálogo real del operador
     const modal=$('modal-operador-cobro');
@@ -18111,11 +18116,12 @@ async function confirmarCobro(btn){
     if(!modal.classList.contains('open')){msgCobro('No pudimos iniciar el cobro. Revisá el aviso y volvé a intentar.');return;}
     const s=$('cobro-operador-sel');
     if(![...s.options].some(o=>o.value===opElegido)){cerrarModalOperadorCobro();msgCobro('Esa persona ya no está disponible. Elegí otra.');return;}
+    if(firmaCobro()!==firmaVista){cerrarModalOperadorCobro();pintarCobro();msgCobro('El pedido cambió mientras confirmabas. Revisá el detalle y volvé a confirmar.');return;}
     s.value=opElegido;s.dispatchEvent(new Event('change',{bubbles:true}));
     await confirmarOperadorCobro();                     // el cobro real, con su firma y su confirmación
     if($('modal-operador-cobro').classList.contains('open'))cerrarModalOperadorCobro();
   }catch(err){msgCobro('No pudimos completar el cobro. Reintentá.');}
-  finally{tabC().classList.remove('cobro-auto');if(!$('cobro-screen').hidden){btn.disabled=false;btn.textContent=txt;}}
+  finally{cobrando=false;tabC().classList.remove('cobro-auto');if(!$('cobro-screen').hidden){btn.disabled=false;btn.textContent=txt;}}
 }
 function montarCobro(){
   if($('cobro-screen'))return;
@@ -18133,7 +18139,8 @@ function montarCobro(){
   });
   sc.addEventListener('keydown',e=>{if(e.key==='Escape')cerrarCobro();});
   const vp=vped();if(vp)new MutationObserver(()=>{if(vp.style.display==='none')cerrarCobro();}).observe(vp,{attributes:true,attributeFilter:['style']});
-  const ct=$('cart-total');if(ct)new MutationObserver(()=>{if(!sc.hidden){const t=sc.querySelector('.btn-confirmar');if(t&&!t.disabled&&typeof totalCobroActual==='function')t.textContent=`Confirmar cobro · ${fm(totalCobroActual())}`;}}).observe(ct,{childList:true,characterData:true,subtree:true});
+  let tm=0;const alCambiar=()=>{if(sc.hidden||firmaCobro()===firmaVista)return;clearTimeout(tm);tm=setTimeout(()=>{if(sc.hidden||firmaCobro()===firmaVista)return;const bloqueado=sc.querySelector('.btn-confirmar')?.disabled;pintarCobro();msgCobro(bloqueado?'El pedido cambió mientras se cobraba. Revisá el detalle antes de volver a confirmar.':'El pedido cambió. Revisá el detalle y confirmá de nuevo.');},50);};
+  ['cart-total','cart-rows'].forEach(id=>{const e=$(id);if(e)new MutationObserver(alCambiar).observe(e,{childList:true,characterData:true,subtree:true,attributes:true});});
 }
 
 // ── Cobro: resumen dentro del diálogo del operador ──
@@ -18191,7 +18198,7 @@ window.__cartaComprobante=(nuevas,{estado='ok',reserva=false}={})=>{
 
 // ── Encabezados de página para Clientes y Gestión ──
 function titulos(){
-  [['tab-clientes','Clientes'],['tab-ajustes','Gestión']].forEach(([id,t])=>{const el=$(id);if(el&&!el.querySelector(':scope > .ph-title')){const h=document.createElement('h1');h.className='ph-title ph-page';h.textContent=t;el.insertBefore(h,el.firstChild);}});
+  [['tab-clientes','Clientes'],['tab-ajustes','Administrar']].forEach(([id,t])=>{const el=$(id);if(el&&!el.querySelector(':scope > .ph-title')){const h=document.createElement('h1');h.className='ph-title ph-page';h.textContent=t;el.insertBefore(h,el.firstChild);}});
 }
 
 // ── Encabezado: una sola barra (local · fecha · turno · datos · usuario) ──
