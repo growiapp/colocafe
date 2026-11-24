@@ -53,9 +53,9 @@ const cargarCarrito = (page, carro, render) => page.evaluate(([carro, render, q]
 // medidas de las filas visibles de un contenedor
 const medirFilas = (page, sel) => page.evaluate(sel => [...document.querySelectorAll(sel + ' .cart-row')].filter(r => r.offsetParent).map(r => {
   const fila = r.getBoundingClientRect(), q = r.querySelector('.qty-wrap').getBoundingClientRect(), n = r.querySelector('.c-name-wrap').getBoundingClientRect(), s = r.querySelector('.c-sub').getBoundingClientRect(), a = r.querySelector('.c-actions').getBoundingClientRect();
-  const del = r.querySelector('.c-act-del');
+  const del = r.querySelector('.c-act-del'); // «solapa» exige coincidir también en vertical: en móvil el nombre ocupa su propia línea
   return {q: Math.round(q.width), qx: Math.round(q.x - fila.x), btn: [...r.querySelectorAll('.qty-wrap .qty-btn')].map(b => Math.round(b.getBoundingClientRect().width)), a: Math.round(a.width), ax: Math.round(fila.right - a.right),
-    delDentroDeQty: !!del && !!del.closest('.qty-wrap'), subDerecha: Math.round(fila.right - s.right), nombre: Math.round(n.width), desborda: r.scrollWidth > r.clientWidth + 1, solapa: n.right > q.left + 1 && n.left < q.right - 1, h: Math.round(fila.height)};
+    delDentroDeQty: !!del && !!del.closest('.qty-wrap'), subDerecha: Math.round(fila.right - s.right), nombre: Math.round(n.width), desborda: r.scrollWidth > r.clientWidth + 1, solapa: n.right > q.left + 1 && n.left < q.right - 1 && n.bottom > q.top + 1 && n.top < q.bottom - 1, h: Math.round(fila.height)};
 }), sel);
 
 // ── F1: controles de cantidad uniformes en Mesa, Nueva mesa y Reserva (escritorio y móvil) ──
@@ -199,9 +199,10 @@ test('F4: si falla la lectura de operadores no se recurre a datos viejos: se inf
 }));
 
 test('F4: sin Supabase (modo local) se usa la lista local de siempre', async () => abrir(async page => {
-  await page.evaluate(() => { window.getSupabaseClient = () => null; });
-  assert.equal(await page.evaluate(() => estadoOperadores()), 'local');
-  assert.deepEqual(await page.evaluate(() => getActiveOperators().map(o => o.name)), ['Ana', 'Bruno', 'Carla']);
+  // todo en una sola evaluación: el arnés restablece su cliente cada segundo
+  const r = await page.evaluate(() => { const antes = window.getSupabaseClient; window.getSupabaseClient = () => null; try { return {estado: estadoOperadores(), nombres: getActiveOperators().map(o => o.name)}; } finally { window.getSupabaseClient = antes; } });
+  assert.equal(r.estado, 'local');
+  assert.deepEqual(r.nombres, ['Ana', 'Bruno', 'Carla']);
 }));
 
 for (const medio of ['ef', 'transferencia', 'mixed']) {

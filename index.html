@@ -2405,12 +2405,12 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 :root{--fila-qty:96px;--fila-act:60px;--fila-btn:28px}
 .cart-row,.order-items-scroll .cart-row,.reserva-cart-scroll .cart-row{display:grid!important;grid-template-columns:var(--fila-qty) minmax(0,1fr) minmax(56px,auto) var(--fila-act)!important;grid-template-areas:"qty name sub act"!important;align-items:center;column-gap:8px;row-gap:4px;padding:10px 0;border-top:1px solid var(--border);border-bottom:0}
 .cart-row:first-child{border-top:0}
-.cart-row .qty-wrap,.order-items-scroll .cart-row .qty-wrap,.reserva-cart-scroll .cart-row .qty-wrap{grid-area:qty!important;grid-column:auto!important;grid-row:auto!important;display:flex!important;align-items:stretch;width:var(--fila-qty);height:36px;margin:0!important;overflow:hidden;border:1.5px solid var(--border2);border-radius:9px;background:var(--surf);justify-content:stretch}
+.cart-row .qty-wrap,.order-items-scroll .cart-row .qty-wrap,.reserva-cart-scroll .cart-row .qty-wrap{grid-area:qty!important;display:flex!important;align-items:stretch;width:var(--fila-qty);height:36px;margin:0!important;overflow:hidden;border:1.5px solid var(--border2);border-radius:9px;background:var(--surf);justify-content:stretch}
 .cart-row .qty-wrap .qty-btn{flex:0 0 28px!important;width:28px!important;min-width:28px!important;height:100%!important;min-height:0!important;border:0;border-radius:0;background:transparent;font-size:17px;line-height:1;margin:0}
 .cart-row .qty-wrap input.qty-n{flex:1 1 auto!important;width:auto!important;min-width:0!important;height:100%!important;padding:0;border:0;border-radius:0;background:transparent;text-align:center;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums;color:var(--ink)}
-.cart-row .c-name-wrap,.order-items-scroll .cart-row .c-name-wrap,.reserva-cart-scroll .cart-row .c-name-wrap{grid-area:name!important;grid-column:auto!important;grid-row:auto!important;min-width:0}
+.cart-row .c-name-wrap,.order-items-scroll .cart-row .c-name-wrap,.reserva-cart-scroll .cart-row .c-name-wrap{grid-area:name!important;min-width:0}
 .cart-row .c-name{font-weight:500;font-size:14px;line-height:1.25;overflow-wrap:anywhere}
-.cart-row .c-sub,.order-items-scroll .cart-row .c-sub,.reserva-cart-scroll .cart-row .c-sub{grid-area:sub!important;grid-column:auto!important;grid-row:auto!important;align-self:center;justify-self:end;min-width:0;text-align:right;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cart-row .c-sub,.order-items-scroll .cart-row .c-sub,.reserva-cart-scroll .cart-row .c-sub{grid-area:sub!important;align-self:center;justify-self:end;min-width:0;text-align:right;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .cart-row .c-actions{grid-area:act;display:flex;align-items:center;justify-content:flex-end;gap:4px;width:var(--fila-act)}
 .cart-row .c-act{flex:0 0 var(--fila-btn);width:var(--fila-btn);height:var(--fila-btn);min-width:0!important;min-height:0!important;padding:0;display:inline-grid;place-items:center;border:0;border-radius:8px;background:transparent;color:var(--ink2);font:600 15px/1 'DM Sans',sans-serif;cursor:pointer}
 .cart-row .c-act:hover,.cart-row .c-act:focus-visible{background:var(--surf2);color:var(--ink)}
@@ -4753,8 +4753,10 @@ function getOperatorsStoreId(){
 // de bajas, renombres y turnos antiguos. Solo sin Supabase (modo local) se usa la lista local.
 function operadoresModoServidor(){
   if(operadoresSinTabla)return false;
-  const client=window.getSupabaseClient?.(),store=getOperatorsStoreId();
-  return !!(client&&store&&isValidUuid(store));
+  try{
+    const client=window.getSupabaseClient?.(),store=getOperatorsStoreId();
+    return !!(client&&store&&isValidUuid(store));
+  }catch(_){return false;} // la librería/cliente no está disponible: modo local
 }
 function operadoresCacheVigente(){
   return Array.isArray(supabaseOperadoresCache)&&supabaseOperadoresCacheStoreId===getOperatorsStoreId();
