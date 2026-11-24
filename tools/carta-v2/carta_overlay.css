@@ -1,0 +1,134 @@
+/* ═══ Colo Café · "Carta de mostrador" (V2) — capa de diseño sobre la app real ═══════════════════════════
+   Solo estilos: no cambia lógica, datos ni flujos. Fuente: Auditorias/ColoCafe/ux-v1/REDISENO_GLOBAL (DESIGN.md, prototipos/v2/carta.css). */
+:root{
+  --frame:#2B1D16; --frame-2:#3E2B23; --on-frame:#FFF1DC; --on-frame-2:#E3C9A8;
+  --bg:#F7EBD8; --surf:#FFFBF4; --surf2:#F3E5CF; --surf3:#E8D4B6;
+  --ink:#2B1D16; --ink2:#5C4436; --ink3:#6B5243;
+  --border:rgba(62,43,35,.16); --border2:rgba(62,43,35,.30);
+  --brand:#F27021; --brand-press:#D9621B; --on-brand:#2A1206; --brand-ink:#A43800; --brand-soft:#FFE7D3;
+  --green:#1B6E43; --green-bg:#DFF0E5; --amber:#7A5008; --amber-bg:#FBE8C2; --red:#A32F2A; --red-bg:#FADDD8;
+  --focus:0 0 0 3px rgba(164,56,0,.35);
+  --rail:96px; --header-top:60px; --ctx-h:46px; --r:12px; --r-lg:16px;
+  --e1:0 1px 2px rgba(43,29,22,.08),0 2px 8px rgba(43,29,22,.05); --e2:0 10px 28px rgba(43,29,22,.14);
+}
+[data-theme="dark"]{
+  --frame:#0F0905; --frame-2:#1E140D; --on-frame:#FFF1DC; --on-frame-2:#C9AC93;
+  --bg:#1A120C; --surf:#241811; --surf2:#30221A; --surf3:#3E2C20;
+  --ink:#FFF1DC; --ink2:#E8CDB2; --ink3:#CDB096;
+  --border:rgba(255,241,220,.12); --border2:rgba(255,241,220,.26);
+  --brand-ink:#FFB27D; --brand-soft:rgba(242,112,33,.20);
+  --green:#86D9A6; --green-bg:rgba(77,181,122,.16); --amber:#F4C06A; --amber-bg:rgba(232,163,59,.16); --red:#FFA59B; --red-bg:rgba(225,90,79,.18);
+  --focus:0 0 0 3px rgba(255,178,125,.45);
+  --e1:0 1px 2px rgba(0,0,0,.3); --e2:0 10px 28px rgba(0,0,0,.45);
+}
+body,[data-theme="dark"] body{background:var(--bg);color:var(--ink);font-family:'DM Sans',system-ui,sans-serif;font-size:15px;line-height:1.45}
+:focus-visible{outline:2px solid var(--brand-ink);outline-offset:2px}
+
+/* ── Marco: barra superior en café ── */
+.header,[data-theme="dark"] .header{background:var(--frame);backdrop-filter:none;border-bottom:0;box-shadow:none;color:var(--on-frame);padding:0 12px 0 0;gap:0}
+.header-left,.header-right{height:var(--header-top)}
+.header-left{width:var(--rail);justify-content:center;flex:none;padding:0}
+.brand-mark{width:52px;height:52px;border-radius:50%;background:var(--on-frame);padding:3px;filter:none;box-shadow:0 0 0 3px var(--frame-2),0 0 0 4px rgba(255,241,220,.25)}
+.brand-name{display:none}
+#ctx-local{flex:1;min-width:0;height:var(--header-top);min-height:44px;background:transparent;border:0;border-radius:10px;padding:0 10px;color:var(--on-frame)}
+#ctx-local:hover{background:rgba(255,241,220,.08)}
+#ctx-local .ctx-k{display:none}
+#ctx-local .ctx-v{font-family:'Alfa Slab One',Georgia,serif;font-size:20px;font-weight:400;color:var(--on-frame);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header-right{gap:6px;flex:none}
+.header-date{color:var(--on-frame-2);font-family:'DM Sans',sans-serif;font-size:13px}
+.theme-toggle{width:44px;height:44px;border:0;background:transparent;color:var(--on-frame);font-size:18px}
+.theme-toggle:hover{background:rgba(255,241,220,.08)}
+.turno-pill,[data-theme="dark"] .turno-pill{min-height:44px;padding:0 14px;border-radius:999px;border:0;background:transparent;color:var(--on-frame);font-size:14px;font-weight:700;max-width:none}
+.turno-pill:hover{background:rgba(255,241,220,.08)}
+.turno-pill.abierto{background:transparent;color:var(--on-frame);border:0}
+.turno-dot{width:8px;height:8px;background:#7FD6A2}
+.gs-pill,[data-theme="dark"] .gs-pill{min-height:44px;border-radius:999px;border:0;background:var(--pill-warn,#F4C06A);color:#2A1206;font-weight:700}
+
+/* Contexto operativo (Cuenta · Turno · Datos): segunda fila compacta del marco */
+.ctx-bar{height:var(--ctx-h);margin-left:var(--rail);padding:0 12px 6px 4px;gap:6px;background:var(--frame);align-items:center}
+.ctx-item,[data-theme="dark"] .ctx-item{min-height:36px;padding:2px 12px;border:0;border-radius:10px;background:var(--frame-2);color:var(--on-frame);flex-direction:row;align-items:center;gap:8px;justify-content:flex-start}
+.ctx-item:hover{background:rgba(255,241,220,.14)}
+.ctx-k{color:var(--on-frame-2);font-size:12px;font-weight:600;text-transform:none;letter-spacing:0}
+.ctx-v{color:var(--on-frame);font-size:14px;font-weight:700}
+.ctx-item[data-estado="ok"] .ctx-v{color:#7FD6A2}
+.ctx-item[data-estado="aviso"]{background:#F4C06A}.ctx-item[data-estado="aviso"] .ctx-k,.ctx-item[data-estado="aviso"] .ctx-v{color:#2A1206}
+.ctx-item[data-estado="error"]{background:#FF9C92}.ctx-item[data-estado="error"] .ctx-k,.ctx-item[data-estado="error"] .ctx-v{color:#2A1206}
+
+/* ── Navegación: riel en escritorio, barra inferior en móvil ── */
+@media (min-width:768px){
+  .bottom-nav,[data-theme="dark"] .bottom-nav{position:fixed;left:0;top:var(--header-h);bottom:0;right:auto;transform:none;width:var(--rail);min-height:0;overflow:visible;margin:0;flex-direction:column;align-items:center;justify-content:flex-start;gap:4px;padding:8px 0 16px;background:var(--frame);border:0;border-radius:0;box-shadow:none;backdrop-filter:none}
+  .nav-btn{flex:none;width:80px;padding:10px 0 9px;border-radius:14px;font-size:12px;font-weight:700;color:var(--on-frame-2);gap:4px}
+  .nav-btn:hover{color:var(--on-frame);background:rgba(255,241,220,.06)}
+  .nav-btn.active{background:var(--on-frame);color:var(--frame)}
+  .nav-btn .nav-icon{font-size:20px;filter:grayscale(.2)}
+  .page-wrap{padding-left:var(--rail);padding-bottom:24px}
+  .header{left:0}
+}
+@media (max-width:767px){
+  :root{--ctx-h:44px}
+  .header-left{width:64px}
+  .brand-mark{width:40px;height:40px}
+  .ctx-bar{margin-left:0;padding:0 8px 6px;overflow-x:auto;display:flex;scrollbar-width:none}
+  .ctx-bar::-webkit-scrollbar{display:none}
+  .ctx-item{flex:none}
+  .header-date{display:none}
+  .bottom-nav,[data-theme="dark"] .bottom-nav{left:0;right:0;bottom:0;width:auto;transform:none;background:var(--surf);border:0;border-top:1px solid var(--border);border-radius:0;box-shadow:none;backdrop-filter:none}
+  .nav-btn{font-size:12px;font-weight:700;color:var(--ink2);position:relative}
+  .nav-btn.active{color:var(--brand-ink)}
+  .nav-btn.active::after{content:'';position:absolute;left:22%;right:22%;bottom:0;height:3px;border-radius:3px 3px 0 0;background:var(--brand)}
+}
+
+/* ── Botones ── */
+.btn-sm,.btn,.btn-cancel,.btn-cfg,.btn-save,.btn-confirmar{border-radius:var(--r);font-weight:700;min-height:44px}
+.btn-sm,.btn-cancel{background:var(--surf);color:var(--ink);border:0;box-shadow:inset 0 0 0 1.5px var(--border2);font-size:14px;padding:0 16px}
+.btn-sm:hover,.btn-cancel:hover{background:var(--surf2)}
+.btn-sm.primary,.btn-save,.btn.alt,.btn-cfg,.btn-confirmar{background:var(--brand);color:var(--on-brand);border:0;box-shadow:inset 0 -3px 0 rgba(42,18,6,.18)}
+.btn-sm.primary:hover,.btn-save:hover,.btn-confirmar:hover{background:var(--brand-press);filter:none}
+.btn-confirmar{min-height:58px;font-size:18px;border-radius:14px}
+
+/* ── Selectores (chips → segmento) ── */
+.cat-chips{gap:2px;padding:3px;border-radius:12px;background:var(--surf2);display:inline-flex;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.cat-chips::-webkit-scrollbar{display:none}
+.chip,.dash-filtro-chip{min-height:44px;display:inline-flex;align-items:center;padding:0 15px;border:0;border-radius:9px;background:transparent;color:var(--ink2);font-size:14px;font-weight:600}
+.chip.active,.dash-filtro-chip.active{background:var(--frame);color:var(--on-frame);box-shadow:none}
+[data-theme="dark"] .chip.active,[data-theme="dark"] .dash-filtro-chip.active{background:var(--on-frame);color:var(--frame)}
+
+/* ── Atención ── */
+.ventas-header,[data-theme="dark"] .ventas-header{background:transparent;border:0;box-shadow:none;padding:0;margin-bottom:18px}
+.ventas-section-title{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;text-transform:none;letter-spacing:0;color:var(--ink);margin:26px 0 12px}
+.ventas-section-title::after{display:none}
+.mesas-grid{grid-template-columns:repeat(auto-fill,minmax(184px,1fr));gap:12px}
+.mesa-card,[data-theme="dark"] .mesa-card{background:var(--surf);border:0;border-radius:var(--r-lg);padding:16px 16px 14px;min-height:132px;box-shadow:var(--e1),inset 0 0 0 1px var(--border);display:flex;flex-direction:column;gap:4px}
+.mesa-card:hover{box-shadow:var(--e2),inset 0 0 0 1px var(--border2)}
+.mesa-card.con-items,.mesa-card.sin-items{border:0}
+.mesa-nombre{font-family:'Alfa Slab One',Georgia,serif;font-size:21px;line-height:1.1;margin:0}
+.mesa-items{font-size:13px;color:var(--ink2);margin:0}
+.mesa-total{margin-top:auto;padding-top:10px;font-size:18px;font-weight:700;color:var(--ink)}
+.mesa-tipo-badge{align-self:flex-start;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--surf2);color:var(--ink2)}
+.mesa-actions .btn-sm{min-height:36px;padding:0 12px;font-size:13px;background:transparent;box-shadow:none;color:var(--brand-ink)}
+.mesa-actions .btn-sm.primary{background:transparent;color:var(--brand-ink);box-shadow:none}
+.mesa-close{background:transparent;color:var(--ink3);border:0}
+.sync-badge{font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;padding:3px 9px}
+.sync-help{font-family:'DM Sans',sans-serif;font-size:12px;color:var(--ink2)}
+
+/* ── Avisos ── */
+.alert-banner,.setup-banner,.pending-ops-banner,[data-theme="dark"] .alert-banner,[data-theme="dark"] .pending-ops-banner{background:var(--amber-bg);border:0;border-radius:var(--r);color:var(--ink);font-size:14px;padding:10px 14px}
+.alert-banner.crit{background:var(--red-bg);color:var(--ink)}
+
+/* ── Pedido (ticket de papel) ── */
+.carrito-wrap,[data-theme="dark"] .carrito-wrap{background:var(--surf);border:0;border-radius:var(--r-lg);box-shadow:var(--e1),inset 0 0 0 1px var(--border);padding:20px}
+.cart-title{font-family:'Alfa Slab One',Georgia,serif;font-size:21px;font-weight:400}
+.cart-total{font-family:'Alfa Slab One',Georgia,serif;font-size:34px;font-weight:400;color:var(--ink)}
+.pago-opt{border:0;border-radius:var(--r);background:var(--surf);box-shadow:inset 0 0 0 1.5px var(--border2);font-weight:700;color:var(--ink)}
+.pago-opt.active{background:var(--brand-soft);box-shadow:inset 0 0 0 2px var(--brand);color:var(--ink)}
+.prod-card,[data-theme="dark"] .prod-card{background:var(--surf);border:0;border-radius:var(--r);box-shadow:var(--e1),inset 0 0 0 1px var(--border)}
+.prod-card:hover{box-shadow:var(--e2),inset 0 0 0 1px var(--border2)}
+
+/* ── Modales ── */
+.modal-box,[data-theme="dark"] .modal-box{background:var(--surf);border:0;border-radius:var(--r-lg);box-shadow:0 24px 64px rgba(20,12,6,.35)}
+.modal-title{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:24px;line-height:1.1}
+.modal-input,.modal-select,.modal-textarea,.inv-search{border:0;border-radius:var(--r);background:var(--surf);box-shadow:inset 0 0 0 1.5px var(--border2);color:var(--ink);min-height:44px;font-size:16px}
+.modal-input:focus,.modal-select:focus,.modal-textarea:focus,.inv-search:focus{outline:2px solid var(--brand-ink);outline-offset:1px}
+
+[data-theme="dark"] .brand-mark{filter:none}
+@media (max-width:767px){ .mesas-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px} .mesa-card{padding:14px 12px 12px} .mesa-nombre{font-size:19px} .sync-help{display:none} }

@@ -2424,6 +2424,8 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 .nav-btn .nav-lbl{font-size:10.5px;letter-spacing:-.01em}
 #tab-ajustes a{color:var(--brand-ink)}
 .inv-search,#carga-prod-search{background-repeat:no-repeat!important;background-position:14px center!important;background-size:20px!important}
+/* Turnos: nota de importe parcial */
+.tr-nota{grid-column:1/-1;margin:0;font-size:12px;line-height:1.45;color:var(--ink2)}
 /*CARTA_V2_END*/
 </style>
 </head>
@@ -17970,8 +17972,22 @@ function irResultados(r){
 }
 const fm=n=>typeof fmt==='function'?fmt(n):'$'+Math.round(Number(n)||0).toLocaleString('es-AR');
 const hh=ts=>{try{return new Date(ts).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});}catch(_){return '';}};
+// Acumulado parcial de un turno abierto: misma función y mismas reglas que el cierre y el modal «Turno activo».
+// Se reutiliza durante 15 s (y mientras la consulta está en vuelo) para no repetir tres lecturas por cada visita a la pestaña.
+const parcialCache=new Map();let turnosVez=0;
+function parcialTurno(storeId,shiftId){
+  const k=`${storeId}|${shiftId}`,c=parcialCache.get(k);
+  if(c&&Date.now()-c.at<15000)return c.p;
+  const fn=window.calculateShiftCloseTotalsFromSupabase;
+  if(typeof fn!=='function')return Promise.reject(new Error('sin cálculo de turno'));
+  const p=Promise.resolve().then(()=>fn(shiftId));
+  parcialCache.set(k,{at:Date.now(),p});
+  p.catch(()=>parcialCache.delete(k));
+  return p;
+}
 async function renderTurnos(){
   const box=$('turnos-lista');if(!box)return;
+  const vez=++turnosVez;
   const client=(window.__coloSupabaseClient||window.getSupabaseClient?.()),storeId=(typeof config!=='undefined'&&config?.activeStoreId)||'';
   if(!client||!storeId){box.innerHTML='<div class="empty-v2"><b>Los turnos se consultan en el servidor.</b><span>Iniciá sesión y elegí un local para ver sus turnos.</span></div>';return;}
   box.innerHTML='<div class="empty-v2"><span>Cargando turnos…</span></div>';
@@ -17979,14 +17995,23 @@ async function renderTurnos(){
   try{
     const {data,error}=await client.from('shifts').select('id,status,business_date,opened_at,closed_at,opened_by_name,closed_by_name,opening_cash,total_amount,total_cash,total_mercado_pago,total_transferencia,total_other').eq('store_id',storeId).gte('business_date',desde).order('opened_at',{ascending:false}).limit(60);
     if(error)throw error;
+    if(vez!==turnosVez)return;
     if(!data?.length){box.innerHTML='<div class="empty-v2"><b>Sin turnos en los últimos 7 días.</b></div>';return;}
-    box.innerHTML=data.map(s=>{
-      const abierto=s.status==='open',otros=(Number(s.total_mercado_pago)||0)+(Number(s.total_other)||0);
+    // Los turnos abiertos no tienen totales guardados: se calculan con las ventas ya confirmadas por el servidor.
+    const parciales=await Promise.all(data.map(s=>s.status==='open'?parcialTurno(storeId,s.id).then(v=>({v}),()=>({fallo:true})):null));
+    if(vez!==turnosVez)return;
+    box.innerHTML=data.map((s,i)=>{
+      const abierto=s.status==='open',par=parciales[i];
+      const ok=!abierto||(par&&par.v);
+      const t=abierto?(ok?{ef:par.v.totalEf,tr:par.v.totalTransferencia,otros:(Number(par.v.totalMp)||0)+(Number(par.v.totalOtro)||0),tot:par.v.total}:null)
+        :{ef:s.total_cash,tr:s.total_transferencia,otros:(Number(s.total_mercado_pago)||0)+(Number(s.total_other)||0),tot:s.total_amount};
+      const nota=abierto?(ok?(par.v.tickets?'Parcial: ventas ya confirmadas por el servidor. El total definitivo se fija al cerrar el turno.':'Todavía no hay ventas confirmadas en este turno. El total definitivo se fija al cerrar.'):'El total se confirma al cerrar el turno.'):'';
       return `<article class="turno-row"><div class="tr-main"><b>${esc(s.business_date||'')}</b><span>${esc(s.opened_by_name||'—')} · ${hh(s.opened_at)}${s.closed_at?` a ${hh(s.closed_at)}`:''}</span></div>
-        <span class="tag ${abierto?'ok':'neutral'}">${abierto?'Abierto':'Cerrado'}</span>
-        <dl class="tr-tot"><div><dt>Efectivo</dt><dd>${fm(s.total_cash)}</dd></div><div><dt>Transferencia</dt><dd>${fm(s.total_transferencia)}</dd></div>${otros?`<div><dt>Otros</dt><dd>${fm(otros)}</dd></div>`:''}<div><dt>Total</dt><dd><b>${fm(s.total_amount)}</b></dd></div></dl></article>`;
+        <span class="tag ${abierto?'ok':'neutral'}">${abierto?'Abierto · parcial':'Cerrado'}</span>
+        ${t?`<dl class="tr-tot"><div><dt>Efectivo</dt><dd>${fm(t.ef)}</dd></div><div><dt>Transferencia</dt><dd>${fm(t.tr)}</dd></div>${t.otros?`<div><dt>Otros</dt><dd>${fm(t.otros)}</dd></div>`:''}<div><dt>${abierto?'Total parcial':'Total'}</dt><dd><b>${fm(t.tot)}</b></dd></div></dl>`:''}
+        ${nota?`<p class="tr-nota">${nota}</p>`:''}</article>`;
     }).join('');
-  }catch(err){box.innerHTML='<div class="empty-v2"><b>No pudimos cargar los turnos.</b><span>Reintentá en unos segundos.</span></div>';}
+  }catch(err){if(vez===turnosVez)box.innerHTML='<div class="empty-v2"><b>No pudimos cargar los turnos.</b><span>Reintentá en unos segundos.</span></div>';}
 }
 function envolverGoTab(){
   const orig=window.goTab;if(typeof orig!=='function'||orig.__carta)return;
@@ -18010,15 +18035,30 @@ const idMesa=m=>String(getMesaOpenOrderId(m));
 const mesaDe=id=>(mesas||[]).find(m=>idMesa(m)===String(id));
 const pend=new Map(),envPorMesa=new Map();let pendAt=0,pendBusy=false;
 let cart=null,cartHome=null,resBloque=null,resHome=null;
+const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Solo las comandas de las mesas abiertas de este local, en lotes de 50 mesas y páginas de 1000 filas: el historial de mesas cerradas no cuenta ni topa la consulta.
+async function leerComandas(client,storeId,ids){
+  const out=[];
+  for(let i=0;i<ids.length;i+=50){
+    const lote=ids.slice(i,i+50);
+    for(let desde=0;;desde+=1000){
+      const {data,error}=await client.from('open_order_dispatches').select('open_order_id,sector,lines').eq('store_id',storeId).in('open_order_id',lote).order('created_at',{ascending:true}).order('id',{ascending:true}).range(desde,desde+999);
+      if(error)throw error;
+      out.push(...(data||[]));
+      if((data||[]).length<1000)break;
+    }
+  }
+  return out;
+}
 async function cargarPend(force){
   if(pendBusy)return;if(!force&&Date.now()-pendAt<20000)return;
   const client=(window.__coloSupabaseClient||window.getSupabaseClient?.()),storeId=(typeof config!=='undefined'&&config?.activeStoreId)||'';
   if(!client||!storeId||typeof pendientesComanda!=='function')return;
   pendBusy=true;
   try{
-    const {data,error}=await client.from('open_order_dispatches').select('open_order_id,sector,lines').eq('store_id',storeId).limit(1000);
-    if(error)return;
-    const por=new Map();(data||[]).forEach(d=>{if(!por.has(d.open_order_id))por.set(d.open_order_id,[]);por.get(d.open_order_id).push(d);});
+    const ids=[...new Set((mesas||[]).map(idMesa).filter(i=>UUID_RE.test(i)))];
+    const data=ids.length?await leerComandas(client,storeId,ids):[];
+    const por=new Map();data.forEach(d=>{if(!por.has(d.open_order_id))por.set(d.open_order_id,[]);por.get(d.open_order_id).push(d);});
     pend.clear();envPorMesa.clear();por.forEach((v,k)=>envPorMesa.set(String(k),v));
     (mesas||[]).forEach(m=>{
       const p=pendientesComanda(m.items,por.get(idMesa(m))||[]);
