@@ -43,7 +43,7 @@ async function abrir(fn) {
 
 test('V2: demo completa, navegación y sin red a Supabase', async () => abrir(async (page, externos) => {
   const nav = await page.$$eval('.nav-btn', b => b.filter(x => x.offsetParent).map(x => x.innerText.trim()));
-  assert.deepEqual(nav, ['Pedidos', 'Negocio', 'Clientes', 'Administrar']);
+  assert.deepEqual(nav, ['Caja', 'Reportes', 'Clientes', 'Administración']);
   assert.equal(await page.$$eval('.mesa-card', t => t.length), 6);
   assert.ok(!externos.some(u => /supabase\.co/.test(u)), externos.join(','));
   assert.equal(await page.$eval('#ctx-sync', e => e.innerText.trim()), 'Al día');
@@ -81,10 +81,35 @@ test('V2: un cambio del pedido con pago mixto abierto conserva los campos del pa
   assert.equal(await page.$$eval('#cobro-screen #mixed-payments-box', n => n.length), 1);
 }));
 
-test('V2: Negocio muestra indicadores reales y turnos del servidor simulado', async () => abrir(async page => {
+test('V2: Reportes muestra indicadores reales y turnos del servidor simulado', async () => abrir(async page => {
   await page.evaluate(() => goTab('dashboard'));
   await page.waitForSelector('#tab-dashboard.active .kpi-grid');
   await page.evaluate(() => document.querySelector('.res-head [data-r="turnos"]').click());
   await page.waitForSelector('.turno-row');
   assert.ok((await page.$$('.turno-row')).length >= 2);
+}));
+
+test('V2: Reportes calcula los indicadores con las ventas y gastos reales de cada período', async () => abrir(async page => {
+  await page.evaluate(() => goTab('dashboard'));
+  await page.waitForSelector('#tab-dashboard.active .kpi-grid');
+  const num = t => Number(String(t).replace(/[^\d]/g, ''));
+  const leer = () => page.$$eval('#kpi-grid .kpi', k => k.map(x => ({l: x.querySelector('.kpi-lbl').textContent.trim(), v: x.querySelector('.kpi-val').textContent.trim(), s: x.querySelector('.kpi-sub')?.textContent || ''})));
+  for (const f of ['hoy', 'semana', 'mes']) {
+    await page.evaluate(x => setDashFiltro(x), f);
+    const esp = await page.evaluate(() => { const {desde, hasta} = dashRango(); const v = ventas.filter(r => r.fecha >= desde && r.fecha <= hasta); const g = gastos.filter(r => r.fecha >= desde && r.fecha <= hasta); const t = new Set(v.map(r => r.ticket_id)).size; const tot = v.reduce((s, r) => s + r.total, 0); return {tot, t, prom: t ? Math.round(tot / t) : 0, gas: g.reduce((s, r) => s + r.monto, 0), unid: v.reduce((s, r) => s + r.cantidad, 0)}; });
+    const k = await leer();
+    assert.deepEqual(k.map(x => x.l), ['Ventas cobradas', 'Cantidad de ventas', 'Ticket promedio', 'Gastos registrados']);
+    assert.equal(num(k[0].v), esp.tot, f); assert.equal(num(k[1].v), esp.t, f); assert.equal(num(k[2].v), esp.prom, f); assert.equal(num(k[3].v), esp.gas, f);
+    assert.match(k[3].s, /no es la ganancia/);
+    // medios de pago: los porcentajes salen de lo cobrado en el período
+    const pagos = await page.$$eval('#split-stats .split-stat .split-monto', e => e.map(x => Number(x.textContent.replace(/[^\d]/g, ''))));
+    assert.equal(pagos.reduce((a, b) => a + b, 0), esp.tot, f);
+  }
+  // sin lenguaje de rentabilidad ni «ganancia» presentada como dato
+  const txt = await page.$eval('#tab-dashboard', e => e.innerText);
+  assert.doesNotMatch(txt, /Estrellas|Caballo|Bajo rendimiento|Potencial oculto|rentable/i);
+  assert.match(txt, /No incluye costos ni márgenes/);
+  assert.equal(await page.$eval('#bar-chart-titulo', e => e.textContent), 'Evolución de ventas');
+  await page.evaluate(() => setDashFiltro('hoy'));
+  assert.equal(await page.$eval('#bar-chart-titulo', e => e.textContent), 'Ventas por hora');
 }));

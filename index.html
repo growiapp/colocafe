@@ -2254,26 +2254,83 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 .cobro-tk h2{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:24px;line-height:1.1;margin:0}
 .cobro-tk .tk-sub{margin-top:2px}
 
-/* ═══ Resultados: "Parte del día" + columna de gráficos ═══ */
-#tab-dashboard .dash-layout{max-width:1560px;padding:8px 28px 40px}
-@media (min-width:1024px){
-  #tab-dashboard .dash-layout{display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr);gap:0 24px;align-items:start}
-  #tab-dashboard .dash-filtros,#tab-dashboard #dash-source-status{grid-column:1/-1}
-  #tab-dashboard .kpi-grid{grid-column:1;grid-row:3}
-  #tab-dashboard .seccion-split{grid-column:1;grid-row:4}
-  #tab-dashboard .dash-grid{grid-column:2;grid-row:3/span 3;margin-top:0}
-}
-#tab-dashboard .kpi-grid{--tooth:9px;display:block;position:relative;background:var(--surf);padding:22px 20px 24px;margin-bottom:18px;filter:drop-shadow(0 10px 22px rgba(43,29,22,.14));
-  -webkit-mask:radial-gradient(circle at 50% 0,#0000 calc(var(--tooth)/2),#000 calc(var(--tooth)/2 + .5px)) top/var(--tooth) 51% repeat-x,radial-gradient(circle at 50% 100%,#0000 calc(var(--tooth)/2),#000 calc(var(--tooth)/2 + .5px)) bottom/var(--tooth) 51% repeat-x;
-  mask:radial-gradient(circle at 50% 0,#0000 calc(var(--tooth)/2),#000 calc(var(--tooth)/2 + .5px)) top/var(--tooth) 51% repeat-x,radial-gradient(circle at 50% 100%,#0000 calc(var(--tooth)/2),#000 calc(var(--tooth)/2 + .5px)) bottom/var(--tooth) 51% repeat-x}
-[data-theme="dark"] #tab-dashboard .kpi-grid{filter:none}
-#tab-dashboard .kpi-grid::before{content:'Parte del día';display:block;font-family:'Alfa Slab One',Georgia,serif;font-size:24px;padding-bottom:10px;border-bottom:1.5px solid var(--ink);margin-bottom:6px}
-#tab-dashboard .kpi{display:grid;grid-template-columns:1fr auto;gap:0 12px;align-items:baseline;background:transparent;border:0;box-shadow:none;border-radius:0;padding:12px 0;border-bottom:1px solid var(--border)}
-#tab-dashboard .kpi:last-child{border-bottom:0}
-#tab-dashboard .kpi .kpi-lbl{text-transform:none;letter-spacing:0;font-size:15px;font-weight:400;margin:0}
-#tab-dashboard .kpi .kpi-val{font:700 17px 'DM Sans',sans-serif;text-align:right;color:var(--ink)}
-#tab-dashboard .kpi>:nth-child(n+3){grid-column:1/-1;font-size:12px;color:var(--ink2)}
+/* ═══ Reportes: indicadores primero; después evolución, medios de pago, productos y análisis ═══ */
+#tab-dashboard .res-head{max-width:1480px;padding:0 28px}
+#tab-dashboard .dash-layout{max-width:1480px;padding:8px 28px 40px;display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}
+#tab-dashboard .dash-layout>*{min-width:0;margin:0}
+#tab-dashboard .dash-filtros{justify-self:start}
+#tab-dashboard #dash-source-status:empty{display:none}
+#tab-dashboard .seccion-split{display:none}
+#tab-dashboard .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+#tab-dashboard .kpi{display:flex;flex-direction:column;gap:4px;padding:16px 18px;min-width:0}
+#tab-dashboard .kpi .kpi-lbl{font-size:13px;font-weight:600;letter-spacing:0;text-transform:none;margin:0}
+#tab-dashboard .kpi .kpi-val{font:700 30px/1.1 'DM Sans',sans-serif;color:var(--ink);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#tab-dashboard .kpi .kpi-sub{font-size:12px;line-height:1.4;color:var(--ink2)}
+#tab-dashboard .kpi-main{box-shadow:var(--e1),inset 0 3px 0 var(--orange),inset 0 0 0 1px var(--border)}
+#tab-dashboard .kpi-main .kpi-val{font-size:34px}
 .kpi .kpi-lbl{color:var(--ink2)!important}
+#tab-dashboard .dash-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px;margin:0}
+#tab-dashboard .dash-grid>.chart-card{grid-column:1/-1;margin:0;min-width:0}
+#tab-dashboard .chart-ttl{display:flex;align-items:center;justify-content:space-between;gap:10px;font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:18px;margin-bottom:12px}
+#tab-dashboard .chart-ttl .btn-sm{font-family:'DM Sans',sans-serif;min-height:36px}
+#tab-dashboard .chart-nota{font-size:12px;line-height:1.5;color:var(--ink2);margin:-4px 0 12px}
+#tab-dashboard .chart-nota:empty{display:none}
+#tab-dashboard .bar-chart{height:176px;gap:10px;min-height:176px}
+#tab-dashboard .bar-col{min-width:0}
+#tab-dashboard .bar-chart.densa{gap:3px}
+#tab-dashboard .bar-chart.densa .bar-lbl{font-size:11px;white-space:nowrap}
+#tab-dashboard .bar-fill{background:var(--orange-mid);opacity:.6}
+#tab-dashboard .bar-fill.today,#tab-dashboard .bar-fill.hi{opacity:1}
+#tab-dashboard .bar-fill.today{background:var(--orange)}
+#tab-dashboard .bar-monto{font-size:11px;color:var(--ink2)}
+#tab-dashboard .bar-lbl{font-size:12px;color:var(--ink2)}
+#tab-dashboard .split-track{height:10px;margin-bottom:14px}
+#tab-dashboard .split-stats{grid-template-columns:1fr;gap:10px}
+#tab-dashboard .split-stat{display:grid;grid-template-columns:1fr auto;align-items:center;gap:0 12px;text-align:left;padding:12px 14px}
+#tab-dashboard .split-stat .split-lbl{margin:0;grid-row:1/3;font-size:12px}
+#tab-dashboard .split-stat .split-pct{font-size:22px;font-weight:700;text-align:right}
+#tab-dashboard .split-stat .split-monto{font-size:13px;text-align:right;color:var(--ink2)}
+#tab-dashboard .top-list{gap:0}
+#tab-dashboard .top-row{padding:11px 0;border-bottom:1px solid var(--border);font-size:14px}
+#tab-dashboard .top-row:last-child{border-bottom:0}
+#tab-dashboard .top-name{font-size:14px}
+#tab-dashboard .top-cnt{font-size:13px}
+#tab-dashboard .recent-list{display:flex;flex-direction:column}
+#tab-dashboard .recent-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 12px;align-items:baseline;padding:10px 0;border-bottom:1px solid var(--border);font-size:14px}
+#tab-dashboard .recent-row:last-child{border-bottom:0}
+#tab-dashboard .rc-h{font-weight:700;font-variant-numeric:tabular-nums}
+#tab-dashboard .rc-d{color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#tab-dashboard .rc-t{font-weight:700;font-variant-numeric:tabular-nums}
+#tab-dashboard .menu-eng-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:0}
+#tab-dashboard .menu-eng-quad{background:var(--surf2)!important;border:0}
+#tab-dashboard .quad-titulo{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:8px}
+#tab-dashboard .quad-item{font-size:13px;color:var(--ink);gap:10px}
+#tab-dashboard .quad-item .qn{font-size:13px;color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#tab-dashboard .quad-item span:last-child{font-size:12px;color:var(--ink2);white-space:nowrap}
+#tab-dashboard .quad-mas,#tab-dashboard .quad-vacio{font-size:12px;color:var(--ink2);padding-top:4px}
+#tab-dashboard .tip-icon{width:28px;height:28px;font-size:14px}
+@media (min-width:1100px){
+  #tab-dashboard #card-evolucion{grid-column:span 8}
+  #tab-dashboard #card-medios{grid-column:span 4}
+  #tab-dashboard #card-top{grid-column:span 5}
+  #tab-dashboard #card-recientes{grid-column:span 7}
+}
+@media (min-width:768px) and (max-width:1099px){
+  #tab-dashboard .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #tab-dashboard #card-evolucion{grid-column:span 7}
+  #tab-dashboard #card-medios{grid-column:span 5}
+  #tab-dashboard .menu-eng-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:767px){
+  #tab-dashboard .res-head,#tab-dashboard .dash-layout{padding-left:14px;padding-right:14px}
+  #tab-dashboard .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  #tab-dashboard .kpi-main,#tab-dashboard .kpi:last-child{grid-column:1/-1}
+  #tab-dashboard .kpi .kpi-val{font-size:26px}
+  #tab-dashboard .kpi-main .kpi-val{font-size:32px}
+  #tab-dashboard .bar-chart{height:170px;min-height:170px;gap:6px}
+  #tab-dashboard .menu-eng-grid{grid-template-columns:1fr}
+  #tab-dashboard .recent-row{grid-template-columns:auto minmax(0,1fr) auto}
+}
 
 /* Mesa: filas compactas como V2 */
 .cart-row{padding:8px 0;gap:0 8px}
@@ -2353,6 +2410,16 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 [data-theme="dark"] .tip-icon{background:#F0C896!important;color:#1A1008!important}
 /* Nombre del local: con poco ancho se corta con puntos suspensivos */
 #ctx-local .ctx-v{display:block}
+
+/* Filtro de fechas personalizado: no desborda en pantallas angostas */
+.dash-fecha-range{max-width:100%}
+.dash-fecha-input{min-width:0;max-width:100%}
+@media (max-width:640px){.dash-fecha-range{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}}
+#tab-historial .inv-toolbar{flex-wrap:wrap}
+#tab-historial .inv-toolbar .dash-fecha-input{flex:1 1 140px}
+@media (max-width:380px){.nav-btn .nav-lbl{font-size:10px;letter-spacing:-.02em}#tab-dashboard .res-head .seg button{padding:0 9px;font-size:13px}.dash-filtro-chip{padding:0 11px}}
+@media (max-width:480px){#tab-dashboard .dash-filtros{display:flex;flex-wrap:wrap;width:100%;justify-self:stretch;overflow:visible}#tab-dashboard .dash-filtros .dash-filtro-chip{flex:1 1 auto;justify-content:center}#tab-dashboard .dash-filtros .dash-fecha-range{flex:1 1 100%}}
+@media (min-width:768px){#tab-historial .res-head{max-width:1480px;padding:0 28px}#tab-historial .hist-layout,#tab-historial .subtab-bar{max-width:1480px;padding-left:28px;padding-right:28px}}
 /*CARTA_V2_END*/
 </style>
 </head>
@@ -2399,7 +2466,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
       <div id="setup-banner"></div>
       <div class="pending-ops-banner" id="caja-pending-banner"></div>
       <!-- Header con filtros y botones -->
-      <h1 class="ph-title" id="atn-title">Pedidos</h1>
+      <h1 class="ph-title" id="atn-title">Caja</h1>
       <div class="ventas-header">
         <div class="cat-chips" id="ventas-filtro-chips" style="margin-bottom:0"></div>
         <div style="display:flex;gap:8px;flex-shrink:0">
@@ -2425,7 +2492,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
     <div class="carga-layout">
       <div class="carga-left">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-          <button class="btn-sm back" onclick="volverAMesas()">‹ Pedidos</button>
+          <button class="btn-sm back" onclick="volverAMesas()">‹ Caja</button>
           <div class="mesa-h1" id="mesa-titulo"></div>
           <div id="mesa-tipo-badge" class="mesa-tipo-badge"></div>
           <button class="btn-sm" onclick="abrirComandaMesa()" style="font-size:11px;padding:5px 10px">Comanda</button>
@@ -2481,27 +2548,31 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
     </div>
     <div id="dash-source-status" style="font-size:12px;color:var(--ink3);margin-bottom:12px"></div>
     <div class="kpi-grid" id="kpi-grid"></div>
-    <div class="seccion-split" id="seccion-split"></div>
+    <div class="seccion-split" id="seccion-split" hidden></div>
     <div class="dash-grid">
-      <div class="chart-card">
-        <div class="chart-ttl" id="bar-chart-titulo">Ventas — últimos 7 días</div>
+      <div class="chart-card" id="card-evolucion">
+        <div class="chart-ttl" id="bar-chart-titulo">Evolución de ventas</div>
         <div class="bar-chart" id="bar-semana"></div>
+        <div class="chart-nota" id="bar-nota"></div>
       </div>
-      <div class="chart-card">
-        <div class="chart-ttl">Top productos</div>
-        <div class="top-list" id="top-list"></div>
-      </div>
-      <div class="chart-card">
-        <div class="chart-ttl">Cobros por medio</div>
+      <div class="chart-card" id="card-medios">
+        <div class="chart-ttl">Medios de pago</div>
         <div class="split-track" id="split-track"></div>
         <div class="split-stats" id="split-stats"></div>
       </div>
-
-    </div>
-    <div class="chart-card">
-      <div class="chart-ttl">Ingeniería de menú</div>
-      <div style="font-size:11px;color:var(--ink3);margin-bottom:10px">Basado en ventas del período seleccionado · tocá <strong>?</strong> para ver qué hacer con cada categoría</div>
-      <div class="menu-eng-grid" id="menu-eng-grid"></div>
+      <div class="chart-card" id="card-top">
+        <div class="chart-ttl">Productos más vendidos</div>
+        <div class="top-list" id="top-list"></div>
+      </div>
+      <div class="chart-card" id="card-recientes">
+        <div class="chart-ttl"><span>Últimas ventas</span><button class="btn-sm" type="button" onclick="document.querySelector('.res-head [data-r=ventas]').click()">Ver todas</button></div>
+        <div class="recent-list" id="recent-list"></div>
+      </div>
+      <div class="chart-card" id="card-analisis">
+        <div class="chart-ttl">Análisis de productos</div>
+        <div class="chart-nota">Compara cada producto con el promedio del período: unidades vendidas y precio cobrado por unidad. No incluye costos ni márgenes, así que no indica cuánto se gana con cada producto.</div>
+        <div class="menu-eng-grid" id="menu-eng-grid"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -2727,10 +2798,10 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 
 <!-- BOTTOM NAV -->
 <nav class="bottom-nav" id="bottom-nav" aria-label="Secciones">
-  <button class="nav-btn active" data-tab="carga"><span class="nav-icon" data-ic="cup"></span><span class="nav-lbl">Pedidos</span></button>
-  <button class="nav-btn" data-tab="dashboard"><span class="nav-icon" data-ic="bars"></span><span class="nav-lbl">Negocio</span></button>
+  <button class="nav-btn active" data-tab="carga"><span class="nav-icon" data-ic="cup"></span><span class="nav-lbl">Caja</span></button>
+  <button class="nav-btn" data-tab="dashboard"><span class="nav-icon" data-ic="bars"></span><span class="nav-lbl">Reportes</span></button>
   <button class="nav-btn" data-tab="clientes"><span class="nav-icon" data-ic="users"></span><span class="nav-lbl">Clientes</span></button>
-  <button class="nav-btn" data-tab="ajustes"><span class="nav-icon" data-ic="clip"></span><span class="nav-lbl">Administrar</span></button>
+  <button class="nav-btn" data-tab="ajustes"><span class="nav-icon" data-ic="clip"></span><span class="nav-lbl">Administración</span></button>
   <button class="nav-btn" data-tab="historial" hidden aria-hidden="true" tabindex="-1"></button>
 </nav>
 <div class="app-update-banner" id="app-update-banner" role="status" aria-live="polite">
@@ -6997,11 +7068,12 @@ function renderDashboard(){
   }
 
   // KPIs
+  const prodVendidos=vh.reduce((sum,v)=>sum+(Number(v.cantidad)||0),0);
   $('kpi-grid').innerHTML=`
-    <div class="kpi"><div class="kpi-lbl">Ventas cobradas</div><div class="kpi-val">${fmt(totalV)}</div>${formatDeltaKpi(compDelta,compLabel)}</div>
-    <div class="kpi"><div class="kpi-lbl">Gastos</div><div class="kpi-val" style="color:var(--red)">${fmt(totalG)}</div><div class="kpi-sub">${vg.length} gasto${vg.length===1?'':'s'}${pendingExpenses?` · ${pendingExpenses} pendiente${pendingExpenses===1?'':'s'}`:''}</div></div>
-    <div class="kpi"><div class="kpi-lbl">Ventas menos gastos</div><div class="kpi-val" style="color:${ganancia>=0?'var(--green)':'var(--red)'}">${fmt(ganancia)}</div><div class="kpi-sub">No es la ganancia: no incluye costos ni sueldos</div></div>
-    <div class="kpi"><div class="kpi-lbl">Ticket promedio</div><div class="kpi-val">${fmt(promP)}</div><div class="kpi-sub">${txP} venta${txP===1?'':'s'}</div></div>`;
+    <div class="kpi kpi-main"><div class="kpi-lbl">Ventas cobradas</div><div class="kpi-val">${fmt(totalV)}</div>${formatDeltaKpi(compDelta,compLabel)}</div>
+    <div class="kpi"><div class="kpi-lbl">Cantidad de ventas</div><div class="kpi-val">${txP}</div><div class="kpi-sub">${prodVendidos} producto${prodVendidos===1?'':'s'} vendido${prodVendidos===1?'':'s'}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Ticket promedio</div><div class="kpi-val">${fmt(promP)}</div><div class="kpi-sub">ventas cobradas ÷ cantidad de ventas</div></div>
+    <div class="kpi"><div class="kpi-lbl">Gastos registrados</div><div class="kpi-val" style="color:var(--red)">${fmt(totalG)}</div><div class="kpi-sub">${vg.length} gasto${vg.length===1?'':'s'}${pendingExpenses?` · ${pendingExpenses} sin confirmar`:''} · Ventas menos gastos: ${fmt(ganancia)} (no es la ganancia: faltan costos y sueldos)</div></div>`;
 
   const productosVendidos=vh.reduce((sum,v)=>sum+(Number(v.cantidad)||0),0);
   const prodRevenue={};vh.forEach(v=>{const key=v.producto||'Sin producto';prodRevenue[key]=(prodRevenue[key]||0)+money2(v.total);});
@@ -7011,17 +7083,30 @@ function renderDashboard(){
     <div class="seccion-card"><div class="seccion-lbl">Productos vendidos</div><div class="seccion-val">${productosVendidos}</div><div class="seccion-sub">${vh.length} líneas vendidas</div></div>
     <div class="seccion-card"><div class="seccion-lbl">Producto principal</div><div class="seccion-val" style="font-size:16px;line-height:1.2">${escapeHtml(topRevenue?.[0]||'Sin datos')}</div><div class="seccion-sub">${topRevenue?fmt(topRevenue[1]):'—'}</div></div>`;
 
-  // Bar chart 7 días
-  const dias7=[],lbls7=[];
-  const dashHasta=parseLocalDateSafe(hasta||today());
-  for(let i=6;i>=0;i--){const d=addLocalDays(dashHasta,-i);dias7.push(getLocalDateString(d));lbls7.push(getLocalDateString(d)===today()?'Hoy':['D','L','M','X','J','V','S'][d.getDay()]);}
-  const sem=dias7.map(f=>vh.filter(v=>v.fecha===f).reduce((s,v)=>s+v.total,0));
-  const maxV=Math.max(...sem,1);
-  const barTtl=$('bar-chart-titulo');if(barTtl)barTtl.textContent='Últimos 7 días';
-  $('bar-semana').innerHTML=sem.map((v,i)=>`<div class="bar-col" style="gap:3px">
-    ${v>0?`<span class="bar-monto">${fmtK(v)}</span>`:'<span class="bar-monto"></span>'}
-    <div class="bar-fill${i===6?' today':v===maxV&&v>0?' hi':''}" style="height:${Math.round(v/maxV*60)}px"></div>
-    <span class="bar-lbl">${lbls7[i]}</span></div>`).join('');
+  // Evolución: ventas por hora si el período es un solo día; si no, ventas por día (hasta 31 días del período)
+  const hrDe=v=>{const m=String(v.hora||'').match(/^(\d{1,2}):/);return m?Number(m[1]):null;};
+  const porHora=desde&&desde===hasta&&vh.length&&vh.every(v=>hrDe(v)!==null);
+  let barras=[],barNotaTxt='',barTitulo='Evolución de ventas';
+  if(porHora){
+    const hs=vh.map(hrDe),h0=Math.min(...hs),h1=Math.max(h0+3,Math.max(...hs));
+    for(let h=h0;h<=h1;h++)barras.push({lbl:`${h} h`,v:vh.filter(v=>hrDe(v)===h).reduce((s,v)=>s+v.total,0)});
+    barTitulo='Ventas por hora';
+  }else{
+    const dH=parseLocalDateSafe(hasta||today()),dD=parseLocalDateSafe(desde||hasta||today());
+    const n=Math.min(31,Math.max(1,Math.round((dH-dD)/86400000)+1));
+    if(Math.round((dH-dD)/86400000)+1>31)barNotaTxt='Se muestran los últimos 31 días del período.';
+    for(let i=n-1;i>=0;i--){const d=addLocalDays(dH,-i),f=getLocalDateString(d);
+      barras.push({lbl:f===today()?'Hoy':(n<=7?['dom','lun','mar','mié','jue','vie','sáb'][d.getDay()]:(d.getDate()%5===1||f===today()?String(d.getDate()):'')),v:vh.filter(v=>v.fecha===f).reduce((s,v)=>s+v.total,0),hoy:f===today()});}
+  }
+  const maxV=Math.max(...barras.map(x=>x.v),1);
+  const barTtl=$('bar-chart-titulo');if(barTtl)barTtl.textContent=barTitulo;
+  const barNota=$('bar-nota');if(barNota)barNota.textContent=barNotaTxt;
+  const conMonto=barras.length<=12;
+  $('bar-semana').classList.toggle('densa',barras.length>12);
+  $('bar-semana').innerHTML=barras.map(x=>`<div class="bar-col" style="gap:3px">
+    ${x.v>0&&(conMonto||x.v===maxV)?`<span class="bar-monto">${fmtK(x.v)}</span>`:'<span class="bar-monto"></span>'}
+    <div class="bar-fill${x.hoy?' today':x.v===maxV&&x.v>0?' hi':''}" style="height:${Math.round(x.v/maxV*120)}px"></div>
+    <span class="bar-lbl">${x.lbl}</span></div>`).join('');
 
   // Top productos
   const conteo={};vh.forEach(v=>{if(!conteo[v.producto])conteo[v.producto]={qty:0,rev:0};conteo[v.producto].qty+=Number(v.cantidad)||0;conteo[v.producto].rev=money2(conteo[v.producto].rev+money2(v.total));});
@@ -7031,6 +7116,15 @@ function renderDashboard(){
     <div class="top-bar-bg"><div class="top-bar-fill" style="width:${Math.round(t.c/maxC*100)}%"></div></div>
     <span class="top-cnt">${t.c} ud. · ${fmt(t.rev)}</span></div>`).join(''):'<div style="font-size:12px;color:var(--ink3);padding:12px;text-align:center">Sin datos</div>';
 
+  // Últimas ventas del período
+  const recientes=[...ticketGroups].sort((x,y)=>`${y.ref?.fecha||''} ${y.ref?.hora||''}`.localeCompare(`${x.ref?.fecha||''} ${x.ref?.hora||''}`)).slice(0,5);
+  const recEl=$('recent-list');
+  if(recEl)recEl.innerHTML=recientes.length?recientes.map(g=>{
+    const r=g.ref||{};
+    const medios=getVisualTicketPayments(g).map(p=>getPaymentMethodMeta(p.metodo).label).join(' + ')||'Sin pagos';
+    const donde=r.mesa||tipoLabel(r.tipo||'salon');
+    return `<div class="recent-row"><span class="rc-h">${r.fecha&&r.fecha!==today()?`${fmtShort(parseLocalDateSafe(r.fecha))} · `:''}${escapeHtml(r.hora||'—')}</span><span class="rc-d">${escapeHtml(donde)} · ${escapeHtml(medios)}</span><span class="rc-t">${fmt(g.total)}</span></div>`;}).join(''):'<div style="font-size:12px;color:var(--ink3);padding:12px;text-align:center">Todavía no hay ventas en este período.</div>';
+
   // Cobros por medio
   const paymentTotals=getVentasPaymentTotals(vh);
   const totalCobrado=money2(Object.values(paymentTotals).reduce((s,v)=>s+v,0))||1;
@@ -7039,28 +7133,25 @@ function renderDashboard(){
 
   // Ventas por categoría eliminada del dashboard
 
-  // Ingeniería de menú
-  const prodStats={};vh.forEach(v=>{if(!prodStats[v.producto])prodStats[v.producto]={nombre:v.producto,qty:0,rev:0,cat:v.cat};prodStats[v.producto].qty+=v.cantidad;prodStats[v.producto].rev+=v.total;});
+  // Análisis de productos: solo ventas reales (unidades y precio cobrado por unidad). Sin costos ni márgenes: no habla de rentabilidad.
+  const prodStats={};vh.forEach(v=>{if(!prodStats[v.producto])prodStats[v.producto]={nombre:v.producto,qty:0,rev:0};prodStats[v.producto].qty+=Number(v.cantidad)||0;prodStats[v.producto].rev+=v.total;});
   const vals=Object.values(prodStats);
   const avgQty=vals.reduce((s,p)=>s+p.qty,0)/(vals.length||1);
-  const avgRev=vals.reduce((s,p)=>s+(p.qty?p.rev/p.qty:0),0)/(vals.length||1);
-  const quads={estrellas:[],caballos:[],rompecabezas:[],perros:[]};
-  vals.forEach(p=>{const hi=p.qty>=avgQty,hr=(p.qty?p.rev/p.qty:0)>=avgRev;quads[hi&&hr?'estrellas':hi?'caballos':hr?'rompecabezas':'perros'].push({n:p.nombre,qty:p.qty});});
+  const avgPu=vals.reduce((s,p)=>s+(p.qty?p.rev/p.qty:0),0)/(vals.length||1);
+  const quads={a:[],b:[],c:[],d:[]};
+  vals.forEach(p=>{const pu=p.qty?p.rev/p.qty:0,hi=p.qty>=avgQty,hr=pu>=avgPu;quads[hi&&hr?'a':hi?'b':hr?'c':'d'].push({n:p.nombre,qty:p.qty,pu});});
+  Object.values(quads).forEach(l=>l.sort((x,y)=>y.qty-x.qty));
   const quadDef=[
-    {key:'estrellas',emoji:'⭐',label:'Estrellas',bg:'var(--green-bg)',
-     tip:'<strong>Alta venta + alto ticket.</strong><br>Tu producto más rentable. Mantenelo visible, no bajes el precio sin análisis.'},
-    {key:'caballos',emoji:'🐴',label:'Caballo de batalla',bg:'var(--blue-bg)',
-     tip:'<strong>Alta venta, ticket más bajo.</strong><br>Mueve volumen pero aporta menos por unidad. Optimizá costos o revisá precio.'},
-    {key:'rompecabezas',emoji:'🧩',label:'Potencial oculto',bg:'var(--amber-bg)',
-     tip:'<strong>Baja venta, alto ticket.</strong><br>Buena rentabilidad pero poca demanda. Mejorá visibilidad o probá una promo.'},
-    {key:'perros',emoji:'🐶',label:'Bajo rendimiento',bg:'var(--red-bg)',
-     tip:'<strong>Baja venta + bajo ticket.</strong><br>Revisá si conviene seguir en carta. Considerá cambiar precio, presentación o retirarlo.'}
+    {key:'a',label:'Más vendidos · precio alto',tip:'Se vendieron más unidades que el promedio y a un precio por unidad superior al promedio.'},
+    {key:'b',label:'Más vendidos · precio bajo',tip:'Se vendieron más unidades que el promedio, a un precio por unidad igual o menor al promedio.'},
+    {key:'c',label:'Menos vendidos · precio alto',tip:'Se vendieron menos unidades que el promedio, a un precio por unidad superior al promedio.'},
+    {key:'d',label:'Menos vendidos · precio bajo',tip:'Se vendieron menos unidades que el promedio y a un precio por unidad menor al promedio.'}
   ];
-  const mkTip=(tip)=>`<span class="tip-wrap"><span class="tip-icon" onclick="this.classList.toggle('open');event.stopPropagation()">?<div class="tip-bubble">${tip}</div></span></span>`;
-  $('menu-eng-grid').innerHTML=quadDef.map(q=>`<div class="menu-eng-quad" style="background:${q.bg};border-color:transparent">
-    <div class="quad-titulo">${q.emoji} ${q.label} ${mkTip(q.tip)}</div>
-    ${quads[q.key].length?quads[q.key].slice(0,5).map(p=>`<div class="quad-item"><span>${p.n}</span><span>${p.qty}ud</span></div>`).join(''):'<div style="font-size:11px;color:var(--ink3)">Sin datos</div>'}
-  </div>`).join('')+'<div class="menu-eng-legend" style="grid-column:1/-1">📐 La ingeniería de menú cruza ventas y contribución al total para clasificar productos y orientar decisiones.</div>';
+  const mkTip=(tip)=>`<span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="Qué significa" onclick="this.classList.toggle('open');event.stopPropagation()">?<div class="tip-bubble">${tip}</div></span></span>`;
+  $('menu-eng-grid').innerHTML=quadDef.map(q=>`<div class="menu-eng-quad">
+    <div class="quad-titulo">${q.label} ${mkTip(q.tip)}</div>
+    ${quads[q.key].length?quads[q.key].slice(0,5).map(p=>`<div class="quad-item"><span class="qn">${escapeHtml(p.n)}</span><span>${p.qty} ud. · ${fmt(Math.round(p.pu))} c/u</span></div>`).join('')+(quads[q.key].length>5?`<div class="quad-mas">y ${quads[q.key].length-5} más</div>`:''):'<div class="quad-vacio">Ningún producto</div>'}
+  </div>`).join('');
 
   // Resultado financiero
   const resEl=$('dash-resultado');
@@ -17850,7 +17941,7 @@ function montarResultados(){
   ['tab-dashboard','tab-historial'].forEach(id=>{
     const t=$(id);if(!t||t.querySelector(':scope > .res-head'))return;
     const h=document.createElement('div');h.className='res-head';
-    h.innerHTML=`<h1 class="ph-title">Negocio</h1><div class="seg" role="group" aria-label="Secciones de Negocio">${RES.map(([k,l])=>`<button type="button" data-r="${k}" aria-pressed="${k===resActual}">${l}</button>`).join('')}</div>`;
+    h.innerHTML=`<h1 class="ph-title">Reportes</h1><div class="seg" role="group" aria-label="Secciones de Reportes">${RES.map(([k,l])=>`<button type="button" data-r="${k}" aria-pressed="${k===resActual}">${l}</button>`).join('')}</div>`;
     h.addEventListener('click',e=>{const b=e.target.closest('[data-r]');if(b)irResultados(b.dataset.r);});
     t.insertBefore(h,t.firstChild);
   });
@@ -18207,7 +18298,7 @@ window.__cartaComprobante=(nuevas,{estado='ok',reserva=false}={})=>{
 
 // ── Encabezados de página para Clientes y Gestión ──
 function titulos(){
-  [['tab-clientes','Clientes'],['tab-ajustes','Administrar']].forEach(([id,t])=>{const el=$(id);if(el&&!el.querySelector(':scope > .ph-title')){const h=document.createElement('h1');h.className='ph-title ph-page';h.textContent=t;el.insertBefore(h,el.firstChild);}});
+  [['tab-clientes','Clientes'],['tab-ajustes','Administración']].forEach(([id,t])=>{const el=$(id);if(el&&!el.querySelector(':scope > .ph-title')){const h=document.createElement('h1');h.className='ph-title ph-page';h.textContent=t;el.insertBefore(h,el.firstChild);}});
 }
 
 // ── Encabezado: una sola barra (local · fecha · turno · datos · usuario) ──
