@@ -261,18 +261,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 .cart-total{display:flex!important;justify-content:space-between;align-items:baseline;width:100%;font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:34px}
 .cart-total::before{content:attr(data-lbl);font:400 14px 'DM Sans',sans-serif;color:var(--ink2)}
 .divider{order:4}.pago-lbl{order:5}.pago-grid{order:6}.pago-mixed-box{order:7}.btn-confirmar{order:8}
-.cart-row{display:grid!important;grid-template-columns:auto minmax(0,1fr) auto auto;grid-template-areas:"qty name sub del";align-items:center;gap:0 14px;padding:12px 0;border-top:1px solid var(--border)}
-.cart-row:first-child{border-top:0}
-.cart-row .qty-wrap{grid-area:qty;display:flex;align-items:center;border:1.5px solid var(--border2);border-radius:10px;overflow:hidden;background:var(--surf)}
-.cart-row .c-name-wrap{grid-area:name;min-width:0}
-.cart-row .c-sub{grid-area:sub;font-weight:700;font-size:16px;font-variant-numeric:tabular-nums}
-.cart-row>.qty-btn{grid-area:del;width:36px;height:36px;border:0;background:transparent;color:var(--ink2)!important;font-size:18px;border-radius:8px;margin:0!important}
-.cart-row>.qty-btn:hover{background:var(--surf2)}
-.qty-wrap .qty-btn{border:0;background:transparent;min-width:38px;width:38px;height:42px;font-size:18px;border-radius:0}
-.qty-wrap input.qty-n{width:34px;text-align:center;border:0;background:transparent;font-weight:700;font-size:15px;color:var(--ink)}
 .c-name{font-weight:500;font-size:15px}
-.c-env{font-size:12px;font-weight:700;line-height:1.3}
-.c-env.ok{color:var(--ink2);font-weight:400}.c-env.pend{color:var(--brand-ink)}
 .c-desc{background:none!important;border:0!important;box-shadow:none!important;padding:0!important;min-height:0!important;font-size:12px;font-weight:700;color:var(--brand-ink);text-decoration:underline;cursor:pointer;border-radius:0}
 .cart-desglose .c-desc{display:block;margin:8px 0 2px;font-size:14px;text-decoration:none}
 @media (max-width:767px){#view-pedido .carga-left>div:first-child{grid-template-columns:1fr auto;grid-template-areas:"back back" "title title" "sub sub" "com add"}#view-pedido .carga-layout{padding:14px}}
@@ -280,10 +269,3 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 #view-pedido .carga-left>div:first-child #mesa-tipo-badge{padding-bottom:6px}
 #view-pedido .carga-left>div:first-child button[onclick="openProdRapidoModal()"],[data-theme="dark"] #view-pedido .carga-left>div:first-child button[onclick="openProdRapidoModal()"]{background:var(--surf);color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--border2)}
 @media (min-width:1024px){#view-pedido .carga-right{margin-top:104px}}
-.cart-row{grid-template-columns:auto minmax(0,1fr) auto auto;gap:0 10px}
-.qty-wrap .qty-btn{min-width:30px;width:30px}
-.qty-wrap input.qty-n{width:28px}
-.cart-row>.qty-btn{width:30px;height:30px}
-.cart-row .c-desc:not(.on){max-height:0;overflow:hidden;opacity:0;transition:opacity .12s}
-.cart-row:hover .c-desc,.cart-row:focus-within .c-desc{max-height:24px;opacity:1}
-@media (hover:none){.cart-row .c-desc:not(.on){max-height:24px;opacity:1}}

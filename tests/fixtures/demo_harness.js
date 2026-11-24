@@ -46,15 +46,18 @@ const hoyV=VV.filter(v=>v.fecha===fecha);
 DATA.sales=hoyV.map(v=>({id:'sv_'+v.id,store_id:S,legacy_id:v.ticket_id,legacy_source:'demo',metadata:{},shift_id:'50000000-0000-4000-8000-000000000001',total_amount:v.total,sold_at:v.timestamp,operator_name:v.operador}));
 DATA.sale_items=hoyV.map(v=>({id:'si_'+v.id,sale_id:'sv_'+v.id,store_id:S,product_name:v.producto,category_name:'Cafetería',section:'cafeteria',quantity:v.cantidad,line_total:v.total}));
 DATA.sale_payments=hoyV.map(v=>({id:'sp_'+v.id,sale_id:'sv_'+v.id,store_id:S,method:v.pago,amount:v.total}));
+// Operadores del local (activos e inactivos) y de OTRO local: Cobrar debe mostrar solo los activos de este local
+const OP=(id,name,active,store)=>({id:'60000000-0000-4000-8000-00000000000'+id,store_id:store||S,name,normalized_name:name.toLowerCase(),active,role:'operator',metadata:{}});
+DATA.operators=[OP(1,'Ana',true),OP(2,'Bruno',true),OP(3,'Carla',true),OP(4,'Maia',false),OP(5,'Zeta',true,'89000000-0000-4000-8000-0000000000ff')];
 window.__DEMO_DATA=DATA; // las pruebas pueden sustituir tablas
 if(typeof window.__DEMO_PRE==='function')window.__DEMO_PRE(DATA,{S,mesas,L,disp}); // gancho de pruebas: ajusta los datos antes de que la app lea
 window.__DEMO_LOG=[]; // consultas recibidas (tabla, filtros, página)
 const GATED={sales:'shift_id',sale_items:'sale_id',sale_payments:'sale_id'}; // solo responden a consultas de un turno (el resto sigue sin servidor, como antes)
 const builder=(t)=>{const f=[];let rg=null,lim=null;const b={select(){return b},eq(c,v){f.push(['eq',c,v]);return b},gte(){return b},order(){return b},limit(n){lim=n;return b},in(c,v){f.push(['in',c,v]);return b},range(a,z){rg=[a,z];return b},
-  then(res,rej){window.__DEMO_LOG.push({t,f:f.map(x=>x.slice()),rg,lim});let rows=DATA[t];if(GATED[t]&&!f.some(x=>x[1]===GATED[t]))rows=null;
+  then(res,rej){const sinTurno=GATED[t]&&!f.some(x=>x[1]===GATED[t]);(sinTurno?(window.__DEMO_LOG_OTRAS||(window.__DEMO_LOG_OTRAS=[])):window.__DEMO_LOG).push({t,f:f.map(x=>x.slice()),rg,lim});let rows=DATA[t];if(sinTurno)rows=[]; // lecturas que no son de un turno: responden vacío y OK (el servidor «existe» pero sin ventas) y no se registran en __DEMO_LOG
     if(rows){rows=rows.filter(r=>f.every(([k,c,v])=>!(c in r)||(k==='eq'?r[c]===v:v.includes(r[c]))));if(rg)rows=rows.slice(rg[0],rg[1]+1);else if(lim!==null)rows=rows.slice(0,lim);}
     return Promise.resolve(rows?{data:rows,error:null}:{data:null,error:{code:'DEMO',message:'sin servidor en la demostración'}}).then(res,rej)}};return b;};
-const MOCK={from:builder,rpc:(n,a)=>Promise.resolve({data:{ok:true,items_version:((a&&a.p_expected_version)||0)+1,version:((a&&a.p_expected_version)||0)+1},error:null})};Object.defineProperty(window,'__coloSupabaseClient',{get:()=>MOCK,set:()=>{},configurable:true});
+const MOCK={from:builder,auth:{getSession:async()=>({data:{session:{user:{id:U}}},error:null}),getUser:async()=>({data:{user:{id:U}},error:null})},rpc:(n,a)=>Promise.resolve({data:{ok:true,items_version:((a&&a.p_expected_version)||0)+1,version:((a&&a.p_expected_version)||0)+1},error:null})};Object.defineProperty(window,'__coloSupabaseClient',{get:()=>MOCK,set:()=>{},configurable:true});
 // Contexto de la demostración: sesión, local y turno confirmados
 const aplicar=()=>{
   if(typeof config==='undefined'||typeof renderContextoGlobal!=='function')return false;

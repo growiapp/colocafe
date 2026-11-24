@@ -115,15 +115,6 @@
 }
 
 /* Mesa: filas compactas como V2 */
-.cart-row{padding:8px 0;gap:0 8px}
-.cart-row .qty-wrap{border-radius:8px}
-.qty-wrap .qty-btn{height:34px;min-width:28px;width:28px}
-.qty-wrap input.qty-n{width:26px;font-size:14px}
-.cart-row>.qty-btn{width:24px;height:24px;font-size:16px}
-.cart-row .c-sub{font-size:15px}
-.cart-row .c-name{font-size:14px;line-height:1.25}
-.cart-row .c-desc:not(.on){display:none}
-.cart-row:hover .c-desc,.cart-row:focus-within .c-desc{display:inline-block}
 .cart-desglose{margin-top:6px}
 #view-pedido .carga-right .carrito-wrap{padding:18px 18px 20px}
 #view-pedido .carga-left>div:first-child #mesa-titulo,#view-pedido .carga-left>div:first-child #mesa-tipo-badge{align-self:end}
@@ -208,3 +199,39 @@
 .inv-search,#carga-prod-search{background-repeat:no-repeat!important;background-position:14px center!important;background-size:20px!important}
 /* Turnos: nota de importe parcial */
 .tr-nota{grid-column:1/-1;margin:0;font-size:12px;line-height:1.45;color:var(--ink2)}
+
+/* ══ Filas del pedido (Mesa, Nueva mesa y Reserva): UNA distribución, sin saltos ══
+   [cantidad fija][nombre flexible][importe][acciones fijas]. Las acciones son hijas directas de la fila y no aparecen/desaparecen al pasar el mouse. */
+:root{--fila-qty:96px;--fila-act:60px;--fila-btn:28px}
+.cart-row,.order-items-scroll .cart-row,.reserva-cart-scroll .cart-row{display:grid!important;grid-template-columns:var(--fila-qty) minmax(0,1fr) minmax(56px,auto) var(--fila-act)!important;grid-template-areas:"qty name sub act"!important;align-items:center;column-gap:8px;row-gap:4px;padding:10px 0;border-top:1px solid var(--border);border-bottom:0}
+.cart-row:first-child{border-top:0}
+.cart-row .qty-wrap,.order-items-scroll .cart-row .qty-wrap,.reserva-cart-scroll .cart-row .qty-wrap{grid-area:qty!important;grid-column:auto!important;grid-row:auto!important;display:flex!important;align-items:stretch;width:var(--fila-qty);height:36px;margin:0!important;overflow:hidden;border:1.5px solid var(--border2);border-radius:9px;background:var(--surf);justify-content:stretch}
+.cart-row .qty-wrap .qty-btn{flex:0 0 28px!important;width:28px!important;min-width:28px!important;height:100%!important;min-height:0!important;border:0;border-radius:0;background:transparent;font-size:17px;line-height:1;margin:0}
+.cart-row .qty-wrap input.qty-n{flex:1 1 auto!important;width:auto!important;min-width:0!important;height:100%!important;padding:0;border:0;border-radius:0;background:transparent;text-align:center;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.cart-row .c-name-wrap,.order-items-scroll .cart-row .c-name-wrap,.reserva-cart-scroll .cart-row .c-name-wrap{grid-area:name!important;grid-column:auto!important;grid-row:auto!important;min-width:0}
+.cart-row .c-name{font-weight:500;font-size:14px;line-height:1.25;overflow-wrap:anywhere}
+.cart-row .c-sub,.order-items-scroll .cart-row .c-sub,.reserva-cart-scroll .cart-row .c-sub{grid-area:sub!important;grid-column:auto!important;grid-row:auto!important;align-self:center;justify-self:end;min-width:0;text-align:right;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cart-row .c-actions{grid-area:act;display:flex;align-items:center;justify-content:flex-end;gap:4px;width:var(--fila-act)}
+.cart-row .c-act{flex:0 0 var(--fila-btn);width:var(--fila-btn);height:var(--fila-btn);min-width:0!important;min-height:0!important;padding:0;display:inline-grid;place-items:center;border:0;border-radius:8px;background:transparent;color:var(--ink2);font:600 15px/1 'DM Sans',sans-serif;cursor:pointer}
+.cart-row .c-act:hover,.cart-row .c-act:focus-visible{background:var(--surf2);color:var(--ink)}
+.cart-row .c-act-desc{font-size:14px}
+.cart-row .c-act-desc.on{color:var(--brand-ink);background:var(--surf2)}
+.cart-row .c-act-del{font-size:18px}
+.cart-row .c-desc.on{display:block;margin-top:2px;padding:0;border:0;background:none;color:var(--brand-ink);font-size:12px;font-weight:700;text-decoration:none}
+@media (hover:none),(max-width:767px){:root{--fila-btn:34px;--fila-act:72px}.cart-row .qty-wrap{height:40px}.cart-row .qty-wrap .qty-btn{flex-basis:32px!important;width:32px!important;min-width:32px!important}:root{--fila-qty:108px}}
+@media (max-width:480px){
+  .cart-row,.order-items-scroll .cart-row,.reserva-cart-scroll .cart-row{grid-template-columns:var(--fila-qty) minmax(0,1fr) var(--fila-act)!important;grid-template-areas:"name name name" "qty sub act"!important}
+  .cart-row .c-sub{padding-right:6px}
+}
+
+/* ══ Accesos rápidos: tira compacta (Mesa, Nueva mesa y Reserva) ══ */
+.accesos{margin:0 0 10px}
+.accesos[hidden]{display:none}
+.accesos-hd{font:600 11px/1 'DM Sans',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);margin:0 0 6px}
+.accesos-row{display:flex;gap:6px;overflow-x:auto;padding:2px 2px 6px;scroll-snap-type:x proximity;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+.acceso{flex:0 0 auto;max-width:190px;min-height:44px;display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1.5px solid var(--border2);border-radius:999px;background:var(--surf);color:var(--ink);font:inherit;font-size:13px;cursor:pointer;scroll-snap-align:start}
+.acceso:hover,.acceso:focus-visible{border-color:var(--orange)}
+.acceso-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;min-width:0}
+.acceso-p{flex:none;color:var(--ink2);font-size:12px;font-variant-numeric:tabular-nums}
+.acceso-q{flex:none;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--orange);color:#fff;font-size:11px;font-weight:700;display:inline-grid;place-items:center}
+.acceso.on{border-color:var(--orange);background:var(--surf2)}

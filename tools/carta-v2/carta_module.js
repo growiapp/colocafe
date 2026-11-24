@@ -198,16 +198,9 @@ function actualizarBotonComanda(){
   const tg=document.querySelector('.cart-head2 .tag');if(tg){tg.hidden=!(n>0);const x=`${n} sin enviar`;if(tg.textContent!==x)tg.textContent=x;}
 }
 function anotarCarrito(){
-  const id=String(typeof mesaActivaId!=='undefined'?mesaActivaId:''),tiene=pendAt>0&&id&&!id.startsWith('reserva_');
-  document.querySelectorAll('#cart-rows .cart-row').forEach(r=>{
-    const del=r.querySelector('.qty-wrap .qty-btn[title="Eliminar"]');if(del&&del.parentNode!==r)r.appendChild(del);
-    if(!tiene||r.querySelector('.c-env'))return;
-    const item=typeof carrito!=='undefined'?carrito[r.dataset.key]:null;if(!item||typeof firmaComanda!=='function')return;
-    const f=firmaComanda(item),q=Number(item.qty)||0;
-    const env=(envPorMesa.get(id)||[]).reduce((t,d)=>t+(d.lines||[]).filter(l=>l.firma===f).reduce((a,l)=>a+(Number(l.cantidad)||0),0),0);
-    const d=document.createElement('div');d.className='c-env '+(env>=q?'ok':'pend');d.textContent=env>=q?'Enviado':(env>0?`Enviado ${env} de ${q}`:'Sin enviar');
-    r.querySelector('.c-name')?.after(d);
-  });
+  const id=String(typeof mesaActivaId!=='undefined'?mesaActivaId:'');
+  // La fila ya se dibuja completa en renderOrderItemRows; aquí solo se completan el título y el total del Pedido.
+  // (Se eliminó la leyenda «Sin enviar» por producto: queda solo el indicador agregado de la mesa.)
   const ct=$('cart-total');
   if(ct&&typeof carrito!=='undefined'){const n=Object.values(carrito).reduce((t,i)=>t+(Number(i.qty)||0),0),l=`Total · ${n} producto${n!==1?'s':''}`;if(ct.dataset.lbl!==l)ct.dataset.lbl=l;}
   const wrap=document.querySelector('.carrito-wrap');
@@ -321,7 +314,7 @@ function pintarCobro(){
   { const cx=$('mixed-payments-box'); if(cx&&sc.contains(cx)&&mixedHome) mixedHome.appendChild(cx); } // el repintado no debe destruir los campos del pago mixto
   const items=Object.values(carrito||{}).filter(i=>Number(i.qty)>0),total=typeof totalCobroActual==='function'?totalCobroActual():0;
   const cant=items.reduce((s,i)=>s+(Number(i.qty)||0),0),nombre=destinoCobro(),esRes=String(mesaActivaId||'').startsWith('reserva_');
-  const m=medioActual(),ops=(typeof operadores!=='undefined'?operadores:[]).filter(Boolean);
+  const m=medioActual(),estOps=typeof estadoOperadores==='function'?estadoOperadores():'local',ops=(typeof getActiveOperators==='function'?getActiveOperators():[]).map(o=>o.name).filter(Boolean);
   const ultimo=(typeof ultimoOperadorCobro!=='undefined'&&ultimoOperadorCobro&&ultimoOperadorCobro.mesa===String(mesaActivaId))?ultimoOperadorCobro.op:'';
   if(!opElegido||!ops.includes(opElegido))opElegido=ultimo&&ops.includes(ultimo)?ultimo:'';
   const medios=[['ef','Efectivo','cash'],['transferencia','Transferencia','bank'],['mixed','Mixto','split']];
@@ -333,10 +326,10 @@ function pintarCobro(){
       <div class="cobro-medios" role="radiogroup" aria-label="Medio de pago">${medios.map(([k,l,ic])=>`<button type="button" role="radio" aria-checked="${k===m}" data-m="${k}">${svg(ic,22)}<span>${l}</span></button>`).join('')}</div>
       <div id="cobro-mixto-slot"></div>
       <h2 class="sec2">Quién atendió</h2>
-      <div class="cobro-ops" role="radiogroup" aria-label="Quién atendió">${ops.length?ops.map(o=>`<button type="button" role="radio" aria-checked="${o===opElegido}" data-o="${esc(o)}">${esc(o)}${o===ultimo?' <small>última vez</small>':''}</button>`).join(''):'<span class="hint">No hay personas cargadas. Pedile a administración que las agregue.</span>'}</div>
+      <div class="cobro-ops" role="radiogroup" aria-label="Quién atendió">${estOps==='cargando'?'<span class="hint">Cargando quién está activo…</span>':estOps==='no_disponible'?'<span class="hint">No pudimos leer las personas activas del local. <button type="button" class="btn-sm" data-c="ops">Reintentar</button></span>':ops.length?ops.map(o=>`<button type="button" role="radio" aria-checked="${o===opElegido}" data-o="${esc(o)}">${esc(o)}${o===ultimo?' <small>última vez</small>':''}</button>`).join(''):'<span class="hint">No hay personas activas cargadas. Pedile a administración que las agregue.</span>'}</div>
       ${ultimo?'<p class="hint">Se propone la última persona elegida en este dispositivo.</p>':''}
       <p id="cobro-msg" class="cobro-msg" role="alert"></p>
-      <button type="button" class="btn-confirmar" data-c="confirmar"${cobrando?' disabled':''}>Confirmar cobro · ${fm(total)}</button>
+      <button type="button" class="btn-confirmar" data-c="confirmar"${cobrando||estOps==='no_disponible'||estOps==='cargando'?' disabled':''}>Confirmar cobro · ${fm(total)}</button>
     </div>
     <aside class="tk cobro-tk"><h2>${esc(nombre)}</h2><div class="tk-sub">${esRes?'Reserva':esc(tipoLabel((mesaDe(mesaActivaId)||{}).tipo||'salon'))+((mesaDe(mesaActivaId)||{}).apertura?` · abierta hace ${Math.max(0,Math.round((Date.now()-new Date(mesaDe(mesaActivaId).apertura).getTime())/60000))} min`:'')}</div>
       <ul class="tk-lines">${items.map(i=>{const p=findProductById(i.prodId);return `<li><span class="q">${Number(i.qty)}×</span><span class="n">${esc(p?.name||i.prodId)}</span><span class="v">${fm(carritoItemTotal(i))}</span></li>`;}).join('')}</ul>
@@ -345,12 +338,19 @@ function pintarCobro(){
   const slot=$('cobro-mixto-slot'),box=$('mixed-payments-box');
   if(slot&&box){if(m==='mixed'){slot.appendChild(box);slot.hidden=false;}else{slot.hidden=true;if(box.parentNode===slot&&mixedHome)mixedHome.appendChild(box);}}
 }
+// Cobrar nunca ofrece a alguien que acaba de quedar inactivo: se relee la lista del local al abrir y otra vez al confirmar.
+async function refrescarOperadoresCobro(){
+  if(typeof loadOperatorsFromSupabase!=='function'||typeof operadoresModoServidor!=='function'||!operadoresModoServidor())return;
+  await loadOperatorsFromSupabase();
+  const sc=$('cobro-screen');if(sc&&!sc.hidden&&!cobrando)pintarCobro();
+}
 function abrirCobro(){
   const sc=$('cobro-screen');if(!sc)return;
   if(!Object.values(carrito||{}).some(i=>Number(i.qty)>0)){showToast('El pedido está vacío');return;}
   if(!mixedHome)mixedHome=$('mixed-payments-box')?.parentNode||null;
   pintarCobro();sc.hidden=false;tabC().classList.add('cobro-abierto');window.scrollTo(0,0);
   setTimeout(()=>sc.querySelector('[data-m][aria-checked="true"]')?.focus(),30);
+  refrescarOperadoresCobro();
 }
 function cerrarCobro(){
   const sc=$('cobro-screen');if(!sc||sc.hidden)return;
@@ -360,6 +360,14 @@ function cerrarCobro(){
 async function confirmarCobro(btn){
   if(cobrando)return;
   if(!opElegido){msgCobro('Elegí quién atendió.');return;}
+  if(typeof operadoresModoServidor==='function'&&operadoresModoServidor()){ // verificación fresca: ¿sigue activa esa persona en este local?
+    cobrando=true;const b0=btn.textContent;btn.disabled=true;btn.textContent='Verificando…';
+    try{await loadOperatorsFromSupabase();}catch(_){}
+    cobrando=false;btn.textContent=b0;
+    if(estadoOperadores()!=='ok'){pintarCobro();msgCobro('No pudimos verificar quién está activo. Reintentá.');return;}
+    if(!getActiveOperators().some(o=>o.name===opElegido)){opElegido='';pintarCobro();msgCobro('Esa persona ya no está disponible. Elegí otra.');return;}
+    btn.disabled=false;
+  }
   let ps;try{ps=getCurrentPaymentState();}catch(_){ps={valido:true};}
   if(!ps.valido){msgCobro(ps.mensaje||'Revisá los pagos antes de cobrar.');return;}
   if(firmaCobro()!==firmaVista){pintarCobro();msgCobro('El pedido cambió. Revisá el detalle y volvé a confirmar.');return;}
@@ -392,6 +400,7 @@ function montarCobro(){
     if(x.dataset.m){try{setPago(x.dataset.m);}catch(_){}pintarCobro();sc.querySelector(`[data-m="${x.dataset.m}"]`)?.focus();}
     else if(x.dataset.o){opElegido=x.dataset.o;pintarCobro();sc.querySelector(`[data-o="${CSS.escape(opElegido)}"]`)?.focus();}
     else if(x.dataset.c==='volver')cerrarCobro();
+    else if(x.dataset.c==='ops'){pintarCobro();refrescarOperadoresCobro();}
     else if(x.dataset.c==='confirmar')confirmarCobro(x);
   });
   sc.addEventListener('keydown',e=>{if(e.key==='Escape')cerrarCobro();});
