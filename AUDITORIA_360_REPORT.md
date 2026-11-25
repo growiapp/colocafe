@@ -1,129 +1,191 @@
-# Colo Café · Auditoría 360° y primera ola
+# Colo Café · Auditoría 360° — ola 1 y fase de riesgos
 
-Base: `334df6c` (= `origin/main` al iniciar). Rama: `audit/ola1-ux-operativa`. Sin push, sin merge, sin deploy; producción y Supabase no modificados.
+Producción: `334df6c`. Candidata local: rama `audit/ola1-ux-operativa`. Sin push, sin merge, sin deploy. Supabase producción no modificado. Stock Durability no tocado.
 
 ## 0. Cómo leer este informe
 
-Cada afirmación lleva uno de estos niveles de evidencia:
+Cada afirmación lleva su nivel de evidencia:
 
-- **PROBADO**: observado en ejecución (navegador local con el arnés de demostración, o prueba automática).
-- **CÓDIGO**: confirmado leyendo `index.html` (con línea). No equivale a ejecutarlo.
-- **HIPÓTESIS**: depende de algo que no se ve desde el cliente (RLS, restricciones, triggers, comportamiento de cada navegador/impresora).
-- **STAGING**: verificado contra el entorno de staging. **Hoy: ninguno** (ver §3).
+- **LOCAL**: reproducido o verificado en el navegador local con el arnés de demostración (datos ficticios, Supabase simulado) o con una prueba automática.
+- **COPIA AISLADA**: verificado en un Postgres en memoria (PGlite) con un esquema **simulado**.
+- **CÓDIGO**: confirmado leyendo `index.html` o el SQL versionado del repo (con línea). No equivale a ejecutarlo ni al estado desplegado.
+- **HIPÓTESIS**: depende de algo no visible (estado desplegado de RLS, restricciones, comportamiento de navegadores/impresoras).
+- **STAGING**: verificado contra el entorno de staging. **Hoy no hay ninguna verificación de este nivel** (ver §3).
 
-## 1. Contrato de generación de `index.html` (corrige un error mío)
+## 1. Contrato de generación de `index.html`
 
-**Dictamen:** `tools/carta-v2/apply.py` está **vigente**, no es histórico. Mi afirmación anterior («`index.html` se edita a mano, los scripts son históricos») era **incorrecta**.
+`tools/carta-v2/apply.py` está **vigente** (corrige un error mío anterior). Genera el CSS entre `/*CARTA_V2_BEGIN*/…/*CARTA_V2_END*/` (desde `carta_overlay{,2,3}.css`) y el JS entre `<!--CARTA_JS_BEGIN-->…<!--CARTA_JS_END-->` (desde `carta_module.js`). Lo demás de `index.html` se edita directamente.
 
-- `apply.py` regenera dos regiones de `index.html`: el CSS entre `/*CARTA_V2_BEGIN*/` y `/*CARTA_V2_END*/` (desde `carta_overlay{,2,3}.css`) y el JS entre `<!--CARTA_JS_BEGIN-->` y `<!--CARTA_JS_END-->` (desde `carta_module.js`). Todo lo demás de `index.html` se edita directamente. `--check` no escribe: compara y sale con 1 si difieren.
-- **Evidencia histórica (PROBADO):** `apply.py --check` corrido commit por commit desde su creación (`0ad24f1`, 2026-11-24) da `COINCIDE` en los 8 commits que tocaron `index.html` o `tools/` hasta `a1f240e` (último de `main`), y `DIFERENTE` desde `f338bce`, el primer commit de la ola 1. El mecanismo no se abandonó: lo rompí yo.
-- **Qué quedó fuera de las fuentes:** mis cambios en Cobrar (vuelto, ancho completo, foco) y el manejador global de teclado estaban sólo en `index.html`, dentro de las regiones generadas. Una regeneración los habría borrado.
-- **Corrección (commit `a26ad14`):** esos hunks (36 inserciones) se llevaron a `carta_overlay3.css` y `carta_module.js` sin ejecutar la regeneración. Resultado: `apply.py --check` → `COINCIDE`. Las demás ediciones de la ola 1 (filtros, acordeones, botón de mesa, nombre del local) caen fuera de las regiones generadas y se mantienen en `index.html`.
-- **Guarda nueva:** `tests/carta_sync.test.cjs` ejecuta `apply.py --check` y falla si `index.html` y las fuentes divergen.
+- **Historial (LOCAL):** `apply.py --check` commit por commit: `COINCIDE` en los 8 commits de `0ad24f1` a `a1f240e`; `DIFERENTE` desde mi `f338bce`. El mecanismo no se abandonó; lo rompí yo y se corrigió en `a26ad14` (fuentes alineadas, `COINCIDE`).
+- **Guarda:** `tests/carta_sync.test.cjs` falla si `index.html` y las fuentes divergen. Todos los cambios de la fase de riesgos caen **fuera** de las regiones generadas, y `--check` sigue en `COINCIDE`.
 
-## 2. Primera ola (estado final)
+## 2. Estado de las cinco mejoras
 
-| # | Mejora | Estado |
-|---|---|---|
-| 1 | Vuelto en Cobrar (efectivo): «Paga con» + atajos, informativo, no se guarda con la venta | Implementada, PROBADO local; fuente en `tools/carta-v2` |
-| 2 | Cobrar a ancho completo en escritorio (antes columna de 296 px y botón cortado en 1280×800) | Implementada, PROBADO local; fuente en `tools/carta-v2` |
-| 3 | «Eliminar mesa» como botón con nombre y zona táctil (44 px móvil, 32 px mouse) | Implementada, PROBADO local |
-| 4 | Teclado en 28 controles `div` (filtros, acordeones, pills), foco conservado, `aria-expanded` | Implementada, PROBADO local |
-| 5 | Nombre del local en móvil en dos líneas | Implementada, PROBADO local |
+| # | Mejora | Estado | Evidencia |
+|---|---|---|---|
+| 1 | Vuelto en Cobrar (efectivo): «Paga con», atajos, informativo | Implementada | LOCAL: O1, O7 (centavos: en la versión previa «Justo» mostraba `Faltan $0` con total 12.400,4) |
+| 2 | Cobrar a ancho completo en escritorio | Implementada | LOCAL: O4 |
+| 3 | «Eliminar mesa» como botón accesible | Implementada | LOCAL: O2, O8 |
+| 4 | Teclado y foco en controles `div` | Implementada | LOCAL: O3, O5, O8 |
+| 5 | Nombre del local en móvil en dos líneas | Implementada | LOCAL: captura 390 px |
 
-Revisiones: Codex (adversarial, estática) halló 2 defectos reales de foco, corregidos; revisión nativa halló 3 observaciones reales (centavos en «Justo», `aria-expanded` inicial, zona táctil del ×), corregidas. Suite: 11 archivos de prueba en verde a `a8b69d0`; ver §6 para la corrida final.
+**Regresión propia hallada y corregida en esta fase (LOCAL):** al enfocar el × con teclado, un repintado periódico de las tarjetas (≈9,6 s) destruía el nodo y el foco caía a `<body>`; mi prueba O2 lo detectó de forma intermitente. `renderMesasSection` ahora conserva el foco en la misma tarjeta y control (O8: rojo en el commit anterior, verde ahora; medición real de 13 s sin pérdida). También se descubrió que mi atributo `data-solo-admin` en «Limpiar» rompía el contrato de `v2_roles` (exige exactamente 3); se reemplazó por `data-solo-admin-estricto`.
 
 ## 3. Staging
 
-**Estado: no ejecutado.** Resultado por rol y flujo: ver §3.1 (se completa al ejecutar). Motivo del retraso: requiere sesiones humanas (clave anon pública + contraseñas tipeadas por la persona) y un local sintético en staging que, por la política de escrituras del arnés, sólo existe si se crea por SQL.
+### 3.1 Fase 1: procedimiento seguro (hecho)
 
-Salvaguardas ya preparadas (reutilizan el arnés E2E existente, copiado fuera del repo): servidor que sirve el commit exacto con hash por archivo; red permitida sólo a staging (`wjymdgfqmqutihadffec`) y a CDN públicos; **producción (`xhtpahjsddfkwsytubgu`) bloqueada por ruta y por resolución DNS**; política positiva de escrituras limitada al local sintético; perfiles de navegador aislados por cuenta; evidencia fuera del repo.
+**Análisis de los scripts existentes** (`02_fixtures.sql`, `05_cleanup.sql`, `00_schema_gate.sql`, del worktree de la aceptación E2E de Stock Durability):
 
-Atención: **la URL por defecto embebida en la app es la de producción** (`index.html:8243`). Por eso cualquier ejecución contra staging debe inyectar la URL de staging y bloquear producción, como hace el arnés.
+- `02_fixtures.sql` es seguro por diseño: un solo `begin/commit`, UUID fijos, precondiciones (el local y sus productos no existen; exactamente 3 usuarios; `stock_store_activation` vacío). Efecto lateral: las tres cuentas reales ganan membresía en el local sintético.
+- `05_cleanup.sql` tiene buenas guardas, pero **borra sólo `stock_ledger` y `stores` y confía en cascadas que nadie verificó** (`00_schema_gate.sql` nunca se ejecutó), y aborta si existe **cualquier** trigger no interno con «stock» en el nombre (Stock Durability está instalado). Los propios scripts declaran «runtime no validado».
+- **COPIA AISLADA:** el script anterior **abortó en los tres escenarios simulados** (FK en cascada → falso `COLLATERAL` por un registro con `store_id` nulo; sin cascada → violación de FK; trigger «stock» → `TRIGGERS_ACTIVE`). Fail-closed y sin daño, pero inutilizable.
 
-### 3.1 Resultados por rol y flujo
-_Pendiente de ejecución._
+**Procedimiento nuevo** (`tools/staging-ola1/`): `fixtures.sql`, `cleanup.sql` y sus versiones `*_ENSAYO.sql` (terminan siempre en error informando qué harían), más `esquema_gate.sql` y `politicas_rls.sql` (ambos de sólo lectura).
 
-## 4. Matriz de cobertura 360°
+- `fixtures.sql` escribe únicamente: 1 local, 3 membresías, 1 categoría, 1 operador y 6 productos, todos con UUID `e2e02026-…` y `legacy_id` `ZZE2E-`.
+- `cleanup.sql` exige identidad exacta (id + legacy_id + nombre), alcance único (`ZZ_E2E%`), rol con `BYPASSRLS`; toma una foto de conteos de **todas** las tablas públicas sin contar el local sintético; borra **sólo** filas con `store_id` del local sintético en pasadas tolerantes a FK (sin depender de cascadas); verifica 0 residuos y conteos idénticos; todo en una transacción. Nunca ejecuta un `DELETE` sin esa condición.
+- **COPIA AISLADA (`verificar_sql.cjs`, 15/15 casos):** ciclo completo con FKs en cascada y sin cascada deja los datos preexistentes (otro local, ventas, clientes, una venta con `store_id` nulo) idénticos y 0 residuos; el ensayo no cambia nada; ejecución parcial (falla un producto) no deja nada; fixtures dos veces y limpieza dos veces abortan sin cambios; con un segundo `ZZ_E2E%`, un producto ajeno o Stock Durability **activo** en el local sintético la limpieza aborta; con el trigger «stock» **inactivo** corre; una tabla hija sin `store_id` con filas del local sintético aborta y revierte todo.
+- **Recuperación ante ejecución parcial:** cada script es una transacción; ante cualquier error el estado queda como estaba (probado). Si la limpieza abortara tras las pruebas, el local sintético sigue identificado por su `store_id` y se puede reintentar sin pérdida.
+- **Límite:** el esquema simulado no es el real. Los `INSERT` usan las columnas del script anterior; los scripts `*_ENSAYO` existen para detectar diferencias sin efectos. Rol requerido: `BYPASSRLS` o superusuario (SQL Editor).
 
-Leyenda: ● hecho · ◐ parcial · ○ no hecho · — no aplica. «Funcional» = recorrido real en navegador (arnés local con datos ficticios). «Código» = lectura de `index.html`.
+**¿Reutilizar un local de staging existente?** No recomendado: la app no puede borrar ventas (RLS), así que cualquier venta de prueba quedaría mezclada con datos reales y su limpieza exigiría borrados por lista de ids en tablas compartidas. El local sintético se elimina entero por `store_id`. No se pudo evaluar qué locales existen (no hay sesión); el preflight de sólo lectura lo informará.
 
-| Área | Funcional local | Sólo código | Pruebas automáticas previas | Staging | Notas / no evaluado |
-|---|---|---|---|---|---|
-| Caja (lista, filtros, reservas del día) | ● escritorio y móvil | ◐ | ● | ○ | |
-| Mesas (tarjeta, panel, nueva mesa) | ● | ● eliminación, sync | ● | ○ | Modal de mesa nueva visto en escritorio, no en móvil |
-| Comandas | ◐ botón y etiquetas «sin enviar» | ● | ● `comanda_panel` | ○ | Escrituras a `open_order_dispatches` fuera de la política del arnés: no probables en staging sin ampliarla |
-| Cobros (3 medios) | ● escritorio y móvil | ● idempotencia, cierre | ● | ○ | Idempotencia multi-dispositivo depende de la restricción UNIQUE del servidor: HIPÓTESIS |
-| Reservas | ◐ tarjetas en Caja | ● alta/edición/recordatorios | ● parcial | — | Modal de alta no inspeccionado visualmente; el arnés de staging bloquea escrituras a reservas |
-| Clientes | ◐ lista | ● | ○ | ○ | Alta/edición y búsqueda no recorridas |
-| Reportes | ◐ pestaña Resumen | ◐ timers | ● | ○ | Ventas, Gastos y Turnos: abiertas, sin revisión visual ni de cálculos |
-| Gestión | ◐ Menú › Categorías (rol caja de la demo) | ● roles, datos locales | ◐ | ○ | Vistas de dueño/administrador no recorridas (la demo corre con rol operador) |
-| Catálogo (productos, variantes, stock) | ○ | ● | ● stock | ○ | Pantalla de Productos y variantes no abiertas |
-| Accesos rápidos | ○ | ● | ● F5 | ○ | |
-| Roles y permisos | ○ | ● cliente | ● `v2_roles` | ○ | La seguridad real es RLS (no visible). Sin cuentas reales |
-| Impresión | ○ | ● | ○ | ○ | Sin impresora ni ticketera: nunca se probó impresión real |
-| Sincronización y colas | ○ | ● | ● mocks | ○ | Latencia, conflictos y red caída reales sin verificar |
-| Experiencia móvil | ◐ Caja, Cobrar, encabezado | ○ | ◐ | ○ | Resto de pantallas en 390×844 sin recorrer |
-| Oportunidades comerciales/operativas | — | ◐ | — | — | Todo HIPÓTESIS: sin datos reales de uso ni de ventas |
+**Política de red del arnés (ampliación mínima, LOCAL):** «Eliminar mesa» emite `DELETE open_orders?id=eq.X&store_id=eq.F`, no permitido antes. Se permite **sólo** con `store_id` del local sintético **y** un `id` de mesa creada por la propia prueba, sin filtros extra ni cuerpo (13 casos en `tests/staging_policy.test.cjs`, incluidas negativas: mesa ajena, otro local, sin id, `in`, filtro extra, `store_id` repetido, modo lectura, producción). Producción se bloquea por ruta y por resolución DNS (heredado). **Atención:** la URL por defecto embebida en la app (`index.html:8243`) es la de producción.
 
-**Frentes sin cobertura funcional real:** impresión, catálogo/variantes, accesos rápidos (visual), Clientes (alta/edición), vistas de Dueño/Administrador, Reportes (Ventas/Gastos/Turnos), móvil fuera de Caja/Cobrar. El backlog de esas áreas proviene de lectura de código (ver «Evidencia» en cada ítem).
+**Límite caracterizado:** las escrituras de comandas (`open_order_dispatches`) y reservas no están en la política (las de reservas se deniegan a propósito). Ampliación mínima propuesta si se quiere probarlas: `POST open_order_dispatches` con `store_id` sintético y `open_order_id` de mesa de la prueba, mismo patrón que arriba.
 
-## 5. Backlog priorizado
+### 3.2 Fase 2: validación funcional en staging — **NO EJECUTADA**
 
-Esfuerzo: S/M/L. Riesgo: riesgo de implementar. **Decisión** = requiere definición suya.
+Bloqueo real: requiere (a) la clave anon pública de staging y las contraseñas de las tres cuentas tipeadas por la persona en ventanas locales, y (b) que la persona ejecute `fixtures.sql` en el SQL Editor (y `cleanup.sql` al final, con su autorización explícita). El guion está listo (`harness/escenarios_ola1.cjs`): verifica proyecto, URL, usuario, rol y local **antes de escribir** y aborta la cuenta si algo no coincide; mide violaciones de red; registra por rol (owner, admin, operator) y dispositivo (escritorio 1280×800, móvil 390×844). **No se ha corrido ni una vez contra staging, y su primera ejecución puede requerir ajustes de selectores.**
 
-### P1 — integridad, seguridad o error funcional importante
+#### Resultado por rol y dispositivo
+| Cuenta | Escritorio | Móvil |
+|---|---|---|
+| owner | no ejecutado | no ejecutado |
+| admin | no ejecutado | no ejecutado |
+| operator (caja) | no ejecutado | no ejecutado |
 
-| ID | Hallazgo | Evidencia | Esf. | Riesgo | Propuesta / criterio de aceptación |
-|---|---|---|---|---|---|
-| B1 | Nombres de categoría/producto/cliente se inyectan **sin escapar** en HTML y en `onclick` (`index.html:7756`, 7750, 7790, 7840, 7989, 7642, 13258). Un apóstrofe rompe el borrado; un nombre con HTML es XSS almacenado entre cajas. | CÓDIGO. Explotabilidad: HIPÓTESIS (quién puede escribirlos en el servidor) | S | Bajo | Escapar todas las salidas y pasar ids, no nombres, a `onclick`. Aceptación: categoría «Dulce d'leche» se elimina; `<img onerror>` se muestra como texto |
-| B2 | Validación de producto: `parseInt` acepta precio negativo, trunca decimales, «12abc»→12; sin validar nombres duplicados (`7904`, `8012`). | CÓDIGO (7904 y 8012 verificados) | S | Bajo | Validar rango y formato; mensaje claro. Un precio negativo no debe poder cobrarse |
-| B3 | Reservas: editar fuerza `estado:'pendiente'` (`7077`); se admite fecha/hora pasada; sin acción de cancelar (sólo eliminar definitivo). | CÓDIGO (7077 verificado) | S–M | Bajo | Conservar estado al editar; validar fecha; **Decisión:** estados y cancelación |
-| B4 | «Limpiar historial de ventas» sin chequeo de rol ni de turno abierto, siempre visible (`5350-5357`). Con turno abierto y sin red, el cierre local sale incompleto. | CÓDIGO (verificado) | S | Bajo | Limitar a owner/admin y bloquear con turno abierto. **Decisión:** qué roles |
-| B5 | Eliminar mesa: disponible a cualquier rol con un clic; si el borrado remoto agota el tiempo, `mesas=before` restaura un snapshot completo y pisa cambios hechos durante 10 s (`5917-5938`). | CÓDIGO. Permisos reales del servidor: HIPÓTESIS | M | Medio | Restaurar sólo la mesa afectada; **Decisión:** ¿puede el operador eliminar mesas con ítems? |
-| B6 | Supabase se carga desde CDN con versión flotante `@2` y sin SRI (`index.html:103`). | CÓDIGO | S | Medio (cambia origen de script crítico) | **Infra/Decisión:** fijar versión + SRI o alojar el SDK |
-| B7 | Reintento de **ventas** pendientes no corre al volver al primer plano; el banner dice «se reintenta sola». Sin backoff ni tope; máx. 10 grupos por pasada. | CÓDIGO. Impacto real: HIPÓTESIS (frecuencia de errores) | M | Medio | Disparar el reintento al reanudar; corregir el texto del banner. Medir antes |
+## 4. Investigaciones de riesgo (Fase 3)
 
-### P2 — fricción operativa y mejoras de valor claro
+Todas tienen prueba que **falla contra `334df6c` y pasa ahora** (`tests/ola2_riesgos.test.cjs`). «Servidor» = SQL versionado en el repo (`open_orders_schema_alignment.sql`, `open_orders_rls.sql`); el estado **desplegado** no está verificado: `politicas_rls.sql` (sólo lectura) lo comprobará.
 
+### B1 · HTML/JavaScript en textos libres — **P1, corregido en local**
+- **Código responsable (CÓDIGO):** 26 interpolaciones sin escapar (24 halladas por mí + 2 que mi barrido no vio y encontró la revisión independiente: el operador en el resumen del turno y el producto del ranking de Reportes): nombres de categoría/producto/cliente/local, teléfono, email, alergias, preferencias, variantes, y en el Historial producto, variante, **nota del ítem**, mesa y operador. Además el nombre de categoría iba dentro de un `onclick` (un apóstrofe rompía el borrado).
+- **Demostrado (LOCAL):** con un payload inocuo (`<img onerror>` que sólo incrementa un contador), el código se **ejecutó** en Clientes, Categorías e Historial.
+- **Impacto y alcance:** las notas de ítem **vuelven del servidor** (`item.note`, líneas 9437/15859/15943) y se pintan sin escapar en el Historial. **El servidor deja escribir `open_order_items` a owner, admin y operator** (CÓDIGO), y el operador escribe notas en su uso normal. Camino: operador → nota con HTML → dueño abre el Historial → JS en la sesión del dueño (que además guarda su sesión en `localStorage`, ver B23). Ejecución real en la sesión de otro rol: **HIPÓTESIS** hasta probarla en staging; la ejecución de JS en el propio navegador está demostrada.
+- **Corrección:** escapar en todos los sitios y pasar el índice (no el nombre) al `onclick`. **Guarda estática** (`B1 (estático)`) que falla si reaparece una interpolación de texto libre sin escapar (ampliada tras la revisión a nombres cortos de variable). **Límite:** la guarda es heurística (patrones de nombres de campo); un campo con otro nombre podría escapársele.
+- **Probabilidad:** media (requiere un nombre/nota maliciosa o accidental con `<`/comillas). **Gravedad:** alta si hay cuentas con roles distintos.
+
+### B2 · Validación de precios — **P1, corregido en local**
+- **Código (CÓDIGO):** `parseInt` en `guardarProducto` y `guardarProdRapido`. El campo es `type=number`, donde el navegador toma el punto como decimal.
+- **Demostrado (LOCAL):** «2.500» se guardaba como **$2**; `-100` se aceptaba; `12.5` se truncaba a 12.
+- **Servidor:** restricción sobre `products.price` **no verificada** (HIPÓTESIS); la consulta de `politicas_rls.sql` la lista.
+- **Corrección:** sólo se guarda un entero positivo (`^\d{1,9}$`, >0); lo demás se rechaza con aviso claro. **No se tocó** el precio de las opciones de variantes (un modificador negativo puede ser intencional): pendiente de decisión.
+- **Impacto:** subcobro silencioso con error de tipeo cotidiano. **Probabilidad:** media (separador de miles). **Alcance:** todos los locales una vez sincronizado.
+
+### B4 · Limpiar historial — **P1, corregido en local**
+- **Código (CÓDIGO):** `limpiarVentas()` sólo bloqueaba si había ventas pendientes; sin rol ni turno; el botón se veía a todos.
+- **Alcance real:** borra el historial **local** (`ventas=[]`); no borra el servidor (HIPÓTESIS menor: el historial en línea no se afecta). El daño es el **cierre de turno sin conexión**, que se calcula con ese historial, y el respaldo/diagnóstico local.
+- **Corrección (LOCAL):** sólo owner/admin **del local activo** (con `activeStoreId` explícito, sesión y rol propio de ese local; rol sin resolver = no), nunca con turno abierto (mismo criterio que DEC-07); el botón se oculta con un atributo propio. La primera versión usaba `getSupabaseActiveRole()`, que cae al rol del **primer local** de la lista si el local activo no tiene rol (Codex lo detectó): ver B25. **Decisión pendiente suya:** si un administrador debe poder hacerlo o sólo el dueño.
+- **Impacto:** medio. **Probabilidad:** baja-media (botón visible, un clic y confirmación).
+
+### B5 · Eliminación concurrente de mesas y snapshot — **P1, corregido en local**
+- **Código (CÓDIGO):** `pedirEliminarMesa` guardaba un snapshot completo de `mesas` y, ante fallo o tiempo agotado (10 s) del borrado remoto, hacía `mesas=before`.
+- **Demostrado (LOCAL):** con un borrado que falla tarde, un cambio en otra mesa y una mesa nueva creados mientras tanto **desaparecían**.
+- **No demostrado (HIPÓTESIS):** el caso en que el servidor sí borró pero el tiempo se agotó (la mesa reaparecería como fantasma hasta la siguiente lectura; el anti-doble-cobro `checkOpenOrderStillOpen` la protege al cobrar).
+- **Permisos (CÓDIGO):** el servidor permite `DELETE` sobre `open_orders` a owner, admin **y operator**; cliente y servidor coinciden. **Decisión pendiente suya:** si el operador debe poder eliminar una mesa con ítems.
+- **Corrección (LOCAL):** se restaura **sólo** la mesa eliminada (copia y posición) y se dispara una relectura del servidor, que tiene la última palabra. **Si al fallar ya cambió la cuenta o el local, no se escribe nada en el contexto nuevo** (Codex: el cierre de sesión no espera al envío en curso). Control: el borrado exitoso no restaura nada.
+- **Impacto:** medio (pérdida de trabajo sin sincronizar). **Probabilidad:** baja (falla de red + trabajo en paralelo en 10 s).
+
+### B23 · Tokens de sesión en exportaciones locales — **P1, corregido en local**
+- **Código (CÓDIGO):** `getLocalRecoveryBackupPayload` y `diagnoseLocalRecoveryData` vuelcan **todo** `localStorage`/`sessionStorage`; el cliente Supabase se crea con `persistSession:true` sin almacenamiento propio.
+- **Demostrado (LOCAL):** con credenciales **sintéticas** con la forma `sb-<ref>-auth-token`, el respaldo las incluía.
+- **HIPÓTESIS (a confirmar en staging):** que el supabase-js real guarde ahí el access/refresh token. El guion de staging lista **sólo los nombres** de las claves y comprueba que el respaldo no contiene el valor real, sin sacarlo de la página.
+- **Acceso al respaldo (CÓDIGO):** sólo owner/admin con modo técnico (verificación en cliente).
+- **Corrección (LOCAL):** se redactan `sb-*-auth-token` y claves con token/secret/password; los datos de operación siguen. **Límite:** no se redactan credenciales dentro de valores de otras claves.
+- **Impacto:** alto si el archivo se comparte (refresh token = acceso a la cuenta). **Probabilidad:** baja (herramienta técnica).
+
+## 5. Matriz de cobertura 360°
+
+Leyenda: ● hecho · ◐ parcial · ○ no hecho. Funcional = recorrido real en navegador (arnés local, datos ficticios).
+
+| Área | Funcional local | Sólo código | Pruebas automáticas | Staging |
+|---|---|---|---|---|
+| Caja | ● escritorio y móvil | ◐ | ● | ○ |
+| Mesas | ● | ● eliminación, sync, concurrencia | ● | ○ |
+| Comandas | ◐ botón y etiquetas | ● | ● | ○ (fuera de la política) |
+| Cobros (3 medios, vuelto) | ● escritorio y móvil | ● idempotencia, cierre | ● | ○ |
+| Reservas | ◐ tarjetas en Caja | ● | ● parcial | ○ (escrituras denegadas) |
+| Clientes | ◐ lista; ● inyección B1 | ● | ● B1 | ○ |
+| Reportes | ◐ Resumen | ◐ | ● | ○ |
+| Gestión / Catálogo | ◐ categorías; ● precios B2 | ● | ● | ○ |
+| Accesos rápidos | ○ | ● | ● | ○ |
+| Roles y permisos | ◐ simulados | ● cliente y SQL del repo | ● `v2_roles` | ○ (RLS desplegado sin verificar) |
+| Impresión | ○ | ● | ○ | ○ |
+| Sincronización y colas | ○ | ● | ● mocks | ○ |
+| Experiencia móvil | ◐ Caja, Cobrar, encabezado | ○ | ◐ | ○ |
+| Oportunidades comerciales | — | ◐ | — | — (hipótesis) |
+
+Sin cobertura funcional real: impresión, variantes de producto, accesos rápidos en pantalla, alta/edición de Clientes, vistas de Dueño/Administrador, Reportes (Ventas/Gastos/Turnos), móvil fuera de Caja/Cobrar.
+
+## 6. Backlog priorizado
+
+Criterio: impacto comercial/operativo/técnico, no facilidad. **A = corregir antes de publicar · F = futura versión · D = requiere decisión suya.**
+
+### Corregidos en la candidata (revisar antes de publicar)
+B1, B2, B4, B5, B23 (§4) y el foco al repintar tarjetas (§2).
+
+### A · Antes de publicar (pendientes)
 | ID | Hallazgo | Evidencia | Esf. |
 |---|---|---|---|
-| B8 | Comandas: imprimir y «Marcar como enviada» son pasos separados; se puede reimprimir duplicado o marcar sin imprimir (`7499-7577`). | CÓDIGO | M |
-| B9 | Comandas: cambiar el sector de una categoría tras enviar genera un «ANULAR» falso; producto fuera del menú imprime el id crudo (`7450-7466`). | CÓDIGO (por lógica, no ejecutado) | M |
-| B10 | Mesas sin id de servidor y reservas: sólo «Imprimir pedido completo», se reimprime todo cada vez; el mensaje para reservas es engañoso. | CÓDIGO | M |
-| B11 | Comprobante post-cobro se imprime aunque la venta no esté confirmada (el historial sí lo bloquea): dos caminos con reglas distintas (`18455`, `18487`, `7315`). | CÓDIGO | S |
-| B12 | El comprobante no muestra «paga con» ni vuelto (decisión de la ola 1: no se persiste). | CÓDIGO | **Decisión** |
-| B13 | Impresión sin manejo de errores, ancho fijo de 72 mm (ticketera 58 mm o A4: HIPÓTESIS). Nunca probada con impresora real. | CÓDIGO / HIPÓTESIS | M |
-| B14 | Clientes: «visitas» no se incrementa en ningún lado del archivo (siempre 0 en este código); un guardado con copia local vieja podría pisar un contador de servidor (HIPÓTESIS). | CÓDIGO (verificado) | M |
-| B15 | Alergias no aparecen en comanda, reserva ni mesa; datos personales visibles para todos los roles (`7645`). | CÓDIGO. Datos personales: **Decisión** | M |
-| B16 | Recordatorio de reserva se marca «visto» antes de que alguien lo vea; se pierde al recargar (`4351`). Local por dispositivo. | CÓDIGO | S |
-| B17 | Eliminar cliente deja la reserva con vínculo roto y al editarla se pierde (`12610`, `6885`). | CÓDIGO | S–M |
-| B18 | Operadores: activar/desactivar y alta sin verificar rol al ejecutar; el alta se guarda local antes de saber si el servidor la acepta (`4971-5012`). | CÓDIGO. RLS: HIPÓTESIS | S |
-| B19 | Catálogo: guard de UI «fail-open» con rol vacío; `toggleProdIlimitado` no revierte si el servidor rechaza (`7734`, `12120`). | CÓDIGO | S |
-| B20 | Accesos rápidos: guardado no atómico (un `update` por producto); productos eliminados dejan huecos de numeración (`6628-6654`). | CÓDIGO | M |
-| B21 | `clockBad` fijo a UTC-3: otra zona horaria muestra «Revisá la hora» siempre (`5591`). | CÓDIGO (verificado) | S |
-| B22 | `setInterval(renderContextoGlobal, 3000)` sin gate de visibilidad; también `updateDate` y recordatorios; realtime no se detiene al ocultar. | CÓDIGO (verificado). Costo real: HIPÓTESIS, medir | S |
-| B23 | Respaldo local vuelca todo `localStorage`/`sessionStorage` sin filtrar; podría incluir tokens de sesión (HIPÓTESIS: depende de supabase-js). Acceso gateado sólo en cliente. | CÓDIGO / HIPÓTESIS | S |
-| B24 | Número de ticket = últimos 12 caracteres del id: no correlativo y difícil de buscar. | CÓDIGO | **Decisión** |
+| **S1** | **Verificar en staging** lo corregido y las cinco mejoras (rol por rol) | — | M |
+| **S2** | **Confirmar RLS desplegado** con `politicas_rls.sql` (qué roles escriben notas/borran mesas; restricción de precio) | CÓDIGO sólo del repo | S |
+| B6 | SDK de Supabase por CDN con `@2` flotante y sin SRI (`index.html:103`) | CÓDIGO | S · **D (infra)** |
+| **B25** | **`getSupabaseActiveRole()` cae al rol del primer local si el local activo no tiene rol** (`index.html:8497-8505`); lo usan `isSupabaseAdminRole`, `puedeEditarCatalogo`, `canShowSupabaseTechnicalUi` y otros: la UI puede mostrar acciones de administración a quien no lo es en el local activo. El servidor (RLS por local) sigue siendo la barrera real. Hallazgo nuevo de la revisión independiente; sólo se corrigió en Limpiar | CÓDIGO | S–M · riesgo medio (muchos llamadores) |
+| B3 | Reservas: editar fuerza `estado:'pendiente'`; admite fecha pasada; sin cancelar | CÓDIGO (7077 verificado) | S–M · **D** |
+| B11 | Comprobante post-cobro se imprime aunque la venta no esté confirmada (el historial sí lo bloquea) | CÓDIGO | S |
 
-### P3 — exploratorio o impacto incierto
-Bloque `disabled-supabase-patch` de 279 líneas (limpieza); 50 `console.log`; 74 usos de `font-size:11px` y 24 de 10px; 4 diálogos nativos (`confirm`/`prompt`); chevrones de acordeón de ~4 px; título de Clientes más pegado al borde que el de otras pantallas (captura); validación de teléfono/email y duplicados en Clientes; `aria-pressed` en filtros.
+### F · Futuras versiones (P2)
+B7 reintento de ventas pendientes al reanudar y texto del banner · B8–B10 comandas (imprimir ≠ marcar enviada; «ANULAR» falso al cambiar sector; mesas sin id/reservas sólo imprimen el pedido completo) · B13 impresión sin manejo de errores y ancho fijo 72 mm · B14 «visitas» no se incrementa · B16 recordatorio se marca visto antes de verse · B17 borrar cliente deja reserva con vínculo roto · B18 operadores: activar/alta sin verificar rol al ejecutar · B19 guard de catálogo «fail-open» con rol vacío · B20 accesos rápidos: guardado no atómico · B21 `clockBad` fijo a UTC-3 · B22 `setInterval` de 3 s sin gate de visibilidad (medir) · B24 número de ticket no correlativo.
 
-### Oportunidades comerciales/operativas (todas HIPÓTESIS, requieren decisión)
-Venta adicional sugerida en Cobrar; fidelización usando «visitas» (hoy inexistente, B14); alergias visibles en cocina (B15); indicadores para el dueño a partir de Reportes. **No se implementó ni se estimó retorno de ninguna.**
+### D · Requieren decisión suya
+B4 (¿admin además del dueño?) · B5 (¿operador elimina mesas con ítems?) · B2b (modificadores de variante negativos) · B12 (vuelto en el comprobante) · B15 (alergias visibles a todos los roles y en comanda: datos personales) · B6 (infra) · B3 (estados de reserva).
 
-### Ya descartadas
-Agrandar controles del panel de pedido (ya tiene tamaños distintos por puntero); filtros de Caja en una línea en móvil (dos líneas es una regla deliberada); refactor del archivo único (sin problema verificable).
+### P3
+Bloque desactivado de 279 líneas; 50 `console.log`; tamaños 10–11 px; 4 diálogos nativos; chevrones de 4 px; título de Clientes pegado al borde; validar teléfono/email; `aria-pressed` en filtros.
 
-## 6. Pruebas
+### Oportunidades comerciales (todas HIPÓTESIS, sin datos de uso)
+Venta adicional en Cobrar; fidelización con «visitas» (hoy inexistente, B14); alergias en cocina (B15); indicadores para el dueño.
 
-- Corrida completa a `a8b69d0`: 11 archivos, 190 pruebas, todas en verde (una intermitencia de `F4 … transferencia` bajo carga concurrente, 3/3 aislada y verde en la corrida sin competencia).
-- Pruebas nuevas rojas contra la versión anterior (O1–O7). **Centavos (O7):** contra `341a762` (sin la corrección) «Justo» con total 12.400,4 mostraba `Faltan $0`; con la corrección, `Vuelto $0`. Se separó de la prueba de `aria-expanded` (O6) para que cada una demuestre su propio caso.
-- `tests/carta_sync.test.cjs`: rojo en `f338bce`–`a8b69d0` (divergencia demostrada con `--check`), verde en `a26ad14`.
+## 7. Pruebas y revisiones
 
-## 7. Riesgos residuales
+- **Regresión completa final (commit `2392533`):** 14 archivos, **220 pruebas, todas en verde**. En una corrida intermedia habían fallado 4 pruebas (3 de `v2_roles` por mi atributo `data-solo-admin` y 1 intermitente de O2 por la pérdida de foco): causas corregidas. `apply.py --check` → `COINCIDE`.
+- **Pruebas nuevas rojo→verde:** O1–O8 (ola 1), `ola2_riesgos` (13: B1 ×5, B2 ×2, B4 ×2, B5 ×3 [una es control], B23), `carta_sync`, `staging_policy` (13).
+- **Revisiones:** Codex adversarial (ola 1) y `/code-review` nativa (ola 1) conservadas sin repetir. Codex dirigida sobre la fase de riesgos: ver §7.1.
+- **Copia aislada SQL:** `verificar_sql.cjs` 15/15.
 
-1. Sin verificación en staging (§3).
-2. Impresión nunca probada en dispositivo real.
-3. Roles: sólo lectura de cliente y mocks; la seguridad efectiva depende de RLS, no auditada.
-4. Backlog P1/P2 basado en lectura de código; varios ítems requieren reproducción antes de implementarse.
+### 7.1 Revisión independiente (Codex) de la fase de riesgos
+Veredicto: *needs-attention*, **3 hallazgos altos, los tres defectos reales, corregidos con prueba rojo→verde**:
+1. **B1 incompleto:** `op` en `pintarResumenTurno` y `t.n` en Reportes seguían sin escapar (mi guarda estática no los veía por el nombre corto). Corregido y guarda ampliada; el recorrido de ambas vistas tiene prueba.
+2. **B4 aceptaba el rol de otro local** (`getSupabaseActiveRole` cae a `stores[0]`). Corregido con guard estricto del local activo; prueba con «primer local owner + local activo sin rol».
+3. **B5 podía insertar la mesa en la cuenta nueva** si se cambiaba de cuenta durante el borrado. Corregido; prueba con cambio de cuenta y de local en el instante del fallo (en la prueba el cambio se hace al fallar porque la app vuelve a fijar la sesión si se cambia antes).
+
+Codex no ejecutó el navegador (revisión estática); las pruebas las corrí yo. No hubo hallazgos sobre B2, B23 ni el wrapper de foco.
+
+## 8. Estado final y recomendación
+
+**Recomendación de publicación: `BLOCKED`.** `STAGING_VERIFIED` **no** se declara.
+
+Motivos concretos:
+1. **Ninguna de las cinco mejoras ni de las correcciones B1/B2/B4/B5/B23 pasó por staging.** Faltan la autenticación humana de las tres cuentas (clave anon pública + contraseñas tipeadas por la persona) y la ejecución por la persona de `fixtures.sql` en el SQL Editor de staging. No hay ningún bloqueo técnico del lado de la candidata.
+2. **RLS desplegado sin verificar** (`politicas_rls.sql`, sólo lectura): el análisis de B1/B5 se apoya en el SQL versionado del repo, no en el estado real.
+3. **Decisiones suyas pendientes que afectan lo implementado:** B4 (¿admin además del dueño?), B5 (¿operador elimina mesas con ítems?), B2b (modificadores de variante negativos).
+
+Lo que **sí** está listo para publicar desde el punto de vista del código: 14 archivos de prueba / 220 pruebas en verde, `apply.py` sincronizado, tres revisiones independientes resueltas (Codex ola 1, nativa ola 1, Codex fase de riesgos).
+
+### Para pasar a GO
+1. Login manual de `owner`, `admin` y `caja` (ventanas locales; la persona pega la clave anon y tipea contraseñas).
+2. La persona corre, en este orden: `esquema_gate.sql` y `politicas_rls.sql` (sólo lectura) → `fixtures_ENSAYO.sql` → `fixtures.sql`.
+3. Se ejecuta `harness/escenarios_ola1.cjs` (primera ejecución: puede requerir ajustes de selectores).
+4. Con autorización explícita: `cleanup_ENSAYO.sql` → `cleanup.sql`, y verificación de que no quedan residuos.
