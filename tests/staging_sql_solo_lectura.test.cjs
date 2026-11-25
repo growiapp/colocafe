@@ -63,6 +63,29 @@ for (const [archivo, permitidas] of Object.entries(AGREGADOS)) {
     assert.deepEqual(analizar(fs.readFileSync(path.join(dir, archivo), 'utf8'), permitidas), []);
   });
 }
+// Modo «solo local sintético»: puede leer filas, pero TODA lectura de una tabla de negocio debe llevar store_id = <local sintético>.
+const LOCAL_SINTETICO = 'e2e02026-1123-4122-8000-000000000001';
+const TABLAS_VENTAS = ['sales', 'sale_items', 'sale_payments', 'open_orders', 'shifts'];
+function analizarSintetico(crudo, permitidas) {
+  const problemas = analizar(crudo.replace(/\bpublic\.(sales|sale_items|sale_payments|open_orders|shifts)\b/g, 'pg_catalog.pg_class'), []);   // las tablas permitidas se validan aquí abajo
+  const sql = sinComentarios(crudo);
+  for (const t of sql.split(/\bfrom\s+public\./i).slice(1)) {
+    const tabla = (/^([a-z_]+)/i.exec(t) || [])[1];
+    if (!permitidas.includes(tabla)) { problemas.push(`tabla de negocio no permitida: ${tabla}`); continue; }
+    const hasta = t.search(/\)\s*(?:::|as\b|,)|\border\s+by\b|\bunion\b|;/i);
+    const cuerpo = hasta < 0 ? t : t.slice(0, hasta);
+    if (!/store_id\s*=\s*'e2e02026-1123-4122-8000-000000000001'/.test(cuerpo)) problemas.push(`lectura de ${tabla} sin store_id = local sintético`);
+  }
+  return problemas;
+}
+test('verificacion_ventas_sinteticas.sql: solo lee filas del local sintético (cada lectura filtra por su store_id) y nada más', () => {
+  const sql = fs.readFileSync(path.join(dir, 'verificacion_ventas_sinteticas.sql'), 'utf8');
+  assert.deepEqual(analizarSintetico(sql, TABLAS_VENTAS), []);
+  const sinFiltro = sql.replace("from public.sales s where s.store_id = 'e2e02026-1123-4122-8000-000000000001'", 'from public.sales s');
+  assert.notDeepEqual(analizarSintetico(sinFiltro, TABLAS_VENTAS), [], 'una lectura sin filtro debe rechazarse');
+  assert.notDeepEqual(analizarSintetico(sql.replace('public.shifts sh', 'public.customers sh'), TABLAS_VENTAS), [], 'otra tabla de negocio debe rechazarse');
+  assert.notDeepEqual(analizarSintetico(sql + '\ndelete from public.sales;', TABLAS_VENTAS), [], 'DML debe rechazarse');
+});
 test('modo agregados: RECHAZA leer filas, columnas sueltas, otras tablas de negocio o select *', () => {
   const base = fs.readFileSync(path.join(dir, 'stock_paridad.sql'), 'utf8'), permitidas = AGREGADOS['stock_paridad.sql'];
   const mutantes = {
