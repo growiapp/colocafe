@@ -167,13 +167,14 @@ test('O5: escribir «Paga con» no pierde el foco si Cobrar se repinta (llegada 
 }));
 
 // ── Revisión nativa: totales con centavos y estado inicial de los acordeones ──
-test('O6: «Justo» no muestra faltante cuando el total tiene centavos, y los acordeones declaran aria-expanded desde el inicio', async () => abrir(async page => {
+test('O6: los acordeones declaran aria-expanded desde el inicio', async () => abrir(async page => {
   await page.evaluate(() => goTab('ajustes'));
   assert.deepEqual(await page.$$eval('.accordion-hdr', h => h.map(x => x.getAttribute('aria-expanded'))), ['false', 'false', 'false', 'false']);
-  await page.evaluate(() => goTab('carga'));
+}));
+
+test('O7: «Justo» no muestra faltante cuando el total tiene centavos (12.400,4 se cobra y se muestra como $12.400)', async () => abrir(async page => {
   await abrirCobro(page);
-  await page.evaluate(() => { document.querySelectorAll('.cobro-tk .tk-total b').forEach(b => b.textContent = '$12.400'); });
-  await page.evaluate(() => { const o = totalCobroActual; window.totalCobroActual = () => 12400.4; });
+  await page.evaluate(() => { window.totalCobroActual = () => 12400.4; });
   await page.click('[data-m="transferencia"]'); await page.click('[data-m="ef"]');   // repinta con el total fraccionario
   await page.click('.cobro-rec [data-r]');                                           // «Justo»
   assert.deepEqual(await vuelto(page), {t: 'Vuelto $0', falta: false});
