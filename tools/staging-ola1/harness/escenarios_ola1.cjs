@@ -28,6 +28,7 @@ async function verificarEntorno(d, cuenta) {
 }
 async function cambiarAlSintetico(d) {                                           // el recorrido real: «Local» → Elegí la tienda → Continuar
   const p = d.page;
+  if (/ZZ_E2E_OLA1/.test(await p.$eval('#ctx-local .ctx-v', e => e.textContent))) return;   // el perfil ya quedó en el local sintético
   await p.click('#ctx-local'); await p.waitForSelector('#sb-store-sel-modal', {state: 'visible', timeout: 10000});
   await p.selectOption('#sb-store-sel-modal', FIXTURE_STORE);
   await p.getByRole('button', {name: 'Continuar'}).click();
@@ -137,7 +138,8 @@ async function bloqueEliminar(d, cuenta) {
       if (!cuenta) { reg(perfil, 'Identidad de la sesión', false, `usuario ${user8} desconocido`); await d.ctx.close(); continue; }
       if (!SOLO.includes(cuenta)) { await d.ctx.close(); continue; }
       d.cuenta = cuenta; instalarCaptura(d, cuenta);
-      await d.page.waitForFunction(() => document.querySelectorAll('.mesa-card').length > 0 && !/Cargando/.test((document.querySelector('#ctx-local .ctx-v') || {}).textContent || 'Cargando'), null, {timeout: 40000});
+      await d.page.waitForFunction(() => !/Cargando/.test((document.querySelector('#ctx-local .ctx-v') || {}).textContent || 'Cargando'), null, {timeout: 40000});
+      await d.page.waitForTimeout(4000);
       await cambiarAlSintetico(d);
       const falla = await verificarEntorno(d, cuenta);
       if (falla) { reg(cuenta, 'Verificación previa a escribir (proyecto, URL, usuario, rol, local)', false, falla); await d.ctx.close(); continue; }
