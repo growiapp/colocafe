@@ -35,7 +35,7 @@ function analizar(crudo) {
   return problemas;
 }
 
-for (const archivo of ['esquema_gate.sql', 'politicas_rls.sql', 'auditoria_triggers.sql']) {
+for (const archivo of ['esquema_gate.sql', 'politicas_rls.sql', 'auditoria_triggers.sql', 'funciones_triggers.sql']) {
   test(`${archivo}: es UNA sola consulta de solo lectura sobre catálogos del sistema, sin DDL/DML, sin auth/vault, sin funciones peligrosas`, () => {
     assert.deepEqual(analizar(fs.readFileSync(path.join(dir, archivo), 'utf8')), []);
   });
