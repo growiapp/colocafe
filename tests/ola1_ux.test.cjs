@@ -106,6 +106,7 @@ for (const [nombreVp, vp] of [['escritorio', ESC], ['móvil', MOV]]) {
     const r = await page.$$eval('.mesa-card .mesa-close', bs => bs.map(b => { const a = getComputedStyle(b, '::after'), r = b.getBoundingClientRect(); return {tag: b.tagName, nombre: b.getAttribute('aria-label'), zona: Math.min(r.width + 2 * -parseFloat(a.top), r.height + 2 * -parseFloat(a.top))}; }));
     assert.equal(r.length, 6);
     for (const b of r) { assert.equal(b.tag, 'BUTTON'); assert.match(b.nombre, /^Eliminar /); assert.ok(b.zona >= (vp.width < 500 ? 44 : 32), JSON.stringify(b)); }
+    await page.evaluate(() => { window.getActiveStoreRoleEstricto = () => 'admin'; }); // B5: con productos, solo owner/admin eliminan
     await page.focus('.mesa-card[data-mesa] .mesa-close');
     assert.equal(await page.evaluate(() => document.activeElement.classList.contains('mesa-close')), true);
     await page.keyboard.press('Enter');
