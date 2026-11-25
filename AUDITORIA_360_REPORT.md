@@ -355,3 +355,34 @@ Codex no ejecutó el navegador (revisión estática); las pruebas las corrí yo.
 **Lo que NO justifica bloquear:** los defectos del arnés (corregidos), el redondeo de descuentos a pesos (diseño), ni la diferencia de `profiles` (efecto del trigger de Auth).
 
 **Riesgos residuales:** B1–B2 extremos con datos reales de producción no probados; B25 y B26 (roles/nombre de local en cachés) siguen abiertos fuera de «Limpiar»; el panel de Supabase guardó fragmentos de consulta («Untitled query») que no son datos de la base.
+
+## 9. Cierre de la candidata: decisiones B4, B5 y B7 (2026-11-25)
+
+### 9.1 B7 — reintentos de ítems de mesa: **CORREGIDO** (pendiente sólo la revisión Codex)
+**Corrección de mi diagnóstico anterior.** El «~2 peticiones/s» que informé contaba todas las peticiones del arnés. Medido en los logs, los reintentos automáticos de la app son cada **~12 s fijos** (intervalo de Caja) y **no terminan nunca**. El defecto real: sin espera creciente, sin tope y sin distinguir un rechazo permanente del servidor de un corte de red.
+
+**Reproducción sin residuos del arnés** (`tests/b7_reintentos.test.cjs`, app real + servidor simulado, reloj adelantado 1 h = 300 ticks):
+
+| Escenario | Antes (`821d04f`) | Después |
+|---|---|---|
+| Red caída 1 hora | **600** envíos al servidor | **6** y se detiene |
+| Rechazo permanente (permiso, 42501) | **600** envíos | **1** y se detiene |
+| Falla corta de red (2 fallos) | se recupera | se recupera sola, sin quedar parada |
+| Conflicto de estado (otro dispositivo) | 0 reenvíos | 0 reenvíos (sin cambios) |
+
+**Qué cambia (mínimo, no toca el envío):** los reintentos automáticos esperan 12 s → 30 s → 1 min → 2 min → 5 min y paran tras 6 fallos; un rechazo permanente (códigos 42xxx, 23xxx, 22xxx, P0xxx, PGRST1+, 401/403) para de inmediato. **Nada se descarta**: el pendiente queda guardado y «Reintentar» (o volver la conexión, o reiniciar la app) lo reenvía. El cartel dice qué pasó y qué hacer («No pudimos guardar los cambios de Mesa 3… tocá Reintentar cuando haya conexión» / «El servidor rechazó los cambios… avisá al administrador») y desaparece al resolverse. Además se elimina el doble envío por turno (la sync de la mesa ya reenvía sus ítems).
+**Sin duplicados:** el camino de envío no se modificó (ids deterministas / versión base); la prueba verifica que tras Reintentar el servidor queda con exactamente lo de pantalla (1 conjunto de ítems, 0 pendientes).
+**Revisión independiente (Codex): NO realizada.** El clasificador de permisos de Claude Code bloqueó la llamada («Unsanctioned Communication»); no se intentó sortearlo. Quedan pendientes tu aprobación de esa llamada y su ejecución. Mientras tanto, la revisión es propia (casos: edición durante la parada, cambio de cuenta/local, clave local→remota, carrera con la cola de envío).
+**Límite conocido:** el estado de espera vive en memoria; recargar la app lo reinicia (a propósito: es un reintento manual implícito). Los cierres de mesa pendientes (`retryPendingOpenOrderClosures`) no se tocaron.
+
+### 9.2 B4 — «Limpiar historial»
+Decisión aprobada: sólo owner/admin del local activo y nunca con turno abierto. **Ya estaba implementado y probado** (`tests/ola2_riesgos.test.cjs`: operador, rol sin resolver y sin sesión no pueden; con turno abierto tampoco; el botón se oculta).
+
+### 9.3 B5 — eliminar mesas: política aprobada vs. cambios de servidor
+**Política comercial aprobada (implementada en el cliente, sin SQL/RLS):** con sesión, el operador sólo elimina mesas **vacías**; con productos, el aviso dice «pedí a un administrador que la cancele». Owner y admin pueden con productos (con la confirmación ya existente). Sin sesión (modo local) no cambia. Prueba: `B5 política` en `ola2_riesgos`.
+
+**Lo que requiere un cambio de servidor y NO se hizo (alcance a autorizar):** hoy el servidor deja al operador borrar `open_orders`/`open_order_items` (políticas RLS vigentes), así que la regla anterior sólo se hace cumplir **en la interfaz**: un operador con herramientas de desarrollo podría saltearla. Para hacerla cumplir de verdad y dar la cancelación «autorizada y trazable» haría falta, en staging primero:
+1. Cambiar la política `DELETE` de `open_orders`/`open_order_items` para que el operador sólo borre pedidos sin ítems.
+2. Una función `cancelar_pedido(id, motivo)` (SECURITY DEFINER) sólo para owner/admin que registre la cancelación en `audit_logs` (hoy la app no lo usa) con usuario, mesa, ítems, total y motivo, y borre el pedido.
+3. Que la app llame a esa función para mesas con productos (cliente + prueba E2E en staging).
+No se implementó nada de esto: queda a la espera de tu autorización de alcance.
