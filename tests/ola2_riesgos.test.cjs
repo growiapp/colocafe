@@ -202,6 +202,7 @@ test('B5: si al fallar el borrado ya se cambió de cuenta o de local, la mesa NO
   for (const cambio of ['cuenta', 'local']) {
     const r = await page.evaluate(async ([id, cambio]) => {
       // El cambio ocurre en el instante exacto del fallo (la app vuelve a fijar la sesión si se cambia antes)
+      window.getActiveStoreRoleEstricto = () => 'admin';
       window.deleteOpenOrderFromSupabase = () => new Promise(res => setTimeout(() => { if (cambio === 'cuenta') window.__sesionUserId = () => 'otra-cuenta'; else config.activeStoreId = 'otro-local'; mesas = []; save(); res(false); }, 400));
       pedirEliminarMesa(id); ejecutarConfirm();
       await new Promise(r => setTimeout(r, 900));
@@ -213,12 +214,36 @@ test('B5: si al fallar el borrado ya se cambió de cuenta o de local, la mesa NO
 }));
 test('B5: si el borrado remoto sale bien la mesa NO reaparece y nada más cambia', async () => abrir(async page => {
   const r = await page.evaluate(async id => {
+    window.getActiveStoreRoleEstricto = () => 'admin';
     window.deleteOpenOrderFromSupabase = async () => true;
     const antes = mesas.length; pedirEliminarMesa(id); ejecutarConfirm();
     await new Promise(r => setTimeout(r, 700));
     return {volvio: !!findMesaByAnyId(id), antes, despues: mesas.length};
   }, MESA);
   assert.equal(r.volvio, false); assert.equal(r.despues, r.antes - 1);
+}));
+
+// ── B5 (política comercial aprobada): el operador solo elimina mesas vacías; con productos lo hace owner/admin ──
+test('B5 política: con sesión, el operador NO elimina una mesa con productos pero sí una vacía; owner/admin sí pueden con productos', async () => abrir(async page => {
+  const r = await page.evaluate(async () => {
+    window.__sesionUserId = () => 'u1'; window.deleteOpenOrderFromSupabase = async () => true;
+    const salida = {};
+    for (const rol of ['operator', 'admin', 'owner']) {
+      window.getActiveStoreRoleEstricto = () => rol;
+      for (const conItems of [true, false]) {
+        const id = 'zz_' + rol + '_' + conItems;
+        mesas.push({id, nombre: 'ZZ ' + id, tipo: 'salon', items: conItems ? {x: {prodId: 'p', qty: 1, precio: 100}} : {}, apertura: new Date().toISOString()});
+        let toast = ''; const t = window.showToast; window.showToast = m => { toast = String(m); };
+        pedirEliminarMesa(id); try { ejecutarConfirm(); } catch (_) {}
+        await new Promise(r => setTimeout(r, 150)); window.showToast = t;
+        salida[rol + (conItems ? ' con productos' : ' vacía')] = {sigue: !!findMesaByAnyId(id), toast};
+      }
+    }
+    return salida;
+  });
+  assert.equal(r['operator con productos'].sigue, true); assert.match(r['operator con productos'].toast, /administrador/);
+  assert.equal(r['operator vacía'].sigue, false);
+  assert.equal(r['admin con productos'].sigue, false); assert.equal(r['owner con productos'].sigue, false);
 }));
 
 // ── B23: el respaldo local no debe incluir credenciales de sesión ──

@@ -5936,6 +5936,8 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 function pedirEliminarMesa(id){
   const m=findMesaByAnyId(id);if(!m)return;
+  // Política B5: con sesión, solo owner/admin eliminan una mesa con productos; el operador solo mesas vacías (la cancelación autorizada y trazable de mesas con productos requiere un cambio de servidor aún no aprobado).
+  if(window.__sesionUserId?.()&&!esAdminDelLocalActivo()&&Object.keys(m.items||{}).length){showToast('Esta mesa tiene productos: pedí a un administrador que la cancele.');return;}
   pedirConfirm(`¿Eliminar "${m.nombre}"? Se perderán los ítems.`,async()=>{
     // Solo se guarda LA mesa eliminada (copia y posición): restaurar el arreglo completo pisaba lo hecho en otras mesas durante los hasta 10 s del borrado remoto.
     let quitada=null;try{quitada=JSON.parse(JSON.stringify(m));}catch(_){quitada=null;}
@@ -10743,7 +10745,7 @@ if(config.webappUrl){loadFromSheets();}
   }
   function ooPendientesDeReintento(){
     const out=new Map();
-    (mesas||[]).filter(m=>mesaPendiente(m)&&!m._items_conflict&&origenEnviable(m,'mesa')).forEach(m=>out.set(String(m._sb_id||m.id),{nombre:m.nombre,code:ooLastTechnicalError?.code||''}));
+    (mesas||[]).filter(m=>mesaPendiente(m)&&!m._items_conflict&&origenEnviable(m,'mesa')).forEach(m=>out.set(String(m._sb_id||m.id),{nombre:m.nombre,code:''}));
     (pendingOpenOrderItemSyncs||[]).filter(e=>e&&e.status!=='synced'&&origenEnviable(e,'cola')).forEach(e=>{
       const k=String(e.open_order_id||'');const m=findMesaByAnyId(k);
       if(m?._items_conflict)return;
