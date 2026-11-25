@@ -1,6 +1,7 @@
--- Colo Café · auditoría ola 1 · POLÍTICAS Y RESTRICCIONES DESPLEGADAS (SOLO LECTURA). Ejecutar en staging (y, si se autoriza, en producción: solo lectura).
+-- Colo Café · auditoría ola 1 · POLÍTICAS Y RESTRICCIONES DESPLEGADAS (SOLO LECTURA). UNA sola sentencia SELECT sobre catálogos del sistema
+-- (pg_policies, pg_class, pg_constraint, pg_attribute, pg_indexes, pg_proc); no lee tablas de negocio ni auth.*. Muestra la DEFINICIÓN (texto) de las políticas y de has_store_role (máx. 300 caracteres), no datos.
+-- Sin begin/rollback para que el SQL Editor muestre el resultado. Que no escribe lo garantiza tests/staging_sql_solo_lectura.test.cjs. Ejecutar en staging.
 -- Responde: ¿qué roles pueden borrar/escribir mesas y notas (B1, B5)?, ¿hay restricción de precio en products (B2)?, ¿existe el índice único de ventas?
-begin read only;
 select 'POLITICA' tipo, tablename || ' · ' || policyname || ' · ' || cmd as detalle, left(coalesce(qual, '') || ' | ' || coalesce(with_check, ''), 240) as definicion
   from pg_policies
  where schemaname = 'public' and tablename in ('open_orders', 'open_order_items', 'open_order_dispatches', 'sales', 'sale_items', 'sale_payments', 'products', 'categories', 'customers', 'reservations')
@@ -16,4 +17,3 @@ select 'INDICE_UNICO_VENTAS', indexname::text, indexdef from pg_indexes where sc
 union all
 select 'FUNCION_ROL', proname::text, left(pg_get_functiondef(oid), 300) from pg_proc where proname = 'has_store_role' and pronamespace = 'public'::regnamespace
 order by 1, 2;
-rollback;

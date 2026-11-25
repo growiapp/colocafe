@@ -168,6 +168,44 @@ const caso = async (nombre, fn) => { try { await fn(); resultados.push([nombre, 
     }
     console.log('  anterior →', out.join(' | '));
   });
+  // ── Scripts de solo lectura: se ejecutan con la sesión forzada a READ ONLY (si escribieran, fallarían) y se compara el estado antes/después ──
+  const GATE = fs.readFileSync(path.join(HERE, 'esquema_gate.sql'), 'utf8'), POL = fs.readFileSync(path.join(HERE, 'politicas_rls.sql'), 'utf8');
+  const huella = async db => JSON.stringify([await foto(db), (await db.query(`select md5(string_agg(c.relname || ':' || c.relkind::text || ':' || c.relrowsecurity::text, ',' order by c.relname)) h from pg_class c where c.relnamespace = 'public'::regnamespace`)).rows[0].h,
+    (await db.query(`select count(*) n from pg_policies`)).rows[0].n, (await db.query(`select count(*) n from pg_constraint`)).rows[0].n]);
+  const soloLectura = async (db, sql) => { await db.exec('set default_transaction_read_only = on'); try { return (await db.query(sql)).rows; } finally { await db.exec('set default_transaction_read_only = off'); } };
+  for (const [nombre, sql] of [['esquema_gate.sql', GATE], ['politicas_rls.sql', POL]]) {
+    await caso(`${nombre}: corre en sesión READ ONLY, devuelve filas y deja datos y catálogo idénticos`, async () => {
+      const db = await nuevo({fk: 'restrict'}); await correr(db, fix); await db.exec(escrituras());
+      await db.exec("alter table public.sales enable row level security; create policy sales_sel on public.sales for select using (true); create function public.has_store_role(a uuid, b text[]) returns boolean language sql as 'select true'");
+      const antes = await huella(db);
+      const filas = await soloLectura(db, sql);
+      assert.ok(filas.length > 0, 'debe devolver filas');
+      assert.equal(await huella(db), antes, 'el estado cambió');
+    });
+  }
+  await caso('la sesión READ ONLY es efectiva: un INSERT falla (la garantía no es nominal)', async () => {
+    const db = await nuevo(); await db.exec('set default_transaction_read_only = on');
+    const r = await correr(db, "insert into public.stores values (gen_random_uuid(), 'X', 'Y')");
+    assert.equal(r.ok, false); assert.match(r.msg, /read-only transaction/i);
+  });
+  await caso('esquema_gate.sql (primera ejecución real): detecta FKs, rol y la tabla hija SIN store_id', async () => {
+    const db = await nuevo({fk: 'restrict', extra: ['hijo_sin_store']});
+    const filas = await soloLectura(db, GATE), tipos = new Set(filas.map(f => f.tipo));
+    assert.ok(tipos.has('ROL') && tipos.has('TABLA_CON_STORE_ID') && tipos.has('FK_EN_EL_ARBOL'), [...tipos].join(','));
+    assert.ok(filas.some(f => f.tipo === 'STOP_HIJO_SIN_STORE_ID' && /sale_events/.test(f.detalle)), 'debe marcar sale_events como STOP');
+    assert.ok(filas.some(f => f.tipo === 'ADVERTENCIA_BORRADO_BLOQUEA'), 'sin cascada debe advertir que el borrado bloquea');
+    assert.ok(!filas.some(f => f.tipo === 'STOP_ROL_SIN_BYPASSRLS'), 'el rol del SQL Editor tiene bypassrls');
+  });
+  await caso('esquema_gate.sql con FKs en cascada y sin hijas huérfanas: sin STOP', async () => {
+    const db = await nuevo({fk: 'cascade'}); const filas = await soloLectura(db, GATE);
+    assert.ok(!filas.some(f => /^STOP_/.test(f.tipo)), JSON.stringify(filas.filter(f => /^STOP_/.test(f.tipo))));
+  });
+  await caso('politicas_rls.sql: lista políticas, RLS activo, restricción de precio e índice único', async () => {
+    const db = await nuevo(); await db.exec("alter table public.open_orders enable row level security; create policy p_del on public.open_orders for delete using (true); alter table public.products add constraint chk_precio check (price > 0); create unique index sales_u on public.sales(id);");
+    const filas = await soloLectura(db, POL), tipos = new Set(filas.map(f => f.tipo));
+    for (const t of ['POLITICA', 'RLS_ACTIVO', 'RESTRICCION_PRODUCTS', 'COLUMNA_PRECIO', 'INDICE_UNICO_VENTAS']) assert.ok(tipos.has(t), 'falta ' + t);
+    assert.ok(filas.every(f => String(f.definicion || '').length <= 400), 'definiciones acotadas');
+  });
   console.log(resultados.map(([n, r]) => `${r === 'OK' ? '✔' : '✖'} ${n}${r === 'OK' ? '' : '  → ' + r}`).join('\n'));
   console.log(`${resultados.filter(r => r[1] === 'OK').length}/${resultados.length} casos OK`);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -1,3 +1,7 @@
+-- Colo Café · auditoría ola 1 · ESQUEMA (SOLO LECTURA). Derivado sin cambios de 00_schema_gate.sql, salvo que se quitó el envoltorio begin/rollback:
+-- es UNA sola sentencia SELECT sobre catálogos del sistema (pg_class, pg_attribute, pg_constraint, pg_roles). No lee tablas de negocio, ni auth.*, ni credenciales.
+-- Se quitó la transacción para que el SQL Editor muestre el resultado (muestra la última sentencia). Que no escribe lo garantiza tests/staging_sql_solo_lectura.test.cjs.
+-- Qué mirar: filas STOP_* (detener y avisar), ADVERTENCIA_* (revisar) y ROL (debe decir bypassrls=true o super=true).
 -- 00_schema_gate.sql · PREFLIGHT DE SOLO LECTURA (futuro, con autorización nueva). NO EJECUTADO: no hay Postgres local; solo se revisó leyéndolo.
 -- Estado de validación: SQL_RUNTIME_VALIDATED = NO. Ver SQL_REVISION.md.
 -- STOP GATE explícito. Antes de crear fixtures hay que ejecutarlo y revisar TODAS las filas:
@@ -7,7 +11,6 @@
 --   * 'STOP_ROL_SIN_BYPASSRLS'  : con RLS forzado, los conteos de residuos del cleanup podrían ser parciales y dar un falso "0".
 --   * 'ADVERTENCIA_*'           : acción de borrado que BLOQUEA (NO ACTION/RESTRICT) o que deja huérfanos (SET NULL/SET DEFAULT). Revisar antes del cleanup.
 -- Usa pg_catalog (information_schema oculta las tablas sobre las que el rol no tiene privilegios).
-begin read only;
 with recursive
 raices as (
   select 'public.stores'::regclass::oid as rel
@@ -49,4 +52,3 @@ select 'ROL', format('%s super=%s bypassrls=%s', rolname, rolsuper, rolbypassrls
 union all
 select 'STOP_ROL_SIN_BYPASSRLS', current_user::text from pg_roles where rolname = current_user and not (rolsuper or rolbypassrls)
 order by 1, 2;
-rollback;
