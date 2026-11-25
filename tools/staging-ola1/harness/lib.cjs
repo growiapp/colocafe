@@ -17,7 +17,11 @@ const EVID = path.resolve(process.env.E2E_EVID);
 if (EVID === REPO || EVID.startsWith(REPO + path.sep)) throw new Error('EVIDENCIA_DENTRO_DEL_REPOSITORIO');
 fs.mkdirSync(EVID, {recursive:true});
 const KEYFILE = path.join(STATE, 'anon.key');
-const fixtureOrders = new Set();
+// Pedidos que ESTA prueba creó en el local sintético, recordados en disco (EVID, fuera del repo) para poder RETOMAR tras una interrupción: la app conserva en el navegador los envíos
+// sin confirmar y los reintenta en la ejecución siguiente; el arnés debe reconocer esos pedidos como suyos (sintéticos) y no bloquearlos.
+const ORDENES_ARCHIVO = path.join(EVID, 'pedidos_sinteticos.json');
+const fixtureOrders = new Set((() => { try { return JSON.parse(fs.readFileSync(ORDENES_ARCHIVO, 'utf8')).filter(id => /^[0-9a-f-]{36}$/i.test(id)); } catch (_) { return []; } })());
+const recordarOrden = id => { if (fixtureOrders.has(id)) return; fixtureOrders.add(id); try { fs.writeFileSync(ORDENES_ARCHIVO, JSON.stringify([...fixtureOrders])); } catch (_) {} };
 const PUBLIC_HOSTS =new Set(['cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com']);
 
 // Credencial aceptada (SOLO claves públicas): (1) la clave «anon» clásica, un JWT (eyJ…) con role=anon y ref=staging, verificable; o
@@ -129,7 +133,7 @@ async function openDevice(name, {origin, audit, mode = 'readonly', fixtureStore 
     }
     log(e);
     if (url.pathname === '/rest/v1/open_orders' && res.status() < 300 && fixtureStore) {
-      try { const rows = await res.json(); idsDePedidoCreado({metodo:req.method(), pathname:url.pathname, postData:req.postData(), status:res.status(), filas:rows, fixtureStore}).forEach(id => fixtureOrders.add(id)); } catch (_) {}
+      try { const rows = await res.json(); idsDePedidoCreado({metodo:req.method(), pathname:url.pathname, postData:req.postData(), status:res.status(), filas:rows, fixtureStore}).forEach(recordarOrden); } catch (_) {}
     }
   })().catch(e => state.violations.push(`EVENTO_RESPONSE:${e.message}`)); state.pendingEvents.add(pendiente); pendiente.then(() => state.pendingEvents.delete(pendiente)); });
   await ctx.addInitScript(({url, key, activeStore, name}) => {
