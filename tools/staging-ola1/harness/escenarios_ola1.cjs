@@ -88,10 +88,11 @@ async function cobrar(d, cuenta, etiqueta, nombre, productos, o) {
   await p.locator('.btn-confirmar[data-c=confirmar]').click();
   await p.waitForFunction(() => !document.querySelector('#cobro-screen:not([hidden])') || document.querySelector('#modal-comprobante.open'), null, {timeout: 40000}).catch(() => {});
   await p.waitForTimeout(3500);
-  await p.evaluate(() => { try { cerrarComprobante(); } catch (_) {} });
+  const listo = p.getByRole('button', {name: 'Listo'}); if (await listo.isVisible().catch(() => false)) await listo.click();   // pantalla «Venta guardada»
+  await p.waitForTimeout(1200);
   return {total, obs, escrituras: desde(n0)};
 }
-const METODOS = {EF: 'cash', TR: 'transfer', MX: 'cash+transfer', CTV: 'cash'};
+const METODOS = {EF: 'efectivo', TR: 'transferencia', MX: 'efectivo+transferencia', CTV: 'efectivo'};
 const filas = (cs, t) => cs.filter(c => c.t === t && c.m === 'POST').flatMap(c => [].concat(c.body || []));
 function evaluarCobro(cuenta, etiqueta, r, esperado) {
   if (!r) return;
