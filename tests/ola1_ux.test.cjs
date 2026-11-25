@@ -145,3 +145,23 @@ test('O4 (escritorio 1280×800): Cobrar no desborda los botones de medio de pago
   assert.ok(m.main >= 600, "columna principal ancha: " + JSON.stringify(m));
   assert.ok(m.conf <= m.alto, `el botón queda fuera de la pantalla (${m.conf} > ${m.alto})`);
 }));
+
+// ── Revisión independiente (Codex): el foco sobrevive a los repintados ──
+test('O5: escribir «Paga con» no pierde el foco si Cobrar se repinta (llegada de operadores) y Enter/Espacio en filtros no pierde el foco', async () => abrir(async page => {
+  await page.focus('#ventas-filtro-chips .chip:not(.active)');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.evaluate(() => !!document.activeElement.closest('#ventas-filtro-chips')), true, 'tras el repintado el foco sigue en un filtro');
+  const a = await page.evaluate(() => document.activeElement.textContent);
+  await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab');
+  assert.equal(await page.evaluate(() => document.activeElement.textContent), a);
+  await page.keyboard.press('Space');                                   // segunda activación sin volver a enfocar por programa
+  assert.equal(await page.evaluate(() => !!document.activeElement.closest('#ventas-filtro-chips')), true);
+  await page.evaluate(() => { const o = loadOperatorsFromSupabase; window.loadOperatorsFromSupabase = () => new Promise(r => setTimeout(() => r(o()), 1500)); });   // la lectura de operadores tarda y termina mientras se escribe
+  await abrirCobro(page); await page.waitForTimeout(150);   // pasa el enfoque inicial que Cobrar da al medio de pago
+  await page.evaluate(() => { document.getElementById('cobro-rec-in').dataset.viejo = '1'; });
+  await page.focus('#cobro-rec-in'); await page.keyboard.type('12');
+  await page.waitForFunction(() => !document.getElementById('cobro-rec-in').dataset.viejo, null, {timeout: 8000});   // el repintado reemplazó el input
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'cobro-rec-in', 'el repintado no saca el foco del importe');
+  await page.keyboard.type('345');
+  assert.equal(await page.$eval('#cobro-rec-in', e => e.value), '12345', 'las cifras siguientes siguen entrando en orden');
+}));

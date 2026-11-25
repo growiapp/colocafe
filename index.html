@@ -18317,6 +18317,7 @@ function pintarVuelto(){const e=$('cobro-vuelto');if(!e)return;const v=textoVuel
 function msgCobro(t){const m=$('cobro-msg');if(m){m.textContent=t||'';}}
 function pintarCobro(){
   const sc=$('cobro-screen');if(!sc)return;
+  const ae=document.activeElement,enRec=ae&&ae.id==='cobro-rec-in'&&sc.contains(ae),selRec=enRec?[ae.selectionStart,ae.selectionEnd]:null; // un repintado (p. ej. al llegar los operadores) no debe sacar el foco del importe
   firmaVista=firmaCobro();
   { const cx=$('mixed-payments-box'); if(cx&&sc.contains(cx)&&mixedHome) mixedHome.appendChild(cx); } // el repintado no debe destruir los campos del pago mixto
   const items=Object.values(carrito||{}).filter(i=>Number(i.qty)>0),total=typeof totalCobroActual==='function'?totalCobroActual():0;
@@ -18346,6 +18347,7 @@ function pintarCobro(){
       <ul class="tk-lines">${items.map(i=>{const p=findProductById(i.prodId);return `<li><span class="q">${Number(i.qty)}×</span><span class="n">${esc(p?.name||i.prodId)}</span><span class="v">${fm(carritoItemTotal(i))}</span></li>`;}).join('')}</ul>
       <div class="tk-total"><span>Total · ${cant} producto${cant!==1?'s':''}</span><b>${fm(total)}</b></div></aside>
   </div>`;
+  if(enRec){const n=$('cobro-rec-in');if(n){n.focus();try{n.setSelectionRange(selRec[0],selRec[1]);}catch(_){}}}
   const slot=$('cobro-mixto-slot'),box=$('mixed-payments-box');
   if(slot&&box){if(m==='mixed'){slot.appendChild(box);slot.hidden=false;}else{slot.hidden=true;if(box.parentNode===slot&&mixedHome)mixedHome.appendChild(box);}}
 }
@@ -18405,7 +18407,10 @@ async function confirmarCobro(btn){
 document.addEventListener('keydown',e=>{
   if(e.key!=='Enter'&&e.key!==' ')return;
   const t=e.target;if(!t||t.getAttribute?.('role')!=='button'||/^(BUTTON|A|INPUT)$/.test(t.tagName)||t.matches('.mesa-card'))return;
-  e.preventDefault();t.click();
+  e.preventDefault();
+  const pa=t.parentElement,i=pa?[...pa.children].indexOf(t):-1;
+  t.click();
+  if(!t.isConnected&&pa?.isConnected&&i>=0)pa.children[i]?.focus?.(); // si el clic repintó los filtros, el foco vuelve al mismo lugar
 });
 function montarCobro(){
   if($('cobro-screen'))return;
