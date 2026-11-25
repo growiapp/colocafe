@@ -20,14 +20,15 @@ Riesgos: B1 (escape de texto libre), B2 (precios inválidos), B4 (Limpiar histor
 | Staging real, 3 roles: cobros efectivo/transferencia/mixto/descuento, permisos, eliminación de mesas | 31 ventas, 31 coherentes en el servidor (informe §3.2) |
 | Limpieza de staging y línea base | 18/19 tablas idénticas; `profiles` explicada (trigger de Auth) |
 | B7 reproducido y corregido sin residuos del arnés | 600 → 6 envíos/hora; rechazo permanente 600 → 1 (informe §9.1) |
+| Guard de B5 en staging con sesiones reales | **Validado**: operador rechazado en cierre/borrado directo con productos, mesa vacía y cobro OK, owner/admin eliminan con productos; limpieza y línea base 18/19 (informe §9.3c) |
 | Revisión independiente de B7 y B5 | **Hecha, dos revisiones coincidentes** (Codex por la vía oficial + revisión nativa): 8 hallazgos, todos corregidos con prueba; ninguno en el SQL (informe §9.1) |
 | `APP_VERSION` | `2026-11-25-b5-b7-consolidada`; detección verificada (informe §9.4) |
 
 ## 4. Antes de publicar (decisiones y acciones de la persona responsable)
-1. **Servidor B5 (opcional pero recomendado):** autorizar la lectura de políticas en staging, la ejecución de `open_orders_operator_guard.sql` en staging y el ciclo corto de verificación (informe §9.3). Sin esto, la regla del operador sólo se hace cumplir en la pantalla. **No** ejecutar en producción sin autorización expresa.
+1. **Servidor B5 en producción (opcional, decisión aparte):** el guard está **instalado y validado en staging** (informe §9.3c: 3 objetos agregados, rollback listo). Instalarlo en producción requiere autorización expresa; antes de hacerlo, leer en producción (solo lectura) las políticas de `open_orders`/`open_order_items` y confirmar que coinciden con las de staging (dos juegos permisivos, `replace_open_order_items` INVOKER). **El guard NO previene cancelaciones deliberadas** (informe §9.3d): decidirlo con esa limitación a la vista.
 2. **Versión de la app:** ya incrementada (`2026-11-25-b5-b7-consolidada`). Un dispositivo con la app abierta no ve el aviso hasta recargar: avisar a los cajeros.
 3. **Aceptar lo no probado:** nota escrita por un rol y vista por otro; comandas; impresión; reservas; Reportes con ventas reales; Stock Durability (staging sólo tiene la estructura, sin funciones ni triggers); producción (nunca consultada).
-4. **Aceptar la limitación de B5:** incluso con el guard del servidor, un operador puede vaciar los productos uno a uno y luego eliminar la mesa vacía; cerrarlo del todo exige una función de cancelación con registro (diseño mayor, informe §9.3).
+4. **Aceptar la limitación de B5 (no resuelta):** el guard protege contra errores accidentales, **no** contra acciones deliberadas: un operador puede vaciar los productos y luego eliminar la mesa vacía, borrar los ítems directamente o fabricar una venta a su nombre. Cerrarlo exige una cancelación con registro (diseño mayor, fuera de alcance; informe §9.3d).
 5. Elegir **horario de baja actividad** (sin turnos abiertos si es posible) y avisar a los cajeros que recarguen la app tras publicar.
 
 ## 5. Publicación y reversa (cuando se autorice; no se ejecutó)

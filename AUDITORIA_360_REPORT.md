@@ -386,13 +386,13 @@ Decisión: sólo owner/admin del local activo y nunca con turno abierto. Ya esta
 ### 9.3 B5 — eliminar mesas: política y servidor
 **Política aprobada:** operador = sólo mesas vacías; owner/admin = también con productos, con confirmación.
 **Cliente (implementado):** con sesión, el operador no elimina una mesa con productos («pedí a un administrador que la cancele»). **Corregí además un hueco que encontré al diseñar el servidor:** si el servidor rechazaba el cierre de una eliminación, el «plan B» del cliente borraba igual los ítems y la fila; ahora ese plan B sólo corre para cobros ya registrados.
-**Servidor (DISEÑADO Y PROBADO EN COPIA AISLADA; NO ejecutado en staging ni producción):** `open_orders_operator_guard.sql` (+ `..._rollback.sql`).
+**Servidor (INSTALADO Y VALIDADO EN STAGING el 2026-11-25, ver §9.3c; NO instalado en producción):** `open_orders_operator_guard.sql` (+ `..._rollback.sql`).
 - **Inspección previa (repo):** políticas `open_orders_*_ops` (owner/admin/operator pueden todo), RPC `replace_open_order_items` (SECURITY INVOKER: borra ítems con los permisos del operador), trigger `trg_close_open_order_after_sale` (SECURITY DEFINER: cierra la mesa al registrar la venta), FK en cascada hacia ítems y comandas. Las definiciones vigentes en staging **no se volvieron a leer** (requiere SQL en staging: pendiente de tu autorización); la copia usa el texto de los `.sql` del repo y un `has_store_role` simulado.
 - **Diseño mínimo:** dos políticas **RESTRICTIVAS** (se combinan con AND con las vigentes, sin depender de sus nombres, sin tocarlas) y una función auxiliar `open_order_operador_puede_cerrar(id)` (SECURITY DEFINER, sólo lectura: «sin ítems o ya cobrada»). El operador no puede **cerrar** (UPDATE a no-`open`) ni **borrar** una mesa `open` con ítems y sin venta; owner/admin no cambian. Falla de forma segura (aborta sin cambiar nada) si falta `has_store_role` u otra pieza.
 - **Por qué no se bloquea el borrado de ítems:** la edición normal del pedido los borra con permisos del operador (RPC). Bloquearlo rompería la edición.
 - **Verificado en la copia (8 pruebas, `tests/b5_servidor_rls.test.cjs`):** antes del guard el operador cancela mesas con productos; después no (ni directo ni con el flujo de la app); sí elimina vacías; owner/admin eliminan con productos; **el cobro del operador sigue funcionando** (venta → trigger cierra → ítems → fila), incluido el cierre tardío de una mesa ya cobrada; la edición de ítems por la RPC (incluso vaciar), las comandas (cascada) y otro local siguen igual; el cambio **agrega sólo 2 políticas y 1 función**, sin triggers ni nada de `stock_*` (Stock Durability intacto), es idempotente y la reversa deja el esquema idéntico.
 - **LÍMITE (importante):** un operador puede quitar los productos uno a uno (edición normal) y luego eliminar la mesa ya vacía; el servidor no puede distinguirlo de editar el pedido. Cerrarlo del todo exigiría una función de cancelación con registro en `audit_logs` y quitar el borrado directo al operador (diseño mayor, no incluido). Un `INSERT` manual en `sales` con `open_order_id` también la saltearía (requiere una petición a medida).
-- **Para aplicarlo (necesita tu autorización específica):** 1) leer en staging las políticas vigentes de `open_orders` (`politicas_rls.sql`, sólo lectura); 2) ejecutar el guard en staging; 3) repetir el ciclo corto (operador con mesa con productos / vacía; cobro del operador; admin). Producción sólo después.
+- **Staging:** hecho (§9.3c). **Producción:** requiere autorización expresa aparte; no se ejecutó nada.
 
 ### 9.3b Verificación del guard de B5 con las definiciones REALES de staging (2026-11-25, solo lectura)
 Consulta `tools/staging-ola1/guard_referencia.sql` (catálogos; sólo texto de definiciones, ningún dato) ejecutada en staging (54 filas). **Lo que encontré y cómo cambió la copia aislada y el SQL:**
@@ -409,16 +409,50 @@ Consulta `tools/staging-ola1/guard_referencia.sql` (catálogos; sólo texto de d
 5. **El operador elimina mesas vacías y cobra con normalidad** (venta → trigger → cierre → ítems → fila). ✔
 6. **Aislamiento entre locales:** el operador de otro local no puede borrar, cerrar, vaciar ni mover (`store_id`) una mesa ajena; una venta fabricada en otro local que apunte a la mesa **no** la cierra ni habilita al operador. ✔
 
+### 9.3c Guard de B5 instalado y validado en STAGING (2026-11-25)
+**Alcance autorizado y respetado:** sólo el proyecto staging `wjymdgfqmqutihadffec`; datos sintéticos sólo en el local `ZZ_E2E_OLA1`; sin tocar «Colo Café Staging»; cada SQL verificado por SHA-256 contra el archivo del commit antes de ejecutarse; nada en producción.
+
+**Secuencia:** línea base previa (19 tablas; 0 locales sintéticos; 3 membresías) → `fixtures_ENSAYO` (error esperado, nada creado) → `fixtures` (`FIXTURES_OK`) → **control sin guard** → verificación del catálogo (54 filas: 34 políticas permisivas, ningún objeto del guard) → **instalación del guard** (una transacción) → verificación del catálogo (57 filas) → validación con sesiones reales → `cleanup_ENSAYO` (plan = inventario, sin cambios) → `cleanup` (`CLEANUP_OK`) → inventario y línea base → recuperación del cliente.
+
+**Control previo (sin guard), operador con sesión real:** cierre directo **1 fila** y borrado directo **204** de una mesa con productos → la mesa dejó de existir. Es lo que el guard corrige.
+
+**Con el guard instalado (sesiones reales de cada cuenta; el servidor aplicó RLS con el usuario):**
+| Prueba | Resultado |
+|---|---|
+| Operador: CIERRE directo de mesa con productos | **Rechazado**: `42501 new row violates row-level security policy "open_orders_update_guard_operador"` |
+| Operador: BORRADO directo de mesa con productos | **No borró nada** (204 con 0 filas): la mesa sigue `open` y con sus ítems (1/1) |
+| Operador: la pantalla | No ofrece eliminar una mesa con productos (aviso, sin confirmación ni escrituras) |
+| Operador: eliminar mesa **vacía** | Permitido: `PATCH 200 → DELETE ítems 204 → DELETE mesa 204`; ya no existe |
+| Operador: **cobro** legítimo y cierre posterior | Permitido: venta $3.100 = pagos = ítems; cierre `PATCH 200 / DELETE ítems 204` sin errores |
+| Owner y admin: eliminar mesa **con productos** (con confirmación) | Permitido en ambos: `PATCH 200 → DELETE ítems 204 → DELETE mesa 204`; ya no existe |
+| Barrera de red del arnés | 0 violaciones; ningún acceso fuera del local sintético |
+Pasadas: control 5/5; validación owner + admin + operador 21/24 en la primera pasada, donde los **3 fallos fueron del arnés, no del guard** (el dispositivo del operador arrastraba un turno viejo del local sintético anterior, `sales_shift_id_fkey`); se descartó ese estado local, se abrió un turno real y el bloque del operador se repitió **14/14**.
+**No probado en vivo:** el aislamiento entre locales (un intento fallido contra el local real podría dañar sus 15 mesas): está cubierto en la copia aislada con las definiciones reales (§9.3b, prueba 6) y el catálogo muestra que el guard no cambió ninguna política de otras tablas.
+
+**Limpieza y línea base:** plan del ensayo = inventario previo (`categories 1, open_order_items 4, open_orders 4, operators 1, products 6, sale_payments 1, sales 1, shifts 1, store_users 3` + `sale_items 2` por cascada); el ensayo no cambió nada; limpieza real `CLEANUP_OK`: el local sintético ya no existe, 0 filas suyas en las 17 tablas, 0 locales `ZZ_E2E%`, cada cuenta conserva 1 membresía en «Colo Café Staging». **Línea base posterior vs. previa: 18 de 19 tablas idénticas** (incluidas `open_orders` 41, `open_order_items` 14, `sales` 26, `sale_items` 51 y las 15 mesas abiertas del local real). Única diferencia: `profiles`, por el trigger `auth_users_profile_sync_update` al iniciar sesión las 3 cuentas (sus `updated_at` 19:26:36/39/42 UTC coinciden con los inicios de sesión de la pasada de control, 19:26:34/38/41; 0 escrituras no-GET a `profiles`). Recuperación del cliente: las 3 cuentas vuelven solas a «Colo Café Staging» (rol correcto, 15 mesas, 0 violaciones).
+
+**CAMBIOS PERSISTENTES EN STAGING (exactamente tres objetos, todos en el esquema `public`):**
+1. Función `public.open_order_operador_puede_cerrar(uuid)` — `SECURITY DEFINER`, `search_path = public`, de sólo lectura; ejecutable por `authenticated`, `service_role` y el dueño; **no** por `anon`/`public`.
+2. Política `open_orders_update_guard_operador` — `AS RESTRICTIVE FOR UPDATE TO authenticated`.
+3. Política `open_orders_delete_guard_operador` — `AS RESTRICTIVE FOR DELETE TO authenticated`.
+Ninguna política, tabla, trigger ni función preexistente fue modificada (el catálogo pasó de 54 a 57 filas: 3 nuevas, 0 cambiadas). **Reversión preparada:** `open_orders_operator_guard_rollback.sql` (SHA-256 `c674ce95…829f`; quita esos tres objetos; probada en la copia aislada, que vuelve al esquema idéntico). **Producción:** sin cambios; el guard no se instaló ahí y su instalación requiere autorización expresa.
+
+### 9.3d LIMITACIÓN CONOCIDA de B5 (no resuelta): protección contra errores accidentales ≠ prevención de acciones deliberadas
+**B5 NO está resuelto en cuanto a la prevención de cancelaciones indebidas.** Lo que se logró y lo que no:
+- **Protegido (errores accidentales y usos normales de la app):** la pantalla no ofrece al operador eliminar una mesa con productos; si un cliente (la app, o una petición directa de cierre/borrado) lo intenta, el servidor lo rechaza; el plan B del cliente ya no borra ítems tras un rechazo. Owner y admin conservan sus permisos; el operador sigue cobrando y eliminando mesas vacías.
+- **NO protegido (acciones deliberadas de un operador con conocimientos técnicos):** (a) vaciar los productos con la edición normal del pedido y luego eliminar la mesa ya vacía (no deja rastro); (b) borrar los ítems directamente y luego la fila; (c) fabricar una venta del mismo local a su nombre que apunte a la mesa (deja una venta falsa en el historial). Cerrarlas requeriría un sistema de cancelación con registro (`audit_logs`) y quitarle al operador el borrado directo; **no se implementó ni se amplió el alcance** a eso.
+- **Lectura correcta:** el guard reduce el riesgo de error y de uso indebido «fácil»; **no** es un control de seguridad frente a un operador que quiera cancelar a propósito. Registrado como riesgo residual.
+
 ### 9.4 Versión de la aplicación
 `APP_VERSION`: `2026-07-22-pending-banner-grace` → **`2026-11-25-b5-b7-consolidada`**. Mecanismo real (no hay consulta al servidor ni service worker): al cargar, la app compara la versión guardada en el dispositivo con la suya y, si difieren, muestra «Nueva versión disponible» con botón «Actualizar app». Verificado (`tests/app_version.test.cjs`): un dispositivo con la versión de producción ve el aviso una sola vez; un dispositivo nuevo o ya actualizado no lo ve; la nueva ordena después de la de producción. **Consecuencia a tener presente:** un dispositivo con la app ya abierta no se entera hasta recargar o reabrirla; conviene avisar a los cajeros.
 
 ### 9.5 Riesgos residuales
-1. Revisión Codex hecha, pero la copia SQL usa `has_store_role` simulado y el esquema real de staging no está en el repo: la prueba real en staging sigue pendiente.
-2. El guard del servidor no cierra el camino «vaciar y luego eliminar» ni el `INSERT` manual de ventas (ver 9.3).
+1. El guard de B5 está instalado y validado **sólo en staging**; en producción no existe (instalarlo requiere autorización expresa).
+2. **B5 no previene cancelaciones deliberadas** (vaciar y eliminar, borrar ítems y luego la fila, fabricar una venta): ver §9.3d.
 3. Sin probar: nota escrita por un rol y vista por otro; comandas; impresión; reservas; Reportes con ventas reales; Stock Durability (staging sólo tiene la estructura); producción.
 4. Un dispositivo con la app abierta no ve el aviso de versión hasta recargar.
 5. Los pendientes del cierre de mesa (`retryPendingOpenOrderClosures`) siguen sin espera creciente (fuera de alcance).
 
 ### 9.6 Rollback
 - **Cliente:** volver a publicar `334df6c` (sólo cambia `index.html`; no hay SQL de producción ni formato de colas modificado; B7 sólo agrega campos opcionales `last_error_code` / `_sync_error_code` que versiones anteriores ignoran). Con `APP_VERSION` distinto, los dispositivos verán el aviso también al volver atrás.
-- **Servidor (cuando se aplique):** `open_orders_operator_guard_rollback.sql` quita las 2 políticas y la función; probado en la copia (esquema idéntico al previo).
+- **Servidor (staging, donde ya está instalado):** `open_orders_operator_guard_rollback.sql` quita las 2 políticas y la función (SHA-256 `c674ce95bc29f1e2…`); probado en la copia aislada (esquema idéntico al previo). En producción no hay nada que revertir.
