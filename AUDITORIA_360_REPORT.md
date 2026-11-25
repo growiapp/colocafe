@@ -356,33 +356,54 @@ Codex no ejecutó el navegador (revisión estática); las pruebas las corrí yo.
 
 **Riesgos residuales:** B1–B2 extremos con datos reales de producción no probados; B25 y B26 (roles/nombre de local en cachés) siguen abiertos fuera de «Limpiar»; el panel de Supabase guardó fragmentos de consulta («Untitled query») que no son datos de la base.
 
-## 9. Cierre de la candidata: decisiones B4, B5 y B7 (2026-11-25)
+## 9. Cierre de la candidata: B4, B5, B7 y versión (2026-11-25)
 
-### 9.1 B7 — reintentos de ítems de mesa: **CORREGIDO** (pendiente sólo la revisión Codex)
-**Corrección de mi diagnóstico anterior.** El «~2 peticiones/s» que informé contaba todas las peticiones del arnés. Medido en los logs, los reintentos automáticos de la app son cada **~12 s fijos** (intervalo de Caja) y **no terminan nunca**. El defecto real: sin espera creciente, sin tope y sin distinguir un rechazo permanente del servidor de un corte de red.
+### 9.1 B7 — reintentos de ítems de mesa: **CORREGIDO y verificado**
+**Corrección a mi diagnóstico anterior:** los reintentos reales de la app eran cada ~12 s fijos y no terminaban nunca (los «~2 peticiones/s» contaban todas las peticiones del arnés). Defecto: sin espera creciente, sin tope y sin distinguir un rechazo permanente del servidor de un corte de red.
 
-**Reproducción sin residuos del arnés** (`tests/b7_reintentos.test.cjs`, app real + servidor simulado, reloj adelantado 1 h = 300 ticks):
+**Reproducción sin residuos del arnés** (`tests/b7_reintentos.test.cjs`, app real + servidor simulado, reloj adelantado 1 h):
 
-| Escenario | Antes (`821d04f`) | Después |
+| Escenario (1 hora simulada) | Antes | Después |
 |---|---|---|
-| Red caída 1 hora | **600** envíos al servidor | **6** y se detiene |
+| Red caída | **600** envíos | **6** y se detiene |
 | Rechazo permanente (permiso, 42501) | **600** envíos | **1** y se detiene |
-| Falla corta de red (2 fallos) | se recupera | se recupera sola, sin quedar parada |
-| Conflicto de estado (otro dispositivo) | 0 reenvíos | 0 reenvíos (sin cambios) |
+| Falla corta de red (2 fallos) | se recupera | se recupera sola |
+| Conflicto de estado (otro dispositivo) | 0 reenvíos | 0 reenvíos |
+| Respuesta perdida (el servidor aplicó, la app vio un corte) + 5 reintentos/reconexiones + edición intermedia | — | servidor = pantalla (4 unidades, 1 fila), 0 pendientes |
+| 20 reintentos/reconexiones más tras recuperarse | — | 0 envíos, filas idénticas (idempotencia) |
 
-**Qué cambia (mínimo, no toca el envío):** los reintentos automáticos esperan 12 s → 30 s → 1 min → 2 min → 5 min y paran tras 6 fallos; un rechazo permanente (códigos 42xxx, 23xxx, 22xxx, P0xxx, PGRST1+, 401/403) para de inmediato. **Nada se descarta**: el pendiente queda guardado y «Reintentar» (o volver la conexión, o reiniciar la app) lo reenvía. El cartel dice qué pasó y qué hacer («No pudimos guardar los cambios de Mesa 3… tocá Reintentar cuando haya conexión» / «El servidor rechazó los cambios… avisá al administrador») y desaparece al resolverse. Además se elimina el doble envío por turno (la sync de la mesa ya reenvía sus ítems).
-**Sin duplicados:** el camino de envío no se modificó (ids deterministas / versión base); la prueba verifica que tras Reintentar el servidor queda con exactamente lo de pantalla (1 conjunto de ítems, 0 pendientes).
-**Revisión independiente (Codex): NO realizada.** El clasificador de permisos de Claude Code bloqueó la llamada («Unsanctioned Communication»); no se intentó sortearlo. Quedan pendientes tu aprobación de esa llamada y su ejecución. Mientras tanto, la revisión es propia (casos: edición durante la parada, cambio de cuenta/local, clave local→remota, carrera con la cola de envío).
-**Límite conocido:** el estado de espera vive en memoria; recargar la app lo reinicia (a propósito: es un reintento manual implícito). Los cierres de mesa pendientes (`retryPendingOpenOrderClosures`) no se tocaron.
+**Qué cambia:** espera 12 s → 30 s → 1 min → 2 min → 5 min y tope de 6 fallos automáticos; un rechazo permanente (42xxx, 22xxx, P0xxx, PGRST1/2xx, 23xxx salvo 23505, 403) para de inmediato; la sesión vencida (401/PGRST3xx) y 23505 (carrera entre dispositivos) **no** son permanentes. Nada se descarta: el pendiente queda guardado y «Reintentar» (o volver la conexión, o reiniciar) lo reenvía. Mensajes claros al cajero («No pudimos guardar… tocá Reintentar cuando haya conexión» / «El servidor rechazó… avisá al administrador»), que desaparecen al resolverse. **No se modificó el camino de envío** (ids deterministas / versión base): no hay duplicados.
+
+**Revisiones independientes (dos, coincidentes):**
+- **Codex** (por la vía oficial del agente `codex:codex-rescue`, sin tocar permisos; en el primer intento el clasificador de permisos lo había bloqueado y en el segundo corrió en modo solo lectura): 3 hallazgos medios, ninguno en el SQL.
+- **Revisión nativa independiente** (agente sin contexto previo): 2 defectos + 4 menores, ninguno en el SQL.
+- **Todos verificados y corregidos con prueba:** (1) fallos contados sin haber intentado (mesa cobrada con cierre pendiente → mensaje falso tras ~9 min); (2) «Reintentar» manual durante un turno automático no reiniciaba nada; (3) sesión vencida tratada como rechazo permanente; (4) rechazo 42501 de crear/actualizar la mesa clasificado como corte de red; (5) el cartel ocultaba otros errores mientras hubiera una mesa detenida; (6) fallo contado a una edición aparecida durante la espera. **Dos probados que fallan en la versión anterior** (sesión vencida y Reintentar durante turno en curso).
+- **Límites conocidos:** el estado de espera vive en memoria (recargar reinicia, a propósito); una mesa detenida no se reinicia sola con una edición nueva que vuelva a fallar (el cartel lo explica); la ruta de reemplazo sin función versionada (`delete+insert`) no se cubrió con el simulador; los cierres de mesa pendientes (`retryPendingOpenOrderClosures`) no se tocaron.
 
 ### 9.2 B4 — «Limpiar historial»
-Decisión aprobada: sólo owner/admin del local activo y nunca con turno abierto. **Ya estaba implementado y probado** (`tests/ola2_riesgos.test.cjs`: operador, rol sin resolver y sin sesión no pueden; con turno abierto tampoco; el botón se oculta).
+Decisión: sólo owner/admin del local activo y nunca con turno abierto. Ya estaba implementado y probado (operador, rol sin resolver y sin sesión no pueden; con turno abierto tampoco; el botón se oculta).
 
-### 9.3 B5 — eliminar mesas: política aprobada vs. cambios de servidor
-**Política comercial aprobada (implementada en el cliente, sin SQL/RLS):** con sesión, el operador sólo elimina mesas **vacías**; con productos, el aviso dice «pedí a un administrador que la cancele». Owner y admin pueden con productos (con la confirmación ya existente). Sin sesión (modo local) no cambia. Prueba: `B5 política` en `ola2_riesgos`.
+### 9.3 B5 — eliminar mesas: política y servidor
+**Política aprobada:** operador = sólo mesas vacías; owner/admin = también con productos, con confirmación.
+**Cliente (implementado):** con sesión, el operador no elimina una mesa con productos («pedí a un administrador que la cancele»). **Corregí además un hueco que encontré al diseñar el servidor:** si el servidor rechazaba el cierre de una eliminación, el «plan B» del cliente borraba igual los ítems y la fila; ahora ese plan B sólo corre para cobros ya registrados.
+**Servidor (DISEÑADO Y PROBADO EN COPIA AISLADA; NO ejecutado en staging ni producción):** `open_orders_operator_guard.sql` (+ `..._rollback.sql`).
+- **Inspección previa (repo):** políticas `open_orders_*_ops` (owner/admin/operator pueden todo), RPC `replace_open_order_items` (SECURITY INVOKER: borra ítems con los permisos del operador), trigger `trg_close_open_order_after_sale` (SECURITY DEFINER: cierra la mesa al registrar la venta), FK en cascada hacia ítems y comandas. Las definiciones vigentes en staging **no se volvieron a leer** (requiere SQL en staging: pendiente de tu autorización); la copia usa el texto de los `.sql` del repo y un `has_store_role` simulado.
+- **Diseño mínimo:** dos políticas **RESTRICTIVAS** (se combinan con AND con las vigentes, sin depender de sus nombres, sin tocarlas) y una función auxiliar `open_order_operador_puede_cerrar(id)` (SECURITY DEFINER, sólo lectura: «sin ítems o ya cobrada»). El operador no puede **cerrar** (UPDATE a no-`open`) ni **borrar** una mesa `open` con ítems y sin venta; owner/admin no cambian. Falla de forma segura (aborta sin cambiar nada) si falta `has_store_role` u otra pieza.
+- **Por qué no se bloquea el borrado de ítems:** la edición normal del pedido los borra con permisos del operador (RPC). Bloquearlo rompería la edición.
+- **Verificado en la copia (8 pruebas, `tests/b5_servidor_rls.test.cjs`):** antes del guard el operador cancela mesas con productos; después no (ni directo ni con el flujo de la app); sí elimina vacías; owner/admin eliminan con productos; **el cobro del operador sigue funcionando** (venta → trigger cierra → ítems → fila), incluido el cierre tardío de una mesa ya cobrada; la edición de ítems por la RPC (incluso vaciar), las comandas (cascada) y otro local siguen igual; el cambio **agrega sólo 2 políticas y 1 función**, sin triggers ni nada de `stock_*` (Stock Durability intacto), es idempotente y la reversa deja el esquema idéntico.
+- **LÍMITE (importante):** un operador puede quitar los productos uno a uno (edición normal) y luego eliminar la mesa ya vacía; el servidor no puede distinguirlo de editar el pedido. Cerrarlo del todo exigiría una función de cancelación con registro en `audit_logs` y quitar el borrado directo al operador (diseño mayor, no incluido). Un `INSERT` manual en `sales` con `open_order_id` también la saltearía (requiere una petición a medida).
+- **Para aplicarlo (necesita tu autorización específica):** 1) leer en staging las políticas vigentes de `open_orders` (`politicas_rls.sql`, sólo lectura); 2) ejecutar el guard en staging; 3) repetir el ciclo corto (operador con mesa con productos / vacía; cobro del operador; admin). Producción sólo después.
 
-**Lo que requiere un cambio de servidor y NO se hizo (alcance a autorizar):** hoy el servidor deja al operador borrar `open_orders`/`open_order_items` (políticas RLS vigentes), así que la regla anterior sólo se hace cumplir **en la interfaz**: un operador con herramientas de desarrollo podría saltearla. Para hacerla cumplir de verdad y dar la cancelación «autorizada y trazable» haría falta, en staging primero:
-1. Cambiar la política `DELETE` de `open_orders`/`open_order_items` para que el operador sólo borre pedidos sin ítems.
-2. Una función `cancelar_pedido(id, motivo)` (SECURITY DEFINER) sólo para owner/admin que registre la cancelación en `audit_logs` (hoy la app no lo usa) con usuario, mesa, ítems, total y motivo, y borre el pedido.
-3. Que la app llame a esa función para mesas con productos (cliente + prueba E2E en staging).
-No se implementó nada de esto: queda a la espera de tu autorización de alcance.
+### 9.4 Versión de la aplicación
+`APP_VERSION`: `2026-07-22-pending-banner-grace` → **`2026-11-25-b5-b7-consolidada`**. Mecanismo real (no hay consulta al servidor ni service worker): al cargar, la app compara la versión guardada en el dispositivo con la suya y, si difieren, muestra «Nueva versión disponible» con botón «Actualizar app». Verificado (`tests/app_version.test.cjs`): un dispositivo con la versión de producción ve el aviso una sola vez; un dispositivo nuevo o ya actualizado no lo ve; la nueva ordena después de la de producción. **Consecuencia a tener presente:** un dispositivo con la app ya abierta no se entera hasta recargar o reabrirla; conviene avisar a los cajeros.
+
+### 9.5 Riesgos residuales
+1. Revisión Codex hecha, pero la copia SQL usa `has_store_role` simulado y el esquema real de staging no está en el repo: la prueba real en staging sigue pendiente.
+2. El guard del servidor no cierra el camino «vaciar y luego eliminar» ni el `INSERT` manual de ventas (ver 9.3).
+3. Sin probar: nota escrita por un rol y vista por otro; comandas; impresión; reservas; Reportes con ventas reales; Stock Durability (staging sólo tiene la estructura); producción.
+4. Un dispositivo con la app abierta no ve el aviso de versión hasta recargar.
+5. Los pendientes del cierre de mesa (`retryPendingOpenOrderClosures`) siguen sin espera creciente (fuera de alcance).
+
+### 9.6 Rollback
+- **Cliente:** volver a publicar `334df6c` (sólo cambia `index.html`; no hay SQL de producción ni formato de colas modificado; B7 sólo agrega campos opcionales `last_error_code` / `_sync_error_code` que versiones anteriores ignoran). Con `APP_VERSION` distinto, los dispositivos verán el aviso también al volver atrás.
+- **Servidor (cuando se aplique):** `open_orders_operator_guard_rollback.sql` quita las 2 políticas y la función; probado en la copia (esquema idéntico al previo).
