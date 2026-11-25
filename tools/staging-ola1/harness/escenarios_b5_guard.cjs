@@ -10,6 +10,7 @@ const H = require('./escenarios_ola1.cjs');
 const {CUENTAS, PERFILES, res, identidades, capturas, reg, shot, verificarEntorno, cambiarAlSintetico, instalarCaptura, desde, nuevaMesa, abrirTurno, cobrar, evaluarCobro} = H;
 const FASE = process.env.B5_FASE || 'despues';
 const SOLO = (process.env.B5_SOLO || 'owner,admin,caja').split(',');
+const TAG = process.env.B5_TAG || '';   // sufijo para repetir un bloque sin chocar con mesas de una pasada anterior
 
 // Operaciones DIRECTAS contra el servidor con la sesión de la página (lo que haría un cliente a medida): cerrar y borrar la mesa; después se LEE el estado real.
 const directo = (d, id) => d.page.evaluate(async ({id, store}) => {
@@ -28,14 +29,19 @@ const estadoServidor = (d, id) => d.page.evaluate(async ({id, store}) => {
 }, {id, store: FIXTURE_STORE});
 const idDeMesa = (d, nombre) => d.page.evaluate(n => { const m = (window.mesas || mesas || []).find(x => x.nombre === n); return m ? String(m._sb_id || '') : ''; }, nombre);
 
+async function turnoReal(d) {   // un turno 'Sin confirmar' es residuo de un local sintético anterior ya eliminado: se descarta SOLO el estado local del dispositivo de prueba
+  const t = await d.page.$eval('#ctx-turno .ctx-v', e => e.textContent.trim()).catch(() => '');
+  if (/Sin confirmar/i.test(t)) { await d.page.evaluate(() => { turno = null; save(); if (typeof renderTurnoPill === 'function') renderTurnoPill(); }); await d.page.waitForTimeout(800); reg(d.cuenta, 'Turno residual (sin confirmar) de un local anterior descartado en el dispositivo de prueba', null, t); }
+}
 async function operador(d, cuenta) {
   const p = d.page;
+  await turnoReal(d);
   await abrirTurno(d, cuenta);
   // (1) mesa con productos: operaciones directas
   let falla = await verificarEntorno(d, cuenta); if (falla) { reg(cuenta, 'Verificación previa a escribir', false, falla); return; }
-  await nuevaMesa(d, 'ZZ-B5-CONITEMS', [['ZZE2E Cien', 2]]);
+  await nuevaMesa(d, `ZZ-B5-CONITEMS${TAG}`, [['ZZE2E Cien', 2]]);
   await p.waitForTimeout(2500);
-  const id = await idDeMesa(d, 'ZZ-B5-CONITEMS');
+  const id = await idDeMesa(d, `ZZ-B5-CONITEMS${TAG}`);
   const antes = id ? await estadoServidor(d, id) : null;
   reg(cuenta, 'Mesa con productos creada y sincronizada en el servidor (control previo)', !!id && antes && antes.existe === 1 && antes.items >= 1, JSON.stringify(antes));
   if (!id || !antes || antes.existe !== 1) return;
@@ -47,22 +53,22 @@ async function operador(d, cuenta) {
   reg(cuenta, 'Operador: CIERRE directo de una mesa con productos RECHAZADO', r.cierre.filas === 0 && (!!r.cierre.error || r.cierre.filas === 0), JSON.stringify(r.cierre));
   reg(cuenta, 'Operador: BORRADO directo de una mesa con productos RECHAZADO (la mesa y sus ítems siguen en el servidor)', luego.existe === 1 && luego.status === 'open' && luego.items === antes.items, `borrado=${JSON.stringify(r.borrado)} · después existe=${luego.existe} estado=${luego.status} ítems=${luego.items}/${antes.items}`);
   // la interfaz tampoco lo intenta (política B5 del cliente)
-  const c0 = capturas.length; const card = p.locator('.mesa-card', {hasText: 'ZZ-B5-CONITEMS'}).first();
+  const c0 = capturas.length; const card = p.locator('.mesa-card', {hasText: `ZZ-B5-CONITEMS${TAG}`}).first();
   await card.locator('.mesa-close').click().catch(() => {}); await p.waitForTimeout(1500);
   const modal = await p.$eval('#modal-confirm', e => e.classList.contains('open')).catch(() => false);
   reg(cuenta, 'Operador: la interfaz no ofrece eliminar una mesa con productos (aviso, sin pedir confirmación ni escribir)', !modal && !desde(c0).some(c => ['DELETE', 'PATCH'].includes(c.m) && /open_orders/.test(c.t)), `confirmación abierta=${modal}`);
   if (modal) await p.locator('#modal-confirm button:has-text("Cancelar"), #modal-confirm .btn-cancel').first().click().catch(() => {});
   // (2) mesa VACÍA: eliminación permitida
   falla = await verificarEntorno(d, cuenta); if (falla) { reg(cuenta, 'Verificación previa a escribir', false, falla); return; }
-  await nuevaMesa(d, 'ZZ-B5-VACIA', []);
+  await nuevaMesa(d, `ZZ-B5-VACIA${TAG}`, []);
   await p.waitForTimeout(1500);
-  const idV = await idDeMesa(d, 'ZZ-B5-VACIA'), c1 = capturas.length;
-  const x = p.locator('.mesa-card', {hasText: 'ZZ-B5-VACIA'}).first().locator('.mesa-close');
+  const idV = await idDeMesa(d, `ZZ-B5-VACIA${TAG}`), c1 = capturas.length;
+  const x = p.locator('.mesa-card', {hasText: `ZZ-B5-VACIA${TAG}`}).first().locator('.mesa-close');
   await x.click(); await p.waitForSelector('#modal-confirm.open', {timeout: 8000}); await p.locator('#confirm-btn-ok').click(); await p.waitForTimeout(5000);
   const ev = desde(c1), est = idV ? await estadoServidor(d, idV) : {existe: -1};
   reg(cuenta, 'Operador: ELIMINAR una mesa vacía permitido (cierre, borrado de ítems y de la fila sin errores; ya no existe en el servidor)', ev.some(c => c.m === 'DELETE' && c.t === 'open_orders' && c.estado < 300) && ev.every(c => !c.estado || c.estado < 400) && est.existe === 0, `${ev.map(c => c.m + ' ' + c.t + ' ' + c.estado).join(' | ')} · existe=${est.existe}`);
   // (3) cobro legítimo y cierre posterior
-  const rc = await cobrar(d, cuenta, `EF_${cuenta}`, `ZZ-B5-COBRO-${cuenta}`, [['ZZE2E Cafe', 1], ['ZZE2E Medialuna', 1]], {medio: 'ef'});
+  const rc = await cobrar(d, cuenta, `EF_${cuenta}`, `ZZ-B5-COBRO-${cuenta}${TAG}`, [['ZZE2E Cafe', 1], ['ZZE2E Medialuna', 1]], {medio: 'ef'});
   if (rc) {
     evaluarCobro(cuenta, `EF_${cuenta}`, rc, 3100);
     const cierres = rc.escrituras.filter(c => ['PATCH', 'DELETE'].includes(c.m) && /open_order/.test(c.t));
@@ -73,7 +79,7 @@ async function operador(d, cuenta) {
 async function adminOwner(d, cuenta) {
   const p = d.page, falla = await verificarEntorno(d, cuenta);
   if (falla) { reg(cuenta, 'Verificación previa a escribir', false, falla); return; }
-  const nombre = `ZZ-B5-DEL-${cuenta}`;
+  const nombre = `ZZ-B5-DEL-${cuenta}${TAG}`;
   await nuevaMesa(d, nombre, [['ZZE2E Cien', 2]]); await p.waitForTimeout(2500);
   const id = await idDeMesa(d, nombre), antes = id ? await estadoServidor(d, id) : null;
   reg(cuenta, 'Mesa con productos creada y sincronizada en el servidor', !!id && antes && antes.existe === 1 && antes.items >= 1, JSON.stringify(antes));
@@ -105,7 +111,7 @@ async function adminOwner(d, cuenta) {
       const falla = await verificarEntorno(d, cuenta);
       if (falla) { reg(cuenta, 'Verificación previa a escribir (proyecto, URL, usuario, rol, local)', false, falla); await d.ctx.close(); continue; }
       reg(cuenta, 'Verificación previa a escribir (proyecto, URL, usuario, rol, local)', true, `fase=${FASE} usuario=${CUENTAS[cuenta].user8} rol=${CUENTAS[cuenta].rol} local=sintético`);
-      if (cuenta === 'caja') await operador(d, cuenta); else { await abrirTurno(d, cuenta); await adminOwner(d, cuenta); }
+      if (cuenta === 'caja') await operador(d, cuenta); else { await turnoReal(d); await abrirTurno(d, cuenta); await adminOwner(d, cuenta); }
     } catch (e) { reg(cuenta, 'Recorrido', false, e.message.split('\n')[0]); await shot(d, 'b5_error'); }
     reg(cuenta, 'Sin violaciones de la barrera de red (escrituras sólo al local sintético)', d.state.violations.length === 0, d.state.violations.slice(0, 4).join(' | '));
     await d.ctx.close();
