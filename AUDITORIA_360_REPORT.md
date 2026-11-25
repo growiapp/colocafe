@@ -55,6 +55,26 @@ Cada afirmación lleva su nivel de evidencia:
 
 **Límite caracterizado:** las escrituras de comandas (`open_order_dispatches`) y reservas no están en la política (las de reservas se deniegan a propósito). Ampliación mínima propuesta si se quiere probarlas: `POST open_order_dispatches` con `store_id` sintético y `open_order_id` de mesa de la prueba, mismo patrón que arriba.
 
+### 3.1b Preflight de staging (sólo lectura) — **STAGING, ejecutado**
+
+Entorno recuperado: el formulario local de la clave devolvía `ERR_BLOCKED_BY_CLIENT` porque el arnés bloqueaba **todo POST a su propio servidor** y el formulario se envía por POST (reproducido con un autotest y corregido permitiendo únicamente `POST /__setup` desde la ventana «setup»; un POST a otra ruta sigue bloqueado). También se corrigió el websocket `wss://` de realtime, que se bloqueaba siempre por comparar contra `https://`. Se acepta la clave pública *anon* clásica (JWT con `ref` y rol verificables) o la *publishable*; nunca service_role ni secret.
+
+Resultado, tres cuentas con sesión real (barrera de sólo lectura, evidencia fuera del repo):
+
+| Perfil (ventana) | Cuenta (usuario) | Proyecto | Local activo | Rol en el local |
+|---|---|---|---|---|
+| `owner` | `7cd84c4f…` | `wjymdgfqmqutihadffec` (staging) | `89401a44…` «Colo Café Staging» | **owner** |
+| `caja` | `eef11ffb…` | staging | idem | **admin** |
+| `admin` | `48075b31…` | staging | idem | **operator** |
+
+Las ventanas `caja` y `admin` quedaron intercambiadas por la persona; no importa, se identifica a cada cuenta por su usuario.
+
+- **Datos preexistentes:** el local «Colo Café Staging» tiene **15 mesas abiertas reales de staging**. Ninguna prueba debe tocarlas: por eso el plan sigue siendo un local sintético aparte (fixtures) y no reutilizar este.
+- **Red:** todo el tráfico fue sólo a staging; **cero conexiones a producción**; **ninguna escritura**. 6 lecturas de `sales` por cuenta se bloquearon por la política del arnés (filtros repetidos y una cabecera no permitida): falla en modo seguro; **limita lo que se podrá validar de Reportes** hasta ampliar la política de lectura (ampliación mínima propuesta: permitir `GET sales` con los filtros de rango de fecha repetidos y la cabecera `Range`; no escribe nada).
+- **`manifest.json` responde 500** en el servidor del arnés (hash distinto por CRLF del archivo en disco): sólo afecta al manifiesto PWA, sin impacto en la prueba.
+- **B23 (STAGING):** las tres sesiones guardan su credencial en `localStorage` bajo `sb-wjymdg…-auth-token`, o sea que la **hipótesis queda confirmada**: el respaldo local la habría incluido sin la redacción de B23.
+- **B4 (STAGING) — regresión mía hallada aquí:** la primera versión del guard de «Limpiar» leía `window.supabaseStores`, una variable que la app **no publica** (`index.html:8943`), por lo que habría negado a **todos, dueño incluido**. Mis pruebas la inyectaban a mano y no lo vieron. Corregido en `9ce1879` con `getActiveStoreRoleEstricto()` (lee la variable real de la sesión, sin caer al primer local). Verificado con sesiones reales: rol estricto `owner`/`admin`/`operator` y `puedeLimpiarHistorial` = **true / true / false**. Además se confirmó **B26**: `window.getActiveStoreRole()` devuelve vacío en las tres cuentas.
+
 ### 3.2 Fase 2: validación funcional en staging — **NO EJECUTADA**
 
 Bloqueo real: requiere (a) la clave anon pública de staging y las contraseñas de las tres cuentas tipeadas por la persona en ventanas locales, y (b) que la persona ejecute `fixtures.sql` en el SQL Editor (y `cleanup.sql` al final, con su autorización explícita). El guion está listo (`harness/escenarios_ola1.cjs`): verifica proyecto, URL, usuario, rol y local **antes de escribir** y aborta la cuenta si algo no coincide; mide violaciones de red; registra por rol (owner, admin, operator) y dispositivo (escritorio 1280×800, móvil 390×844). **No se ha corrido ni una vez contra staging, y su primera ejecución puede requerir ajustes de selectores.**
@@ -142,6 +162,7 @@ B1, B2, B4, B5, B23 (§4) y el foco al repintar tarjetas (§2).
 | **S1** | **Verificar en staging** lo corregido y las cinco mejoras (rol por rol) | — | M |
 | **S2** | **Confirmar RLS desplegado** con `politicas_rls.sql` (qué roles escriben notas/borran mesas; restricción de precio) | CÓDIGO sólo del repo | S |
 | B6 | SDK de Supabase por CDN con `@2` flotante y sin SRI (`index.html:103`) | CÓDIGO | S · **D (infra)** |
+| **B26** | `window.getActiveStore()` / `getActiveStoreRole()` leen `window.supabaseStores`, que la app no publica: devuelven rol vacío siempre (confirmado con sesiones reales de staging). Sus llamadores caen a otras fuentes (`catalogCurrentRole`, `getSupabaseActiveRole`), así que hoy no rompe lo visible, pero engaña a cualquier código nuevo que confíe en ellas | STAGING | S |
 | **B25** | **`getSupabaseActiveRole()` cae al rol del primer local si el local activo no tiene rol** (`index.html:8497-8505`); lo usan `isSupabaseAdminRole`, `puedeEditarCatalogo`, `canShowSupabaseTechnicalUi` y otros: la UI puede mostrar acciones de administración a quien no lo es en el local activo. El servidor (RLS por local) sigue siendo la barrera real. Hallazgo nuevo de la revisión independiente; sólo se corrigió en Limpiar | CÓDIGO | S–M · riesgo medio (muchos llamadores) |
 | B3 | Reservas: editar fuerza `estado:'pendiente'`; admite fecha pasada; sin cancelar | CÓDIGO (7077 verificado) | S–M · **D** |
 | B11 | Comprobante post-cobro se imprime aunque la venta no esté confirmada (el historial sí lo bloquea) | CÓDIGO | S |
