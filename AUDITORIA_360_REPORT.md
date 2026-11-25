@@ -59,8 +59,12 @@ Veredicto de Codex: *needs-attention*, dos hallazgos medios, ambos **defectos re
 - El repintado de Cobrar (p. ej. al llegar la lectura de operadores) sacaba el foco del campo «Paga con» → se conserva foco y selección; prueba con lectura demorada.
 - Enter/Espacio en un filtro repintado perdía el foco → se restaura al mismo lugar; prueba con activaciones consecutivas.
 
-No hubo hallazgos de XSS, fuga de estado entre cobros ni de `display:block` en otros flujos. Codex avisó que no pudo ejecutar Chromium en su entorno (EPERM): **su revisión fue estática**; las pruebas de navegador las corrí yo. No se ejecutó además la revisión nativa `/code-review`.
+No hubo hallazgos de XSS, fuga de estado entre cobros ni de `display:block` en otros flujos. Codex avisó que no pudo ejecutar Chromium en su entorno (EPERM): **su revisión fue estática**; las pruebas de navegador las corrí yo.
+
+Revisión nativa (`/code-review medium`): 5 observaciones. Corregidas 3 (centavos en «Justo», `aria-expanded` inicial, zona táctil del × con mouse reducida a 32 px). Descartadas 2 como ruido: Espacio sobre pills (comportamiento estándar de botón) y recorte del encabezado móvil (`.ctx-k` está oculto; la captura lo muestra sin recorte). La prueba O6 solo es roja de forma demostrada en su parte de `aria-expanded`; el caso de centavos se cubre con un total simulado de 12400,4 y no se probó en rojo por separado.
 
 ## E. Dictamen
 
-Ver el cierre del mensaje (depende del resultado de la suite final).
+**CANDIDATE_VERIFIED**, con una reserva: validada en local (190/190 pruebas, rojo→verde en las nuevas, revisión de Codex y nativa resueltas), **sin pasada en staging**. Commits: `f338bce`, `341a762`, `a8b69d0`.
+
+Flakiness observada: `F4 … (transferencia)` agotó su tiempo una vez cuando corrió junto a otra revisión; aislada pasó 3/3 y en la corrida completa sin competencia pasó.
