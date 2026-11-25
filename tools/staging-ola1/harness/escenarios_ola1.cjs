@@ -6,11 +6,13 @@ const fs = require('node:fs'), path = require('node:path');
 const {openDevice, frozenServer, saveAudit, EVID, STAGING} = require('./lib.cjs');
 const {FIXTURE_STORE} = require('./policy.cjs');
 const CUENTAS = {owner: {user8: '7cd84c4f', rol: 'owner'}, admin: {user8: 'eef11ffb', rol: 'admin'}, caja: {user8: '48075b31', rol: 'operator'}};
-const SOLO = (process.env.OLA1_SOLO || 'owner,admin,caja').split(',');
+const SOLO = (process.env.OLA1_SOLO || 'owner,admin,caja').split(',');   // filtro por CUENTA (owner, admin, caja=operador), no por nombre de ventana
+const PERFILES = ['owner', 'admin', 'caja'];                              // perfiles de navegador; qué cuenta tiene cada uno se descubre por su usuario
+const identidades = {};
 const ESC = {width: 1280, height: 800}, MOV = {width: 390, height: 844};
 const res = []; // {cuenta, dispositivo, flujo, ok, detalle}
 const reg = (cuenta, dispositivo, flujo, ok, detalle = '') => { res.push({cuenta, dispositivo, flujo, ok: !!ok, detalle: String(detalle).slice(0, 300)}); console.log(`${ok ? 'OK ' : 'FALLA'} [${cuenta}/${dispositivo}] ${flujo}${detalle ? ' · ' + String(detalle).slice(0, 160) : ''}`); };
-const shot = (d, nombre) => d.page.screenshot({path: path.join(EVID, `${d.name}_${nombre}.png`)}).catch(() => {});
+const shot = (d, nombre) => d.page.screenshot({path: path.join(EVID, `${d.cuenta || d.name}_${nombre}.png`)}).catch(() => {});   // evidencia nombrada por CUENTA autenticada, no por la ventana
 
 // Verificación previa de escritura (proyecto, URL, usuario, rol, local). Devuelve null si todo coincide.
 async function verificarEntorno(d, esperado) {
@@ -146,16 +148,23 @@ async function recorridoMovil(d, cuenta) {
   const {server, origin} = await frozenServer();
   const audit = [];
   const credencialesEnLocalStorage = {};
-  for (const cuenta of SOLO) {
-    const d = await openDevice(cuenta, {origin, audit, mode: 'fixture', fixtureStore: FIXTURE_STORE, activeStore: FIXTURE_STORE, headless: true});
+  for (const perfil of PERFILES) {
+    const d = await openDevice(perfil, {origin, audit, mode: 'fixture', fixtureStore: FIXTURE_STORE, activeStore: FIXTURE_STORE, headless: true});
+    let cuenta = perfil;
     try {
       await d.page.goto(`${origin}/`);
       await d.page.waitForFunction(() => typeof window.__sesionUserId === 'function' && !!window.__sesionUserId(), null, {timeout: 30000});
+      const user8 = (await d.page.evaluate(() => String(window.__sesionUserId())).catch(() => '')).slice(0, 8);
+      cuenta = Object.keys(CUENTAS).find(k => CUENTAS[k].user8 === user8);
+      identidades[perfil] = {user8, cuenta: cuenta || 'DESCONOCIDA'};
+      if (!cuenta) { reg(perfil, 'escritorio', 'Identidad de la sesión', false, `el usuario ${user8} no corresponde a ninguna cuenta esperada`); await d.ctx.close(); continue; }
+      if (!SOLO.includes(cuenta)) { await d.ctx.close(); continue; }
+      d.cuenta = cuenta;
       await d.page.waitForFunction(() => document.querySelectorAll('#ctx-local .ctx-v').length && !/Cargando/.test(document.querySelector('#ctx-local .ctx-v').textContent), null, {timeout: 30000}).catch(() => {});
       await d.page.waitForTimeout(3000);
       const falla = await verificarEntorno(d, CUENTAS[cuenta]);
       if (falla) { reg(cuenta, 'escritorio', 'Verificación previa a escribir', false, falla); await d.ctx.close(); continue; }
-      reg(cuenta, 'escritorio', 'Verificación previa a escribir (proyecto, URL, usuario, rol y local)', true, `rol=${CUENTAS[cuenta].rol}`);
+      reg(cuenta, 'escritorio', 'Verificación previa a escribir (proyecto, URL, usuario, rol y local)', true, `perfil=${perfil} usuario=${CUENTAS[cuenta].user8} rol=${CUENTAS[cuenta].rol}`);
       await shot(d, 'caja_escritorio');
       await recorridoTeclado(d, cuenta);
       if (cuenta === 'owner') await recorridoCobros(d);
@@ -177,7 +186,7 @@ async function recorridoMovil(d, cuenta) {
     await d.ctx.close();
   }
   saveAudit(audit, 'network_ola1.jsonl');
-  fs.writeFileSync(path.join(EVID, 'resultados_ola1.json'), JSON.stringify({res, credencialesEnLocalStorage}, null, 1));
+  fs.writeFileSync(path.join(EVID, 'resultados_ola1.json'), JSON.stringify({identidades, res, credencialesEnLocalStorage}, null, 1));
   console.log(`\n${res.filter(r => r.ok).length}/${res.length} comprobaciones OK`);
   server.close();
 })().catch(e => { console.error('ESCENARIOS_FALLARON', e.message); process.exit(1); });
