@@ -155,7 +155,7 @@ async function bloqueEliminar(d, cuenta) {
         r = await cobrar(d, cuenta, `MX_${cuenta}`, `ZZ-MX-${cuenta}`, [['ZZE2E Jugo', 1], ['ZZE2E Cien', 1]], {medio: 'mixed', mixEf: 1000, mixTr: 1700});
         if (r) { reg(cuenta, 'Mixto: sin cálculo de vuelto', r.obs.sinVuelto === true, ''); evaluarCobro(cuenta, `MX_${cuenta}`, r, 2700); }
         r = await cobrar(d, cuenta, `CTV_${cuenta}`, `ZZ-CTV-${cuenta}`, [['ZZE2E Cien', 1]], {medio: 'ef', descuentoPct: 12.5, justo: true});
-        if (r) { reg(cuenta, 'Centavos (12,5 % sobre $100 = 87,5): «Justo» sin faltante', /^Vuelto \$0$/.test(r.obs.justo || ''), `mostrado=${fm(r.total)} · ${r.obs.justo}`); evaluarCobro(cuenta, `CTV_${cuenta}`, r, 87.5); }
+        if (r) { reg(cuenta, 'Descuento 12,5 % sobre $100 (la app redondea a pesos enteros: total $87): «Justo» sin faltante', /^Vuelto \$0$/.test(r.obs.justo || ''), `mostrado=${fm(r.total)} · ${r.obs.justo}`); evaluarCobro(cuenta, `CTV_${cuenta}`, r, 87); }   // la app redondea el descuento a pesos enteros: 12,5 % de $100 = $12,50 → $13 → total $87
       }
       if (BLOQUES.includes('eliminar')) await bloqueEliminar(d, cuenta);
     } catch (e) { reg(cuenta, 'Recorrido', false, e.message.split('\n')[0]); await shot(d, 'error'); }

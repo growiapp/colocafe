@@ -243,4 +243,13 @@ function entradaAuditable({headers = {}, body = null, mode, fixtureStore}) {
   for (const [k,v] of Object.entries(headers)) h[k.toLowerCase()] = CABECERAS_SECRETAS.test(k) ? '[REDACTED]' : String(v);
   return {mode, fixtureStore, headers:h, cuerpo:body === null || body === undefined ? null : proyectarCuerpo(body)};
 }
-module.exports = {entradaAuditable, reconstruirCuerpo, decidirAccesoStaging, alcanceEscritura, storeOfWrite, ESCRITURAS_REST, DENEGADAS_REGISTRADAS, IDENTIDAD_FIXTURE, FIXTURE_STORE, STAGING_ORIGIN};
+// Ids de pedidos que ESTA prueba creó en el local sintético: un POST a open_orders cuyo cuerpo (la petición, no la respuesta) lleva store_id = local sintético.
+// (La app pide ?select=id: la respuesta no trae store_id, por eso se mira la petición.) Se usa para permitir luego rpc/replace_open_order_items y DELETE open_orders de ESAS mesas.
+function idsDePedidoCreado({metodo, pathname, postData, status, filas, fixtureStore}) {
+  if (metodo !== 'POST' || pathname !== '/rest/v1/open_orders' || !(status < 300) || !fixtureStore) return [];
+  let cuerpo; try { cuerpo = JSON.parse(postData || 'null'); } catch (_) { return []; }
+  const pedidas = Array.isArray(cuerpo) ? cuerpo : [cuerpo];
+  if (!pedidas.length || pedidas.some(r => !r || r.store_id !== fixtureStore)) return [];
+  return (Array.isArray(filas) ? filas : [filas]).map(r => r && r.id).filter(id => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id));
+}
+module.exports = {idsDePedidoCreado, entradaAuditable, reconstruirCuerpo, decidirAccesoStaging, alcanceEscritura, storeOfWrite, ESCRITURAS_REST, DENEGADAS_REGISTRADAS, IDENTIDAD_FIXTURE, FIXTURE_STORE, STAGING_ORIGIN};

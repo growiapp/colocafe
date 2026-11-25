@@ -2,7 +2,7 @@
 // Harness E2E de Stock Durability. Sirve index.html congelado y aísla la red. No contiene ni registra secretos.
 const fs = require('node:fs'), http = require('node:http'), path = require('node:path'), crypto = require('node:crypto');
 const {execFileSync} = require('node:child_process');
-const {decidirAccesoStaging, entradaAuditable} = require('./policy.cjs');
+const {decidirAccesoStaging, entradaAuditable, idsDePedidoCreado} = require('./policy.cjs');
 const {manejarRetencion} = require('./barrier.cjs');
 const {cargarPlaywright} = require('./deps.cjs');
 const {negativaAutorizada} = require('./matriz.cjs');
@@ -129,7 +129,7 @@ async function openDevice(name, {origin, audit, mode = 'readonly', fixtureStore 
     }
     log(e);
     if (url.pathname === '/rest/v1/open_orders' && res.status() < 300 && fixtureStore) {
-      try { const rows = await res.json(); (Array.isArray(rows) ? rows : [rows]).forEach(r => { if (r?.id && r.store_id === fixtureStore) fixtureOrders.add(r.id); }); } catch (_) {}
+      try { const rows = await res.json(); idsDePedidoCreado({metodo:req.method(), pathname:url.pathname, postData:req.postData(), status:res.status(), filas:rows, fixtureStore}).forEach(id => fixtureOrders.add(id)); } catch (_) {}
     }
   })().catch(e => state.violations.push(`EVENTO_RESPONSE:${e.message}`)); state.pendingEvents.add(pendiente); pendiente.then(() => state.pendingEvents.delete(pendiente)); });
   await ctx.addInitScript(({url, key, activeStore, name}) => {

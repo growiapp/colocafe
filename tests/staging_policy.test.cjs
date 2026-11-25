@@ -54,3 +54,14 @@ for (const [nombre, q, o] of [
   ['producción', `${BASE_Q}&business_date=gte.2026-11-25&business_date=lte.2026-11-25`, {base: 'https://xhtpahjsddfkwsytubgu.supabase.co'}],
   ['cabecera desconocida', `${BASE_Q}`, {h: {'x-otra': '1'}}],
 ]) test(`lectura se BLOQUEA: ${nombre}`, () => assert.equal(permitido(lectura(q, o || {})), false, JSON.stringify(lectura(q, o || {}))));
+
+// ── Registro de los pedidos que la propia prueba crea (la respuesta de la app trae solo el id: ?select=id) ──
+const {idsDePedidoCreado} = require('../tools/staging-ola1/harness/policy.cjs');
+const NUEVO = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const reg = (o = {}) => idsDePedidoCreado({metodo: 'POST', pathname: '/rest/v1/open_orders', postData: JSON.stringify({store_id: FIXTURE_STORE, status: 'open'}), status: 201, filas: [{id: NUEVO}], fixtureStore: FIXTURE_STORE, ...o});
+test('se registra el pedido que la prueba crea en el local sintético (mirando la PETICIÓN, no la respuesta)', () => assert.deepEqual(reg(), [NUEVO]));
+for (const [nombre, o] of [
+  ['pedido creado en OTRO local', {postData: JSON.stringify({store_id: OTRO})}], ['cuerpo sin store_id', {postData: '{"status":"open"}'}], ['cuerpo inválido', {postData: 'x'}],
+  ['respuesta con error', {status: 409}], ['método distinto (PATCH)', {metodo: 'PATCH'}], ['otra tabla', {pathname: '/rest/v1/sales'}], ['sin local sintético configurado', {fixtureStore: null}],
+  ['id que no es uuid', {filas: [{id: "1; drop table x"}]}], ['lote con una fila de otro local', {postData: JSON.stringify([{store_id: FIXTURE_STORE}, {store_id: OTRO}])}],
+]) test(`no se registra: ${nombre}`, () => assert.deepEqual(reg(o), []));
