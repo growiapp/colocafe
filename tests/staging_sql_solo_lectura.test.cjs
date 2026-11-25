@@ -8,7 +8,7 @@ const dir = path.resolve(__dirname, '../tools/staging-ola1');
 const sinComentarios = sql => sql.replace(/\r\n/g, '\n').replace(/--.*$/gm, '');
 const sinLiterales = sql => sinComentarios(sql).replace(/'(?:[^']|'')*'/g, "''");
 const PROHIBIDAS = ['insert', 'update', 'delete', 'merge', 'alter', 'create', 'drop', 'truncate', 'grant', 'revoke', 'copy', 'call', 'do', 'vacuum', 'analyze', 'reindex', 'cluster', 'refresh', 'lock', 'comment', 'set', 'reset', 'execute', 'prepare', 'listen', 'notify', 'discard', 'load', 'import', 'begin', 'commit', 'rollback', 'savepoint', 'security', 'into'];
-const FUNCIONES_PG_PERMITIDAS = new Set(['pg_get_constraintdef', 'pg_get_functiondef']);
+const FUNCIONES_PG_PERMITIDAS = new Set(['pg_get_constraintdef', 'pg_get_functiondef', 'pg_get_triggerdef']);
 const FUNCION_PROHIBIDA = /^(pg_read_|pg_ls_|pg_stat_file|lo_|dblink|set_config|current_setting|pg_sleep|pg_terminate|pg_cancel|pg_advisory|nextval|setval|txid_|query_to_xml|pg_reload|pg_rotate|pg_switch|pg_create|pg_drop|pg_logical|pg_replication)/;
 const CATALOGO_SENSIBLE = /^(pg_authid|pg_shadow|pg_user_mapping|pg_largeobject|pg_db_role_setting|pg_stat_activity|pg_settings|pg_file_settings|pg_hba_file_rules)$/;
 
@@ -35,7 +35,7 @@ function analizar(crudo) {
   return problemas;
 }
 
-for (const archivo of ['esquema_gate.sql', 'politicas_rls.sql']) {
+for (const archivo of ['esquema_gate.sql', 'politicas_rls.sql', 'auditoria_triggers.sql']) {
   test(`${archivo}: es UNA sola consulta de solo lectura sobre catálogos del sistema, sin DDL/DML, sin auth/vault, sin funciones peligrosas`, () => {
     assert.deepEqual(analizar(fs.readFileSync(path.join(dir, archivo), 'utf8')), []);
   });
