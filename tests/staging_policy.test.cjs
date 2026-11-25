@@ -32,3 +32,25 @@ test('producción nunca se permite', () => {
   const r = decidirAccesoStaging({method: 'GET', url: 'https://xhtpahjsddfkwsytubgu.supabase.co/rest/v1/sales?select=*', headers: H, mode: 'fixture', fixtureStore: FIXTURE_STORE});
   assert.equal(permitido(r), false);
 });
+
+// ── Lecturas de sales con rango de fechas (consulta legítima de Reportes/Historial) ──
+const lectura = (q, o = {}) => decidirAccesoStaging({method: o.m || 'GET', url: `${o.base || STAGING_ORIGIN}/rest/v1/${o.t || 'sales'}?${q}`, headers: {...H, ...(o.h || {})}, mode: 'readonly', fixtureStore: FIXTURE_STORE, fixtureOrders: new Set()});
+const BASE_Q = `select=id%2Cstore_id%2Ctotal_amount&store_id=eq.${OTRO}&order=sold_at.desc`;
+test('lectura de sales con rango de fechas (gte+lte sobre business_date) y límite: PERMITIDA, también con reintento del cliente', () => {
+  assert.equal(permitido(lectura(`${BASE_Q}&business_date=gte.2026-11-25&business_date=lte.2026-11-25&limit=100`)), true);
+  assert.equal(permitido(lectura(`${BASE_Q}&business_date=gte.2026-11-25&business_date=lt.2026-11-26`, {h: {'x-retry-count': '1'}})), true);
+  assert.equal(permitido(lectura(`select=id&store_id=eq.${OTRO}&sold_at=gte.2026-11-25T00:00:00-03:00&sold_at=lte.2026-11-25T23:59:59-03:00`)), true);
+});
+for (const [nombre, q, o] of [
+  ['otra clave repetida (id)', `${BASE_Q}&id=eq.a&id=eq.b`],
+  ['store_id repetido', `select=id&store_id=eq.${OTRO}&store_id=eq.${FIXTURE_STORE}`],
+  ['tres ocurrencias del rango', `${BASE_Q}&business_date=gte.2026-11-01&business_date=gte.2026-11-02&business_date=lte.2026-11-30`],
+  ['dos límites inferiores', `${BASE_Q}&business_date=gte.2026-11-01&business_date=gte.2026-11-02`],
+  ['valor que no es fecha con operador', `${BASE_Q}&business_date=gte.x&business_date=lte.y`],
+  ['operador no permitido (eq repetido)', `${BASE_Q}&business_date=eq.2026-11-25&business_date=eq.2026-11-26`],
+  ['clave no fecha con gte/lte repetidos (total_amount)', `${BASE_Q}&total_amount=gte.1&total_amount=lte.9`],
+  ['escritura PATCH con rango repetido', `${BASE_Q}&business_date=gte.2026-11-25&business_date=lte.2026-11-25`, {m: 'PATCH'}],
+  ['DELETE con rango repetido', `${BASE_Q}&business_date=gte.2026-11-25&business_date=lte.2026-11-25`, {m: 'DELETE'}],
+  ['producción', `${BASE_Q}&business_date=gte.2026-11-25&business_date=lte.2026-11-25`, {base: 'https://xhtpahjsddfkwsytubgu.supabase.co'}],
+  ['cabecera desconocida', `${BASE_Q}`, {h: {'x-otra': '1'}}],
+]) test(`lectura se BLOQUEA: ${nombre}`, () => assert.equal(permitido(lectura(q, o || {})), false, JSON.stringify(lectura(q, o || {}))));

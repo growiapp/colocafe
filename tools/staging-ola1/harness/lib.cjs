@@ -33,28 +33,35 @@ function validAnonKey(key) {
 }
 
 // Solo el contenido congelado: HEAD exacto y worktree limpio antes de servir.
+// Paquete de despliegue de un commit (los mismos archivos que publica .github/workflows/static.yml), leído DIRECTAMENTE del commit con `git show`:
+// se sirven los bytes del commit, no los del disco (en Windows, con autocrlf, el disco difiere del commit en saltos de línea y el hash no coincidía: HTTP 500).
+const PAQUETE_WEB = ['index.html', 'otra-pestana.html', 'manifest.json', 'logo.png', 'logo.svg', 'preview.jpg'];
+function paqueteDeCommit(repo, ref) {
+  const tracked = execFileSync('git', ['-C', repo, 'ls-tree', '-r', '--name-only', ref], {encoding:'utf8'}).split(/\r?\n/).filter(Boolean);
+  const paquete = new Map();
+  for (const rel of tracked) {
+    if (!(PAQUETE_WEB.includes(rel) || rel.startsWith('assets/'))) continue;
+    const buf = execFileSync('git', ['-C', repo, 'show', `${ref}:${rel}`], {maxBuffer: 64 * 1024 * 1024});
+    paquete.set(rel, {buf, sha256: crypto.createHash('sha256').update(buf).digest('hex')});
+  }
+  return paquete;
+}
+// Solo el contenido congelado: HEAD exacto y worktree limpio antes de servir; se sirven los bytes de ese commit.
 function frozenServer(onSetup) {
   const head = execFileSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], {encoding:'utf8'}).trim();
   if (head !== FROZEN) throw new Error(`HEAD inesperado ${head}`);
   const dirty = execFileSync('git', ['-C', REPO, 'status', '--porcelain', '--untracked-files=all'], {encoding:'utf8'}).trim();
   if (dirty) throw new Error('worktree con cambios');
-  const tracked = execFileSync('git', ['-C', REPO, 'ls-tree', '-r', '--name-only', FROZEN], {encoding:'utf8'}).split(/\r?\n/).filter(Boolean);
-  const approved = new Map();
-  for (const rel of tracked) {
-    if (rel.startsWith('.e2e_acceptance/') || rel.startsWith('.')) continue;
-    const expected = execFileSync('git', ['-C', REPO, 'show', `${FROZEN}:${rel}`], {maxBuffer: 64 * 1024 * 1024});
-    approved.set(rel, crypto.createHash('sha256').update(expected).digest('hex'));
-  }
+  const paquete = paqueteDeCommit(REPO, FROZEN);
   const types = {'.html':'text/html; charset=utf-8', '.png':'image/png', '.json':'application/json', '.svg':'image/svg+xml', '.jpg':'image/jpeg'};
   const server = http.createServer((req, res) => {
     const p = new URL(req.url, 'http://x').pathname;
     if (onSetup && p.startsWith('/__setup')) return onSetup(req, res);
-    const rel = p === '/' ? 'index.html' : p.slice(1);
-    const file = path.resolve(REPO, rel);
-    if (!approved.has(rel) || !file.startsWith(path.resolve(REPO) + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404); return res.end(); }
-    if (crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== approved.get(rel)) { res.writeHead(500); return res.end(); }
-    res.writeHead(200, {'content-type':types[path.extname(file)] || 'application/octet-stream'});
-    res.end(fs.readFileSync(file));
+    const rel = p === '/' ? 'index.html' : decodeURIComponent(p.slice(1));
+    const f = paquete.get(rel);
+    if (!f) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, {'content-type':types[path.extname(rel)] || 'application/octet-stream', 'x-sha256':f.sha256});
+    res.end(f.buf);
   });
   return new Promise(ok => server.listen(Number(process.env.E2E_PORT || 0), '127.0.0.1', () => ok( // localStorage es por origen: las sesiones requieren el puerto del login
 {server, origin:`http://127.0.0.1:${server.address().port}`})));
@@ -142,4 +149,4 @@ async function openDevice(name, {origin, audit, mode = 'readonly', fixtureStore 
 }
 
 const saveAudit = (audit, file) => { if (audit.length) fs.appendFileSync(path.join(EVID, file), audit.splice(0).map(e => JSON.stringify(e)).join('\n') + '\n'); };
-module.exports = {openDevice, frozenServer, saveAudit, validAnonKey, KEYFILE, STATE, EVID, STAGING, PROD, FROZEN};
+module.exports = {openDevice, frozenServer, paqueteDeCommit, saveAudit, validAnonKey, KEYFILE, STATE, EVID, STAGING, PROD, FROZEN};

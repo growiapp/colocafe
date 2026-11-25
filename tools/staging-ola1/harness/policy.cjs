@@ -12,8 +12,9 @@ const ESCRITURAS_REST = Object.freeze({
 // Las sondas de E9 se bloquean localmente: su inocuidad no depende de RLS.
 const DENEGADAS_REGISTRADAS = new Set(['POST reservations','PATCH reservations','PATCH products','DELETE sale_items']);
 const TABLAS_LECTURA = new Set(['categories','customers','expenses','open_order_dispatches','open_order_items','open_orders','operators','products','profiles','reservations','sale_items','sale_payments','sales','shifts','stock_store_activation','stock_ledger','store_users','stores']);
-const CABECERAS = new Set(['accept','accept-language','accept-encoding','apikey','authorization','content-type','content-length','prefer','x-client-info','x-supabase-api-version','accept-profile','content-profile','cache-control','pragma','origin','referer','user-agent','host','connection','priority','dnt','sec-fetch-site','sec-fetch-mode','sec-fetch-dest','sec-ch-ua','sec-ch-ua-mobile','sec-ch-ua-platform']);
+const CABECERAS = new Set(['accept','accept-language','accept-encoding','apikey','authorization','content-type','content-length','prefer','x-client-info','x-supabase-api-version','accept-profile','content-profile','cache-control','pragma','origin','referer','user-agent','host','connection','priority','dnt','sec-fetch-site','sec-fetch-mode','sec-fetch-dest','sec-ch-ua','sec-ch-ua-mobile','sec-ch-ua-platform','x-retry-count']); // x-retry-count: la agrega el cliente Supabase al reintentar una lectura fallida
 const PARAMETROS_LECTURA = new Set(['select','order','limit','offset','or','and','store_id','id','name','sale_id','open_order_id','product_id','metadata','role','status','category_id','operator_id','shift_id','legacy_id','created_at','sold_at','parent_id','active','business_date','full_name','open','opened_at','prod','reservation_id','sale_items','show','spent_at','stock','stock_applied_at','stock_applied_reason','user_id']);
+const RANGO_FECHA = new Set(['business_date','sold_at','opened_at','created_at','spent_at']); // claves de fecha que pueden llevar un rango en LECTURAS
 const PARAMETROS_ESCRITURA = new Set(['select','store_id','id','open_order_id','sale_id']);
 const violacion = razon => ({accion:'VIOLACION', razon});
 const tipoContenido = valor => {
@@ -80,7 +81,16 @@ function cabecerasValidas(headers, metodo, ruta) {
 
 function queryValida(url, metodo, ruta, forma) {
   if (url.searchParams.has('on_conflict')) return 'ON_CONFLICT_PROHIBIDO';
-  if (new Set(url.searchParams.keys()).size !== [...url.searchParams.keys()].length) return 'QUERY_REPETIDA';
+  // Claves repetidas: prohibido, salvo un RANGO de fechas en LECTURAS (gte + lte sobre la misma clave de fecha; p. ej. business_date=gte.D&business_date=lte.D).
+  {
+    const veces = new Map(); for (const k of url.searchParams.keys()) veces.set(k, (veces.get(k) || 0) + 1);
+    for (const [k, n] of veces) {
+      if (n === 1) continue;
+      const ops = url.searchParams.getAll(k).map(v => (/^(gte|gt|lte|lt)\.[0-9T:.+\-Zz]{4,40}$/.exec(v) || [])[1]);
+      const inferior = ops.filter(o => o === 'gte' || o === 'gt').length, superior = ops.filter(o => o === 'lte' || o === 'lt').length;
+      if (!(['GET', 'HEAD'].includes(metodo) && RANGO_FECHA.has(k) && n === 2 && inferior === 1 && superior === 1)) return 'QUERY_REPETIDA';
+    }
+  }
   if (ruta === '/auth/v1/token') return [...url.searchParams].length === 1 && ['password','refresh_token'].includes(url.searchParams.get('grant_type')) ? null : 'QUERY_AUTH_NO_AUTORIZADA';
   if (ruta === '/auth/v1/logout') return url.search === '?scope=local' ? null : 'LOGOUT_GLOBAL_NO_AUTORIZADO';
   const lectura = ['GET','HEAD','OPTIONS'].includes(metodo);
