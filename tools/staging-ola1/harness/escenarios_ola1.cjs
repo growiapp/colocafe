@@ -126,7 +126,8 @@ async function bloqueEliminar(d, cuenta) {
   reg(cuenta, `Eliminar mesa (confirmada) con rol ${CUENTAS[cuenta].rol}: resultado en el servidor`, !!borrado && borrado.estado < 300 && quedan === 0, `DELETE open_orders → ${borrado ? borrado.estado + (borrado.error ? ' ' + borrado.error : '') : 'no se emitió'} · en pantalla quedan=${quedan} · ${eventos.map(c => c.m + ' ' + c.t + ' ' + c.estado).join(' | ')}`);
 }
 
-(async () => {
+module.exports = {CUENTAS, PERFILES, res, identidades, capturas, reg, shot, fm, verificarEntorno, cambiarAlSintetico, instalarCaptura, desde, nuevaMesa, abrirTurno, cobrar, evaluarCobro};
+if (require.main === module) (async () => {
   const {server, origin} = await frozenServer(), audit = [];
   for (const perfil of PERFILES) {
     const d = await openDevice(perfil, {origin, audit, mode: 'fixture', fixtureStore: FIXTURE_STORE, headless: true});
