@@ -15,7 +15,10 @@
 | `verificar_sql.cjs` | Valida los scripts en una copia aislada (PGlite, esquema simulado). No toca staging ni producción. |
 | `harness/` | Arnés de navegador (copia adaptada del E2E previo): sirve el commit exacto, bloquea producción por ruta y DNS, política positiva de escrituras. |
 
-## Paso 1 detallado: los dos scripts de SOLO LECTURA (a cargo de la persona)
+## Estado (2026-11-25)
+Las consultas de solo lectura de este directorio **ya se ejecutaron en staging** (panel de Supabase autenticado, proyecto `wjymdgfqmqutihadffec`, contenido verificado por SHA-256 contra el archivo del commit antes de cada ejecución): `politicas_rls.sql`, `esquema_gate.sql`, `auditoria_triggers.sql`, `funciones_triggers.sql`, `columnas_fixtures.sql` y `restricciones_fixtures.sql`. Resultados en `AUDITORIA_360_REPORT.md` §3.1c. `validacion_solo_lectura.cjs` valida las mejoras sobre el local real de staging **sin ninguna escritura** (66/66). Lo que sigue (`fixtures.sql`, `escenarios_ola1.cjs`, `cleanup.sql`) escribe y exige autorización explícita.
+
+## Paso 1 (histórico): los scripts de SOLO LECTURA
 
 **Acceso:** quien audita no tiene acceso al SQL Editor de Supabase (sólo sesiones de la app con la clave pública), por lo que los ejecuta la persona. No se pide ninguna contraseña ni clave.
 

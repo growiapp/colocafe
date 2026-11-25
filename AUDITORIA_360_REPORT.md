@@ -80,7 +80,43 @@ Las ventanas `caja` y `admin` quedaron intercambiadas por la persona; no importa
 2. **`manifest.json` HTTP 500 (causa y corrección):** en el disco `manifest.json` y `otra-pestana.html` están en CRLF (`autocrlf=true`) y el índice de git en LF; el arnés comparaba el hash del disco con el del blob. Ahora el servidor entrega **los bytes del commit** (`git show`), sólo del paquete que publica `static.yml`. Verificado por HTTP real: los 8 archivos dan 200 con el **mismo SHA-256 que el commit**; `tools/`, `.git` y rutas con `..` dan 404 (3 pruebas en `tests/staging_servidor.test.cjs`).
 3. **Identidad de sesiones:** los recorridos y la evidencia ahora se asocian al **usuario autenticado** y su rol (`7cd84c4f`→owner, `eef11ffb`→admin, `48075b31`→operator), no al nombre de la ventana; además se intercambiaron los directorios de perfil `caja`↔`admin` (sin repetir logins) y un nuevo preflight confirmó etiquetas correctas, sesiones vivas, **0 violaciones, 0 errores de consola, 0 escrituras**.
 
-### 3.2 Fase 2: validación funcional en staging — **NO EJECUTADA**
+### 3.1c Esquema real de staging (STAGING, solo lectura, ejecutado por el panel de Supabase autenticado)
+
+Seis consultas `SELECT` sobre catálogos del sistema, cada una verificada por SHA-256 contra el archivo del commit antes de ejecutarla, en el proyecto `colo-cafe-staging` (`wjymdgfqmqutihadffec`). Resultados:
+
+- **RLS activo y forzado** en las 8 tablas operativas. `open_orders`, `open_order_items`: SELECT/INSERT/UPDATE/DELETE para **owner, admin y operator** (políticas duplicadas «legacy» y `_ops`). `categories`, `products`: escribir sólo owner/admin. `sales`, `sale_items`, `sale_payments`: DELETE sólo owner/admin; lectura para cualquier miembro. `customers`, `reservations`, `open_order_dispatches`: operador puede escribir. → **confirma B1 (el operador escribe notas que el dueño verá) y B5 (el operador puede eliminar mesas)** como permisos reales del servidor, no sólo del cliente.
+- **B2:** `products.price` es `numeric(12,2)` con `CHECK (price >= 0)` (el servidor ya rechaza negativos y **acepta 0**; no valida enteros: el rechazo de decimales y cero es regla del cliente).
+- **Idempotencia de ventas:** índice único `sales_store_legacy_unique_idx (store_id, legacy_id) WHERE legacy_id IS NOT NULL`: la hipótesis sobre la restricción UNIQUE queda **confirmada**.
+- `has_store_role`: `SECURITY DEFINER`, `search_path` fijo.
+- **Esquema para la limpieza:** rol del editor `postgres` con `bypassrls`; **0 filas `STOP_*`** (no hay tablas hijas sin `store_id`; `reservations` existe); **0 FKs que bloqueen el borrado**; 17 tablas con `store_id` (incluye `audit_logs` y `stock_ledger`); **16 FKs hacia `stores`, todas `ON DELETE CASCADE`** (`stock_ledger` no tiene FK y la limpieza lo borra explícitamente); 11 FKs `SET NULL`, todas entre tablas del mismo local.
+- **Triggers (20):** `updated_at`, versionado de ítems, etiquetas de pedido, `trg_close_open_order_after_sale` (el servidor cierra la mesa al entrar una venta con `open_order_id`) y `stores_create_owner_membership`, que crea membresía **sólo si `created_by` no es nulo**: `fixtures.sql` no lo informa, así que sus «exactamente 3 membresías» son correctas. **Ningún trigger escribe en `audit_logs` y `index.html` nunca la usa.** **No hay triggers de Stock Durability en `public`: en staging ese módulo no está instalado.**
+- **`fixtures.sql` contra el esquema real (sin ejecutarlo):** las 56 columnas de `stores`, `store_users`, `categories`, `operators` y `products` se leyeron; **todas las columnas que el script informa existen y no falta ninguna obligatoria sin valor por defecto**; sus valores no chocan con `UNIQUE (store_id, name)`, `UNIQUE (store_id, normalized_name)`, `UNIQUE (slug)` (queda nulo), `CHECK price>=0` ni `CHECK stock>=0`.
+- **Copia aislada con la topología real** (`verificar_sql.cjs`, 22/22): fixtures → escrituras de la app (venta ligada a su mesa con el trigger de cierre, auditoría, `stock_ledger`) → ensayo → limpieza deja lo preexistente intacto (incluidos sus vínculos `SET NULL`) y 0 residuos.
+- **Efecto lateral en el panel:** el SQL Editor guardó automáticamente un fragmento «Untitled query» con la última consulta (metadato del panel, no dato de la base). Se puede borrar a mano; no se borró.
+
+### 3.1d Validación en staging SIN escrituras — **STAGING, 66/66 comprobaciones OK**
+
+`harness/validacion_solo_lectura.cjs`: local real «Colo Café Staging» (`89401a44…`), las tres cuentas (identificadas por usuario y rol), escritorio 1280×800 y móvil 390×844. Barrera `readonly` + freno dentro de la página que anula los clics en «Confirmar cobro», en el «Eliminar» del diálogo y en «Guardar». **Cero escrituras de datos**: sólo 288 GET, 12 HEAD, 3 websockets y 3 `POST /auth/v1/token` (refresco de sesión). Sólo se abre, se mide, se escribe en campos sin enviarlos y se **cancela**.
+
+| Comprobación (cada cuenta: owner / admin / operator) | Resultado |
+|---|---|
+| Entorno: proyecto, usuario, rol y local | OK ×3 |
+| **M1** Vuelto en efectivo sobre una mesa real (T15, $3.900): exacto `Vuelto $0`, superior `Vuelto $5.000`, insuficiente `Faltan $100`; el botón conserva el total | OK ×3 |
+| **M1** Transferencia y mixto: sin cálculo de vuelto; el mixto muestra sus campos; Efectivo conserva el monto | OK ×3 |
+| **M2** Cobrar a ancho completo en 1280×800: sin desborde, «Confirmar cobro» a la vista (columna 700 px) | OK ×3 |
+| **M2** Cobrar en móvil 390×844: sin desborde horizontal | OK ×3 |
+| **M3** Eliminar mesa: `<button>` con nombre, abre confirmación por teclado, **Cancelar no elimina** | OK ×3 |
+| **M4** Foco: filtros (Enter/Espacio), × conservado tras 14 s de repintados reales, y el foco del importe sobrevive a la llegada real de los operadores | OK ×3 |
+| **M5** Nombre del local en móvil: «Colo Café Staging» completo (2 líneas) | OK ×3 |
+| **B4** «Limpiar historial» y edición de catálogo visibles sólo para owner/admin del local activo | OK ×3 (operator: oculto) |
+| **B2** «2.500», «-100», «0», «12.5» se rechazan con aviso y no llegan al servidor | OK ×3 |
+| **B23** La credencial `sb-…-auth-token` está en `localStorage` y el respaldo local **no** la contiene | OK ×3 |
+| Reportes, Historial y Clientes cargan sin errores de página ni de red (lecturas de `sales` ya permitidas) | OK ×3 |
+| Clics anulados por el freno / violaciones de red | 0 / 0 ×3 |
+
+**Lo que esto NO demuestra** (requiere escribir datos sintéticos): que el cobro **persista** con los importes, descuentos y pagos correctos (y que el vuelto no los altere en el servidor), el caso de centavos con un total real, la eliminación real de una mesa por rol (y B5 con el servidor), B1 con una nota de un rol vista por otro, comandas, impresión y reservas.
+
+### 3.2 Fase 2: parte con ESCRITURAS — **NO EJECUTADA (requiere autorización)**
 
 Bloqueo real: requiere (a) la clave anon pública de staging y las contraseñas de las tres cuentas tipeadas por la persona en ventanas locales, y (b) que la persona ejecute `fixtures.sql` en el SQL Editor (y `cleanup.sql` al final, con su autorización explícita). El guion está listo (`harness/escenarios_ola1.cjs`): verifica proyecto, URL, usuario, rol y local **antes de escribir** y aborta la cuenta si algo no coincide; mide violaciones de red; registra por rol (owner, admin, operator) y dispositivo (escritorio 1280×800, móvil 390×844). **No se ha corrido ni una vez contra staging, y su primera ejecución puede requerir ajustes de selectores.**
 
@@ -216,11 +252,11 @@ Codex no ejecutó el navegador (revisión estática); las pruebas las corrí yo.
 
 ## 8. Estado final y recomendación
 
-**Recomendación de publicación: `BLOCKED`.** `STAGING_VERIFIED` **no** se declara.
+**Recomendación de publicación: `BLOCKED` (parcial).** `STAGING_VERIFIED` **no** se declara: el comportamiento de interfaz de las cinco mejoras y de B2/B4/B23 está verificado en staging **sin escrituras** (66/66, §3.1d), pero la **persistencia** de los cobros, la eliminación real de mesas y B1 entre roles requieren datos sintéticos y autorización de escritura.
 
 Motivos concretos:
-1. **Ninguna de las cinco mejoras ni de las correcciones B1/B2/B4/B5/B23 pasó por staging.** Faltan la autenticación humana de las tres cuentas (clave anon pública + contraseñas tipeadas por la persona) y la ejecución por la persona de `fixtures.sql` en el SQL Editor de staging. No hay ningún bloqueo técnico del lado de la candidata.
-2. **RLS desplegado sin verificar** (`politicas_rls.sql`, sólo lectura): el análisis de B1/B5 se apoya en el SQL versionado del repo, no en el estado real.
+1. **Falta la parte de staging que escribe datos:** cobros persistidos (efectivo con vuelto, transferencia, mixto, centavos), eliminación real de mesa por rol y B1/B5 contra el servidor. Requiere crear (y luego eliminar) un local sintético y **autorización explícita de escritura**. El procedimiento está verificado contra el esquema real (§3.1c). No hay bloqueo técnico del lado de la candidata.
+2. ~~RLS desplegado sin verificar~~ **Resuelto en staging** (§3.1c): los permisos de B1/B5 son los del servidor real. Sigue sin verificarse **producción**.
 3. **Decisiones suyas pendientes que afectan lo implementado:** B4 (¿admin además del dueño?), B5 (¿operador elimina mesas con ítems?), B2b (modificadores de variante negativos).
 
 Lo que **sí** está listo para publicar desde el punto de vista del código: 14 archivos de prueba / 220 pruebas en verde, `apply.py` sincronizado, tres revisiones independientes resueltas (Codex ola 1, nativa ola 1, Codex fase de riesgos).
