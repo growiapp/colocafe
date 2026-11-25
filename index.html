@@ -5608,7 +5608,11 @@ function renderCajaPendingBanner(){
   if(state.rejected.length)lineas.push({cls:'accion',texto:`<strong>El servidor rechazó ${n(state.rejected.length,'venta cobrada','ventas cobradas')}.</strong> Está guardada en este dispositivo: no la cobres de nuevo y avisá al administrador.`});
   if(state.paused.length)lineas.push({cls:'espera',texto:`<strong>${n(state.paused.length,'venta cobrada','ventas cobradas')} en pausa por mantenimiento.</strong> Quedó guardada acá. Cuando termine la pausa, tocá Reintentar; no la cobres de nuevo.`,reintentar:true});
   if(state.transient.length)lineas.push({cls:'espera',texto:`<strong>${n(state.transient.length,'venta cobrada','ventas cobradas')} con una demora del servidor.</strong> Quedó guardada acá. Reintentar comprueba primero si llegó; no la cobres de nuevo.`,reintentar:true});
-  if(state.errors.length)lineas.push({cls:'error',texto:`<strong>No pudimos sincronizar ${n(state.errors.length,'operación','operaciones')}.</strong> Se reintenta sola; podés reintentar ahora.`,reintentar:true});
+  const parados=window.getOOReintentosParados?.()||[];
+  parados.forEach(p=>lineas.push({cls:'accion',texto:p.permanente
+    ?`<strong>El servidor rechazó los cambios de ${escapeHtml(p.nombre)}.</strong> Quedan guardados en este dispositivo y no se reintenta solo: avisá al administrador.`
+    :`<strong>No pudimos guardar los cambios de ${escapeHtml(p.nombre)}.</strong> Quedan guardados en este dispositivo; dejamos de reintentar solo. Tocá Reintentar cuando haya conexión.`,reintentar:true}));
+  if(state.errors.length&&!parados.length)lineas.push({cls:'error',texto:`<strong>No pudimos sincronizar ${n(state.errors.length,'operación','operaciones')}.</strong> Se reintenta sola; podés reintentar ahora.`,reintentar:true});
   if(state.confirming.length)lineas.push({cls:'espera',texto:`<strong>${n(state.confirming.length,'venta cobrada','ventas cobradas')} esperando confirmación del servidor.</strong> Ya está${state.confirming.length===1?'':'n'} guardada${state.confirming.length===1?'':'s'} acá: no la${state.confirming.length===1?'':'s'} cobres de nuevo.`,reintentar:true});
   if(state.pending.length)lineas.push({cls:'espera',texto:`<strong>${n(state.pending.length,'operación pendiente','operaciones pendientes')}.</strong> No cierres la app hasta que se sincronice.`,reintentar:true});
   if(state.slow.length)lineas.push({cls:'espera',texto:`Terminando de sincronizar ${n(state.slow.length,'operación','operaciones')}.`});
@@ -10126,7 +10130,7 @@ if(config.webappUrl){loadFromSheets();}
         type:'open_order_items_replace',status:'partial_error',created_at:syncStartedAt||undefined,
         open_order_id:sbOrderId,store_id:storeId,payload:rows,
         local_items:Object.values(items||{}),local_revision:itemsRevision,
-        last_error:err?.message||String(err)
+        last_error:err?.message||String(err),last_error_code:err?.code||''
       }));
       ooRememberError(err,{table:'open_order_items',operation:'replace_items',query:'delete existing items + insert current cart',store_id:storeId});
       console.warn('[open_orders] syncItems failed:',{
@@ -10214,8 +10218,8 @@ if(config.webappUrl){loadFromSheets();}
     if(typeof window.save==='function')window.save();
     return ok;
   }
-  window.retryPendingOpenOrdersSync=async function({silent=false}={}){
-    const pending=(mesas||[]).filter(m=>m&&!m._items_conflict&&((!m._sb_id)||m._syncing)&&origenEnviable(m,'mesa'));
+  window.retryPendingOpenOrdersSync=async function({silent=false,saltear=null}={}){
+    const pending=(mesas||[]).filter(m=>m&&!m._items_conflict&&((!m._sb_id)||m._syncing)&&origenEnviable(m,'mesa')&&!(saltear&&saltear.has(String(m._sb_id||m.id))));
     if(!pending.length){
       if(!silent)showToast('No hay mesas pendientes.');
       return {ok:true,total:0,synced:0,failed:0};
@@ -10651,8 +10655,8 @@ if(config.webappUrl){loadFromSheets();}
     if(!silent)showToast(summary.failed?`Quedan ${summary.failed} cierre(s) de mesa pendientes.`:'Actualizado.');
     return summary;
   };
-  window.retryPendingOpenOrderItemSyncs=async function({silent=false}={}){
-    const pending=(pendingOpenOrderItemSyncs||[]).filter(entry=>entry&&entry.status!=='synced'&&origenEnviable(entry,'cola'));
+  window.retryPendingOpenOrderItemSyncs=async function({silent=false,saltear=null}={}){
+    const pending=(pendingOpenOrderItemSyncs||[]).filter(entry=>entry&&entry.status!=='synced'&&origenEnviable(entry,'cola')&&!(saltear&&saltear.has(String(entry.open_order_id||''))));
     if(!pending.length){
       if(!silent)showToast('No hay ítems de mesa pendientes.');
       return {ok:true,total:0,synced:0,failed:0};
@@ -10710,7 +10714,7 @@ if(config.webappUrl){loadFromSheets();}
         summary.synced++;
       }catch(err){
         entry.status='partial_error';
-        entry.last_error=err?.message||String(err);
+        entry.last_error=err?.message||String(err);entry.last_error_code=err?.code||'';
         entry.updated_at=getLocalTimestamp();
         summary.failed++;
         summary.ok=false;
@@ -10726,6 +10730,42 @@ if(config.webappUrl){loadFromSheets();}
     return summary;
   };
 
+  // B7: los reintentos AUTOMÁTICOS (cada 12 s, al volver a la pestaña, etc.) esperan cada vez más y tienen un tope; un rechazo permanente del servidor
+  // (sin permiso, datos no válidos) no se reintenta solo. Nada se descarta: el pendiente sigue guardado y «Reintentar» (manual) siempre lo envía de nuevo.
+  // Los envíos son idempotentes (ids deterministas / versión base), así que reintentar no duplica pedidos ni ítems.
+  const OO_ESPERAS_MS=[12000,30000,60000,120000,300000],OO_MAX_FALLOS_AUTO=6;
+  const OO_REINTENTO_REINICIA=new Set(['manual','technical_manual','online','init']);
+  const ooReintentos=new Map(); // id del pedido → {fallos,proximo,parado,permanente}
+  function ooErrorPermanente(code){
+    code=String(code||'');
+    // permisos, restricciones, datos inválidos, reglas del servidor, sesión. Sin código (red, tiempo agotado), 08/53/57/55P03 y desconocidos: se reintenta, con espera y tope.
+    return /^(42|23|22|P0|PGRST[1-9])/.test(code)||/^(401|403)$/.test(code);
+  }
+  function ooPendientesDeReintento(){
+    const out=new Map();
+    (mesas||[]).filter(m=>mesaPendiente(m)&&!m._items_conflict&&origenEnviable(m,'mesa')).forEach(m=>out.set(String(m._sb_id||m.id),{nombre:m.nombre,code:ooLastTechnicalError?.code||''}));
+    (pendingOpenOrderItemSyncs||[]).filter(e=>e&&e.status!=='synced'&&origenEnviable(e,'cola')).forEach(e=>{
+      const k=String(e.open_order_id||'');const m=findMesaByAnyId(k);
+      if(m?._items_conflict)return;
+      out.set(k,{nombre:m?.nombre||'una mesa',code:e.last_error_code||''});
+    });
+    return out;
+  }
+  function ooClavesASaltear(ahora){return new Set([...ooReintentos].filter(([,s])=>s.parado||s.proximo>ahora).map(([k])=>k));}
+  window.getOOReintentosParados=()=>{const quedan=ooPendientesDeReintento();for(const k of [...ooReintentos.keys()])if(!quedan.has(k))ooReintentos.delete(k);return [...ooReintentos].filter(([,s])=>s.parado).map(([k,s])=>({id:k,nombre:findMesaByAnyId(k)?.nombre||'Una mesa',permanente:!!s.permanente}));};
+  function ooRegistrarResultadoReintento(saltear,manual){
+    const quedan=ooPendientesDeReintento(),ahora=Date.now();
+    for(const k of [...ooReintentos.keys()])if(!quedan.has(k))ooReintentos.delete(k);
+    quedan.forEach((info,k)=>{
+      if(saltear.has(k))return; // en espera: no se intentó en este turno
+      const antes=ooReintentos.get(k)||{fallos:0},fallos=antes.fallos+1,permanente=ooErrorPermanente(info.code);
+      const parado=permanente||fallos>=OO_MAX_FALLOS_AUTO;
+      ooReintentos.set(k,{fallos,permanente,parado,proximo:ahora+OO_ESPERAS_MS[Math.min(fallos,OO_ESPERAS_MS.length)-1]});
+      if(parado&&!antes.parado&&!manual)showToast(permanente
+        ?`El servidor rechazó los cambios de ${info.nombre||'una mesa'}. Quedan guardados en este dispositivo: avisá al administrador.`
+        :`No pudimos guardar los cambios de ${info.nombre||'una mesa'}. Quedan guardados en este dispositivo: tocá Reintentar cuando haya conexión.`);
+    });
+  }
   function retryPendingOpenOrderWrites({reason='auto'}={}){
     if(ooPendingWriteRetryPromise)return ooPendingWriteRetryPromise;
     const initialTables=(mesas||[]).filter(m=>mesaPendiente(m)).length;
@@ -10733,12 +10773,20 @@ if(config.webappUrl){loadFromSheets();}
     const initialTotal=initialTables+initialItems;
     if(!initialTotal)return Promise.resolve({ok:true,reason:'empty',total:0,synced:0,failed:0});
     if(!ooReady())return Promise.resolve({ok:false,reason:'not_ready',total:initialTotal,synced:0,failed:initialTotal});
+    const manual=OO_REINTENTO_REINICIA.has(reason);
+    if(manual)ooReintentos.clear();
+    const saltear=ooClavesASaltear(Date.now());
+    const candidatos=ooPendientesDeReintento();
+    if(candidatos.size&&[...candidatos.keys()].every(k=>saltear.has(k)))return Promise.resolve({ok:false,reason:'backoff',total:initialTotal,synced:0,failed:initialTotal});
     ooPendingWriteRetryPromise=(async()=>{
-      await window.retryPendingOpenOrdersSync?.({silent:true});
-      await window.retryPendingOpenOrderItemSyncs?.({silent:true});
+      // La sync de la mesa ya reenvía sus ítems: reenviarlos otra vez en el mismo turno duplicaba el tráfico sin ganar nada.
+      const deLaMesa=(mesas||[]).filter(m=>m&&!m._items_conflict&&((!m._sb_id)||m._syncing)&&origenEnviable(m,'mesa')&&!saltear.has(String(m._sb_id||m.id))).map(m=>String(m._sb_id||m.id));
+      await window.retryPendingOpenOrdersSync?.({silent:true,saltear});
+      await window.retryPendingOpenOrderItemSyncs?.({silent:true,saltear:new Set([...saltear,...deLaMesa])});
       const remainingTables=(mesas||[]).filter(m=>mesaPendiente(m)).length;
       const remainingItems=(pendingOpenOrderItemSyncs||[]).filter(entry=>entry&&entry.status!=='synced').length;
       const remaining=remainingTables+remainingItems;
+      ooRegistrarResultadoReintento(saltear,manual);
       ooTechLog('pending writes retry',{reason,remainingTables,remainingItems});
       return {ok:remaining===0,reason,total:remaining,synced:remaining===0?1:0,failed:remaining?1:0};
     })().finally(()=>{
