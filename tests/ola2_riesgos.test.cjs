@@ -141,36 +141,44 @@ for (const [forma, ids] of [['formulario de producto', {nom: 'm-nombre', pre: 'm
 }
 
 // ── B4: limpiar historial local de ventas ──
-// Rol del LOCAL ACTIVO: supabaseStores + config.activeStoreId (getSupabaseActiveRole cae al primer local; no se usa para decidir)
-const limpiar = (page, {stores, activo = 'sx', sesion = true, turnoAbierto = false}) => page.evaluate(([stores, activo, sesion, turnoAbierto]) => {
-  window.supabaseStores = stores; config.activeStoreId = activo; window.__sesionUserId = () => (sesion ? 'u1' : '');
+// La fuente del rol es window.getActiveStoreRoleEstricto (rol del LOCAL ACTIVO, sin caer al primer local). Su lectura de la variable real de la
+// sesión solo se puede comprobar con una sesión real (ver evidencia de staging); aquí se prueba la decisión del guard dado ese rol.
+const limpiar = (page, {rol, sesion = true, turnoAbierto = false}) => page.evaluate(([rol, sesion, turnoAbierto]) => {
+  window.getActiveStoreRoleEstricto = () => rol; window.__sesionUserId = () => (sesion ? 'u1' : '');
   turno = turnoAbierto ? {...(turno || {}), abierto: true} : null;
   ventas = ventas.filter(v => v && v.id); const antes = ventas.length; let toast = '';
   const t = window.showToast; window.showToast = m => { toast = String(m); };
   limpiarVentas(); window.showToast = t;
   return {antes, despues: ventas.length, toast};
-}, [stores, activo, sesion, turnoAbierto]);
-test('B4: solo owner/admin DEL LOCAL ACTIVO, con sesión y sin turno abierto; operador, rol vacío, otro local owner o sin sesión no pueden', async () => abrir(async page => {
+}, [rol, sesion, turnoAbierto]);
+test('B4: solo owner/admin del local activo, con sesión y sin turno abierto; operador, rol vacío o sin sesión no pueden', async () => abrir(async page => {
   const negado = async (nombre, o) => { const r = await limpiar(page, o); assert.equal(r.despues, r.antes, `${nombre}: no debe poder limpiar`); assert.match(r.toast, /dueño o un administrador/, nombre); };
-  await negado('operador', {stores: [{id: 'sx', role: 'operator'}]});
-  await negado('rol vacío', {stores: [{id: 'sx', role: ''}]});
-  await negado('primer local owner y local activo SIN rol (caso de la revisión independiente)', {stores: [{id: 'otro', role: 'owner'}, {id: 'sx', role: ''}]});
-  await negado('primer local owner y local activo operador', {stores: [{id: 'otro', role: 'owner'}, {id: 'sx', role: 'operator'}]});
-  await negado('local activo que no está en la lista', {stores: [{id: 'otro', role: 'owner'}]});
-  await negado('sin local activo', {stores: [{id: 'sx', role: 'owner'}], activo: ''});
-  await negado('sin sesión', {stores: [{id: 'sx', role: 'owner'}], sesion: false});
+  await negado('operador', {rol: 'operator'});
+  await negado('rol vacío (local activo sin rol / sin resolver)', {rol: ''});
+  await negado('sin sesión', {rol: 'owner', sesion: false});
   for (const rol of ['owner', 'admin']) {
-    const r = await limpiar(page, {stores: [{id: 'sx', role: rol}], turnoAbierto: true});
+    const r = await limpiar(page, {rol, turnoAbierto: true});
     assert.equal(r.despues, r.antes, `${rol} con turno abierto no debe poder limpiar`); assert.match(r.toast, /Cerrá el turno/);
   }
-  const ok = await limpiar(page, {stores: [{id: 'otro', role: 'operator'}, {id: 'sx', role: 'owner'}]});
-  assert.ok(ok.antes > 0 && ok.despues === 0, 'el dueño del local activo, sin turno abierto, sí puede');
+  const ok = await limpiar(page, {rol: 'owner'});
+  assert.ok(ok.antes > 0 && ok.despues === 0, 'el dueño sin turno abierto sí puede');
+}));
+test('B4: la fuente del rol es la estricta y real (no la variable no publicada window.supabaseStores ni el fallback al primer local)', async () => abrir(async page => {
+  const r = await page.evaluate(() => ({
+    guard: esAdminDelLocalActivo.toString(), estricta: typeof window.getActiveStoreRoleEstricto,
+    sinSesionActivaVacio: (() => { config.activeStoreId = ''; return window.getActiveStoreRoleEstricto(); })(),
+    localInexistente: (() => { config.activeStoreId = 'no-existe'; return window.getActiveStoreRoleEstricto(); })(),
+  }));
+  assert.equal(r.estricta, 'function');
+  assert.match(r.guard, /getActiveStoreRoleEstricto/); assert.doesNotMatch(r.guard, /supabaseStores|getActiveStore\(|getSupabaseActiveRole/);
+  assert.equal(r.sinSesionActivaVacio, ''); assert.equal(r.localInexistente, '', 'sin fallback al primer local');
 }));
 test('B4: el botón «Limpiar» queda oculto salvo para owner/admin del local activo', async () => abrir(async page => {
-  const visible = stores => page.evaluate(stores => { window.supabaseStores = stores; config.activeStoreId = 'sx'; window.__sesionUserId = () => 'u1'; goTab('ajustes'); if (!document.getElementById('acc-body-datos').classList.contains('open')) toggleAccordion('datos'); aplicarPermisosCatalogo(); return getComputedStyle(document.querySelector('#acc-body-datos button[onclick*="limpiarVentas"]')).display !== 'none'; }, stores);
-  assert.equal(await visible([{id: 'sx', role: 'operator'}]), false);
-  assert.equal(await visible([{id: 'otro', role: 'owner'}, {id: 'sx', role: ''}]), false);
-  assert.equal(await visible([{id: 'sx', role: 'admin'}]), true);
+  const visible = rol => page.evaluate(rol => { window.getActiveStoreRoleEstricto = () => rol; window.__sesionUserId = () => 'u1'; goTab('ajustes'); if (!document.getElementById('acc-body-datos').classList.contains('open')) toggleAccordion('datos'); aplicarPermisosCatalogo(); return getComputedStyle(document.querySelector('#acc-body-datos button[onclick*="limpiarVentas"]')).display !== 'none'; }, rol);
+  assert.equal(await visible('operator'), false);
+  assert.equal(await visible(''), false);
+  assert.equal(await visible('admin'), true);
+  assert.equal(await visible('owner'), true);
 }));
 
 // ── B5: eliminar mesa con fallo/timeout remoto mientras se trabaja en otras mesas ──

@@ -5347,11 +5347,11 @@ function renderAjustesConfig(){
   if($('cfg-sheet-adj')&&config.sheetId)$('cfg-sheet-adj').value=config.sheetId;
   if($('cfg-url-adj')&&config.webappUrl)$('cfg-url-adj').value=config.webappUrl;
 }
-// Rol del local ACTIVO, sin caer en el primer local de la lista (getSupabaseActiveRole lo hace) y con sesión: para acciones destructivas.
+// Solo owner/admin del local activo y con sesión (rol estricto: ver getActiveStoreRoleEstricto).
 function esAdminDelLocalActivo(){
-  const id=String(config?.activeStoreId||'');if(!id||!window.__sesionUserId?.())return false;
-  const st=window.getActiveStore?.();
-  return !!st&&String(st.id||'')===id&&['owner','admin'].includes(String(st.role||'').toLowerCase());
+  if(!window.__sesionUserId?.())return false;
+  const r=String(window.getActiveStoreRoleEstricto?.()||'').toLowerCase();
+  return r==='owner'||r==='admin';
 }
 function limpiarVentas(){
   // Borra el historial LOCAL: el cierre de turno sin conexión se calcula con él (getLocalShiftCloseTotals). Solo owner/admin y nunca con turno abierto (mismo criterio que DEC-07). Rol sin resolver = no permitido.
@@ -8512,6 +8512,13 @@ if(config.webappUrl){loadFromSheets();}
     return stores[0]?.role||'';
   }
   window.getSupabaseActiveRole=getSupabaseActiveRole;
+  // Rol del local ACTIVO, sin caer al primer local de la lista (getSupabaseActiveRole lo hace) y leyendo la variable real de esta sesión
+  // (window.supabaseStores no se publica: getActiveStore/getActiveStoreRole leen esa variable y devuelven rol vacío). Para acciones destructivas.
+  window.getActiveStoreRoleEstricto=function(){
+    const id=String((config&&config.activeStoreId)||'');if(!id)return '';
+    const f=(Array.isArray(supabaseStores)?supabaseStores:[]).find(s=>String(s?.id||'')===id);
+    return String(f?.role||'');
+  };
   function canShowSupabaseTechnicalUi(){
     return ['owner','admin'].includes((getSupabaseActiveRole()||'').toLowerCase()) && getSupabaseTechnicalModeEnabled();
   }

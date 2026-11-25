@@ -20,7 +20,9 @@ const LOGICA = {'7cd84c4f': 'owner', 'eef11ffb': 'admin', '48075b31': 'operator 
         urlHost: (() => { try { return new URL(config.supabaseUrl).host; } catch (_) { return null; } })(),
         localActivo: String((config && config.activeStoreId) || '').slice(0, 8),
         rolActivo: (window.getSupabaseActiveRole && window.getSupabaseActiveRole()) || '',
-        rolEstricto: (window.getActiveStoreRole && window.getActiveStoreRole()) || '',
+        rolEstricto: (window.getActiveStoreRoleEstricto && window.getActiveStoreRoleEstricto()) || '',
+        rolViejoGetActiveStoreRole: (window.getActiveStoreRole && window.getActiveStoreRole()) || '',   // referencia: siempre vacío (lee una variable no publicada)
+        puedeLimpiarHistorial: typeof esAdminDelLocalActivo === 'function' ? esAdminDelLocalActivo() : null,
         locales: (Array.isArray(window.supabaseStores) ? window.supabaseStores : []).map(s => `${String(s.id || '').slice(0, 8)}|${String(s.name || '').slice(0, 40)}|${s.role || ''}|activo=${s.active}`),
         encabezado: ((document.querySelector('#ctx-local .ctx-v') || {}).textContent || '').trim(),
         mesas: document.querySelectorAll('.mesa-card').length,
