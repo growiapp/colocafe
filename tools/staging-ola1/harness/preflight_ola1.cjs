@@ -3,7 +3,7 @@
 // Por perfil: proyecto/URL, usuario, rol, locales visibles (id corto, nombre, rol), local activo, claves de credencial (SOLO nombres) y errores. No escribe nada.
 const fs = require('node:fs'), path = require('node:path');
 const {openDevice, frozenServer, saveAudit, EVID, STAGING} = require('./lib.cjs');
-const PERFILES = ['owner', 'admin', 'caja'];
+const PERFILES = (process.env.PREFLIGHT_PERFILES || 'owner,admin,caja').split(',');
 const LOGICA = {'7cd84c4f': 'owner', 'eef11ffb': 'admin', '48075b31': 'operator (caja)'};
 (async () => {
   const {server, origin} = await frozenServer();
