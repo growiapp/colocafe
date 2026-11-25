@@ -102,10 +102,10 @@ test('O1: cobrar con vuelto calculado no altera la venta (mismo total, sin campo
 
 // ── O2: «Eliminar mesa» es un botón con nombre y zona táctil de 44 px ──
 for (const [nombreVp, vp] of [['escritorio', ESC], ['móvil', MOV]]) {
-  test(`O2 (${nombreVp}): el × de la tarjeta es un botón con nombre, alcanzable por teclado, con zona táctil ≥ 44 px y confirmación`, async () => abrir(async page => {
+  test(`O2 (${nombreVp}): el × de la tarjeta es un botón con nombre, alcanzable por teclado, con zona de toque (44 px en móvil, 32 con mouse) y confirmación`, async () => abrir(async page => {
     const r = await page.$$eval('.mesa-card .mesa-close', bs => bs.map(b => { const a = getComputedStyle(b, '::after'), r = b.getBoundingClientRect(); return {tag: b.tagName, nombre: b.getAttribute('aria-label'), zona: Math.min(r.width + 2 * -parseFloat(a.top), r.height + 2 * -parseFloat(a.top))}; }));
     assert.equal(r.length, 6);
-    for (const b of r) { assert.equal(b.tag, 'BUTTON'); assert.match(b.nombre, /^Eliminar /); assert.ok(b.zona >= 40, JSON.stringify(b)); }
+    for (const b of r) { assert.equal(b.tag, 'BUTTON'); assert.match(b.nombre, /^Eliminar /); assert.ok(b.zona >= (vp.width < 500 ? 44 : 32), JSON.stringify(b)); }
     await page.focus('.mesa-card[data-mesa] .mesa-close');
     assert.equal(await page.evaluate(() => document.activeElement.classList.contains('mesa-close')), true);
     await page.keyboard.press('Enter');
@@ -164,4 +164,17 @@ test('O5: escribir «Paga con» no pierde el foco si Cobrar se repinta (llegada 
   assert.equal(await page.evaluate(() => document.activeElement.id), 'cobro-rec-in', 'el repintado no saca el foco del importe');
   await page.keyboard.type('345');
   assert.equal(await page.$eval('#cobro-rec-in', e => e.value), '12345', 'las cifras siguientes siguen entrando en orden');
+}));
+
+// ── Revisión nativa: totales con centavos y estado inicial de los acordeones ──
+test('O6: «Justo» no muestra faltante cuando el total tiene centavos, y los acordeones declaran aria-expanded desde el inicio', async () => abrir(async page => {
+  await page.evaluate(() => goTab('ajustes'));
+  assert.deepEqual(await page.$$eval('.accordion-hdr', h => h.map(x => x.getAttribute('aria-expanded'))), ['false', 'false', 'false', 'false']);
+  await page.evaluate(() => goTab('carga'));
+  await abrirCobro(page);
+  await page.evaluate(() => { document.querySelectorAll('.cobro-tk .tk-total b').forEach(b => b.textContent = '$12.400'); });
+  await page.evaluate(() => { const o = totalCobroActual; window.totalCobroActual = () => 12400.4; });
+  await page.click('[data-m="transferencia"]'); await page.click('[data-m="ef"]');   // repinta con el total fraccionario
+  await page.click('.cobro-rec [data-r]');                                           // «Justo»
+  assert.deepEqual(await vuelto(page), {t: 'Vuelto $0', falta: false});
 }));

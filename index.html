@@ -612,7 +612,7 @@ input.qty-n:focus{border-color:var(--border2);background:var(--surf2);outline:no
 .mesa-total{font-size:14px;font-weight:500;color:var(--orange)}
 .mesa-close{position:absolute;top:8px;right:8px;width:22px;height:22px;border-radius:50%;border:1px solid var(--border2);background:var(--surf2);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--ink3);cursor:pointer;transition:all .12s}
 .mesa-close{padding:0;font-family:inherit;line-height:1}
-.mesa-close::after{content:'';position:absolute;inset:-11px} /* zona táctil de 44 px sin cambiar el aspecto */
+.mesa-close::after{content:'';position:absolute;inset:-5px} /* zona de 32 px con mouse; en móvil 44 px (ver abajo) sin cambiar el aspecto */
 .mesa-close:hover{background:var(--red-bg);color:var(--red);border-color:rgba(176,48,48,.3)}
 .tipo-btns{display:flex;gap:6px;margin-bottom:14px;justify-content:center}
 .tipo-btn{min-width:112px;padding:7px 14px;border-radius:var(--r-sm);font-size:12px;font-weight:500;border:1px solid var(--border2);background:var(--surf);color:var(--ink2);cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease;user-select:none}
@@ -2692,7 +2692,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
     </div>
     <!-- ACCORDION: Menú -->
     <div class="accordion-item" id="acc-menu">
-      <div role="button" tabindex="0" class="accordion-hdr" onclick="toggleAccordion('menu')">
+      <div role="button" tabindex="0" aria-expanded="false" class="accordion-hdr" onclick="toggleAccordion('menu')">
         <div>
           <div class="accordion-titulo">Menú</div>
           <div class="accordion-meta" id="acc-menu-meta"></div>
@@ -2745,7 +2745,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 
     <!-- ACCORDION: OPERADORES (visible para owner/admin sin modo técnico) -->
     <div class="accordion-item" id="acc-operadores" style="display:none">
-      <div role="button" tabindex="0" class="accordion-hdr" onclick="toggleAccordion('operadores')">
+      <div role="button" tabindex="0" aria-expanded="false" class="accordion-hdr" onclick="toggleAccordion('operadores')">
         <div>
           <div class="accordion-titulo">Operadores</div>
           <div class="accordion-meta" id="acc-operadores-meta">Personal activo de la tienda</div>
@@ -2761,7 +2761,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 
     <!-- ACCORDION: Sheets (solo modo técnico) -->
     <div class="accordion-item" id="acc-sheets" style="display:none">
-      <div role="button" tabindex="0" class="accordion-hdr" onclick="toggleAccordion('sheets')">
+      <div role="button" tabindex="0" aria-expanded="false" class="accordion-hdr" onclick="toggleAccordion('sheets')">
         <div>
           <div class="accordion-titulo">Compatibilidad Google Sheets</div>
           <div class="accordion-meta" id="acc-sheets-meta"></div>
@@ -2788,7 +2788,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 
     <!-- ACCORDION: Datos -->
     <div class="accordion-item" id="acc-datos">
-      <div role="button" tabindex="0" class="accordion-hdr" onclick="toggleAccordion('datos')">
+      <div role="button" tabindex="0" aria-expanded="false" class="accordion-hdr" onclick="toggleAccordion('datos')">
         <div>
           <div class="accordion-titulo">Datos locales</div>
           <div class="accordion-meta">Limpiar historial de ventas</div>
@@ -18311,8 +18311,9 @@ const firmaCobro=()=>{try{const m=(typeof mesaDe==='function'&&mesaDe(mesaActiva
 const medioActual=()=>{try{const ps=getCurrentPaymentState();return ps.payment_mode==='mixed'?'mixed':((ps.pagos&&ps.pagos[0]?.metodo)==='transferencia'?'transferencia':'ef');}catch(_){return 'ef';}};
 function destinoCobro(){try{const t=getCurrentVentaTarget();return t?.nombre||t?.cliente||'Mesa';}catch(_){return 'Mesa';}}
 const montoRecibido=()=>Number(recibido)||0;
-function textoVuelto(total){const r=montoRecibido();if(!r)return{t:'',falta:false};return r>=total?{t:`Vuelto ${fm(r-total)}`,falta:false}:{t:`Faltan ${fm(total-r)}`,falta:true};}
-function opcionesRecibido(total){const s=new Set();[1000,5000,10000,20000].forEach(b=>{const v=Math.ceil(total/b)*b;if(v>total)s.add(v);});return[...s].slice(0,3);}
+function textoVuelto(total){total=Math.round(Number(total)||0);const r=montoRecibido(); // fm() muestra el total redondeado: se compara contra ese mismo importe
+  if(!r)return{t:'',falta:false};return r>=total?{t:`Vuelto ${fm(r-total)}`,falta:false}:{t:`Faltan ${fm(total-r)}`,falta:true};}
+function opcionesRecibido(total){total=Math.round(total);const s=new Set();[1000,5000,10000,20000].forEach(b=>{const v=Math.ceil(total/b)*b;if(v>total)s.add(v);});return[...s].slice(0,3);}
 function pintarVuelto(){const e=$('cobro-vuelto');if(!e)return;const v=textoVuelto(typeof totalCobroActual==='function'?totalCobroActual():0);e.textContent=v.t;e.classList.toggle('falta',v.falta);}
 function msgCobro(t){const m=$('cobro-msg');if(m){m.textContent=t||'';}}
 function pintarCobro(){
@@ -18335,7 +18336,7 @@ function pintarCobro(){
       <div id="cobro-mixto-slot"></div>
       ${m==='ef'&&total>0?`<div class="cobro-rec"><label for="cobro-rec-in">Paga con <small>(opcional, para calcular el vuelto)</small></label>
         <div class="cr-fila"><input id="cobro-rec-in" type="text" inputmode="numeric" autocomplete="off" placeholder="$ recibido" value="${esc(recibido)}">
-        <button type="button" data-r="${total}">Justo</button>${opcionesRecibido(total).map(v=>`<button type="button" data-r="${v}">${fm(v)}</button>`).join('')}</div>
+        <button type="button" data-r="${Math.round(total)}">Justo</button>${opcionesRecibido(total).map(v=>`<button type="button" data-r="${v}">${fm(v)}</button>`).join('')}</div>
         <p id="cobro-vuelto" class="cobro-vuelto${textoVuelto(total).falta?' falta':''}" aria-live="polite">${textoVuelto(total).t}</p></div>`:''}
       <h2 class="sec2">Quién atendió</h2>
       <div class="cobro-ops" role="radiogroup" aria-label="Quién atendió">${estOps==='cargando'?'<span class="hint">Cargando quién está activo…</span>':estOps==='no_disponible'?'<span class="hint">No pudimos leer las personas activas del local. <button type="button" class="btn-sm" data-c="ops">Reintentar</button></span>':ops.length?ops.map(o=>`<button type="button" role="radio" aria-checked="${o===opElegido}" data-o="${esc(o)}">${esc(o)}${o===ultimo?' <small>última vez</small>':''}</button>`).join(''):'<span class="hint">No hay personas activas cargadas. Pedile a administración que las agregue.</span>'}</div>
