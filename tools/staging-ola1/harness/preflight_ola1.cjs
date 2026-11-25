@@ -22,6 +22,10 @@ const LOGICA = {'7cd84c4f': 'owner', 'eef11ffb': 'admin', '48075b31': 'operator 
         rolActivo: (window.getSupabaseActiveRole && window.getSupabaseActiveRole()) || '',
         rolEstricto: (window.getActiveStoreRoleEstricto && window.getActiveStoreRoleEstricto()) || '',
         rolViejoGetActiveStoreRole: (window.getActiveStoreRole && window.getActiveStoreRole()) || '',   // referencia: siempre vacío (lee una variable no publicada)
+        // B26: qué devuelven las funciones que leen window.supabaseStores (no publicada)
+        b26: (() => { const n = window.getActiveStoreName ? String(window.getActiveStoreName()) : null, st = window.getActiveStore ? window.getActiveStore() : null;
+          return {getActiveStoreName_esUuid: n ? /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(n) : null, getActiveStore: st ? {idCorto: String(st.id || '').slice(0, 8), nombreVacio: !st.name, rolVacio: !st.role} : null,
+                  nombreEnTicket: typeof nombreComercio === 'function' ? nombreComercio() : null}; })(),
         puedeLimpiarHistorial: typeof esAdminDelLocalActivo === 'function' ? esAdminDelLocalActivo() : null,
         locales: (Array.isArray(window.supabaseStores) ? window.supabaseStores : []).map(s => `${String(s.id || '').slice(0, 8)}|${String(s.name || '').slice(0, 40)}|${s.role || ''}|activo=${s.active}`),
         encabezado: ((document.querySelector('#ctx-local .ctx-v') || {}).textContent || '').trim(),
