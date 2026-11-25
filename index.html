@@ -2797,7 +2797,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
       </div>
       <div class="accordion-body" id="acc-body-datos">
         <p style="font-size:12px;color:var(--ink2);margin-bottom:12px;line-height:1.5">Borrá ventas e historial local. Menú y Ajustes no se ven afectados.</p>
-        <button class="btn-sm" style="color:var(--red);border-color:rgba(176,48,48,.3)" onclick="pedirConfirm('¿Limpiar todo el historial local de ventas?',limpiarVentas,'Limpiar','var(--red)','🗑')">🗑 Limpiar ventas e historial</button>
+        <button class="btn-sm" data-solo-admin style="color:var(--red);border-color:rgba(176,48,48,.3)" onclick="pedirConfirm('¿Limpiar todo el historial local de ventas?',limpiarVentas,'Limpiar','var(--red)','🗑')">🗑 Limpiar ventas e historial</button>
         <!-- Diagnóstico mesas abiertas (solo modo técnico) -->
         <div id="oo-sb-box" style="display:none;margin-top:14px">
           <div style="font-size:11px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Mesas abiertas · Estado de sincronización</div>
@@ -5226,7 +5226,7 @@ function mostrarResumenTurno(){
 }
 function pintarResumenTurno({ef,mp,tr,otro,tot,cafe,cocina,porOp},nota,delTurno){
   $('turno-modal-body').innerHTML=`
-    <p style="font-size:12px;color:var(--ink3);margin-bottom:14px">Abierto: ${fmtFull(turno.apertura)}<br>Operador principal: <strong>${turno.operador}</strong>${nota?`<br>${nota}`:''}</p>
+    <p style="font-size:12px;color:var(--ink3);margin-bottom:14px">Abierto: ${fmtFull(turno.apertura)}<br>Operador principal: <strong>${escapeHtml(turno.operador)}</strong>${nota?`<br>${nota}`:''}</p>
     <div class="turno-resumen-grid">
       <div class="turno-stat"><div class="turno-stat-lbl">Fondo inicial</div><div class="turno-stat-val">${fmt(turno.fondoCaja)}</div></div>
       <div class="turno-stat"><div class="turno-stat-lbl">Total vendido</div><div class="turno-stat-val" style="color:var(--orange)">${fmt(tot)}</div></div>
@@ -5348,6 +5348,9 @@ function renderAjustesConfig(){
   if($('cfg-url-adj')&&config.webappUrl)$('cfg-url-adj').value=config.webappUrl;
 }
 function limpiarVentas(){
+  // Borra el historial LOCAL: el cierre de turno sin conexión se calcula con él (getLocalShiftCloseTotals). Solo owner/admin y nunca con turno abierto (mismo criterio que DEC-07). Rol sin resolver = no permitido.
+  if(!isSupabaseAdminRole()){showToast('Solo el dueño o un administrador puede limpiar el historial local.');return;}
+  if(turno&&turno.abierto){showToast('Cerrá el turno antes de limpiar el historial de ventas.');return;}
   const pending=window.findPendingSalesSyncGroups?.(ventas||[])||[];
   if(pending.length){
     showToast(`No se puede limpiar: hay ${pending.length} venta${pending.length===1?'':'s'} pendiente${pending.length===1?'':'s'} de sincronizar.`);
@@ -5362,7 +5365,7 @@ function renderStockAlerts(){
   // Se conservan solo los avisos de integridad: discrepancia a conciliar, mantenimiento de stock y ventas pendientes de conciliar.
   const disc=lista.filter(x=>x.i.discrepancia>0);
   const est=x=>x.i.estimado?' (estimado)':'';
-  el.innerHTML=(disc.length?`<div class="alert-banner crit">⚠️ Discrepancia de stock, hay que conciliar: ${disc.map(x=>`${x.p.name} (faltan ${x.i.discrepancia}${est(x)})`).join(', ')}</div>`:'')
+  el.innerHTML=(disc.length?`<div class="alert-banner crit">⚠️ Discrepancia de stock, hay que conciliar: ${disc.map(x=>`${escapeHtml(x.p.name)} (faltan ${x.i.discrepancia}${est(x)})`).join(', ')}</div>`:'')
     +(stockEstadoLocal().pausado?`<div class="alert-banner crit">⏸ Mantenimiento de stock: no cobres ahora. Lo que se cobre queda guardado en este dispositivo y se revisa después.</div>`:'')
     +(stockIncidencias.firma===firmaOperativa()&&stockIncidencias.total?`<div class="alert-banner">⚠️ ${stockIncidencias.total} ${stockIncidencias.total===1?'venta pendiente':'ventas pendientes'} de conciliar, sin descuento de stock: ${stockIncidencias.lista.map(i=>`${escapeHtml(i.product_name||'Sin producto')} ×${Number(i.quantity)||0} (${STOCK_MOTIVOS_INCIDENCIA[i.stock_applied_reason]||'revisar'})`).join(', ')}${stockIncidencias.lista.length<stockIncidencias.total?` <button class="btn ghost" type="button" onclick="window.verMasIncidenciasStock?.()">Ver más</button>`:''}</div>`:'');
 }
@@ -5917,7 +5920,9 @@ document.addEventListener('DOMContentLoaded',()=>{
 function pedirEliminarMesa(id){
   const m=findMesaByAnyId(id);if(!m)return;
   pedirConfirm(`¿Eliminar "${m.nombre}"? Se perderán los ítems.`,async()=>{
-    const before=cloneMesasState();
+    // Solo se guarda LA mesa eliminada (copia y posición): restaurar el arreglo completo pisaba lo hecho en otras mesas durante los hasta 10 s del borrado remoto.
+    let quitada=null;try{quitada=JSON.parse(JSON.stringify(m));}catch(_){quitada=null;}
+    const posicion=findMesaIndexByAnyId(id);
     const sbId=m._sb_id||null;
     removeMesaByAnyId(id);save();syncMesasSheets();
     renderMesasSection();
@@ -5930,8 +5935,9 @@ function pedirEliminarMesa(id){
       showToast('Mesa eliminada.');
       setTimeout(()=>window.triggerOORefresh?.('post_action'),500);
     }catch(err){
-      mesas=before;
+      if(quitada&&!findMesaByAnyId(id)){const i=Math.min(Math.max(posicion,0),(mesas||[]).length);mesas.splice(i,0,quitada);}
       save();renderMesasSection();
+      window.triggerOORefresh?.('delete_failed'); // el servidor tiene la última palabra: si el borrado sí se aplicó, la mesa se retira en la próxima lectura
       if(window.canShowClientTechnicalUi?.())console.warn('[Caja] delete mesa rollback',err);
       showToast('No pudimos eliminar la mesa. Reintentá.');
     }
@@ -6551,7 +6557,7 @@ function renderCargaCats(){
     return;
   }
   const all=[{id:'todos',name:'Todos',color:'#888'},...cats];
-  el.innerHTML=all.map(c=>`<div role="button" tabindex="0" class="chip${catCarga===c.id?' active':''}" onclick="setCargaCat('${c.id}')">${c.id!=='todos'?`<span class="chip-dot" style="background:${c.color}"></span>`:''}${c.name}</div>`).join('');
+  el.innerHTML=all.map(c=>`<div role="button" tabindex="0" class="chip${catCarga===c.id?' active':''}" onclick="setCargaCat('${c.id}')">${c.id!=='todos'?`<span class="chip-dot" style="background:${c.color}"></span>`:''}${escapeHtml(c.name)}</div>`).join('');
 }
 function setCargaCat(id){catCarga=id;renderCargaCats();renderProdGrid();}
 // ── Accesos rápidos: barra de la carga de mesas, elegida por el local (products.metadata.frecuente = posición) ──
@@ -6827,10 +6833,10 @@ function abrirModalVariantes(p,target='pedido'){
   $('modal-variantes-titulo').textContent=p.name;$('modal-variantes-nota').value='';
   $('modal-variantes-grupos').innerHTML=(p.variantes||[]).map((grupo,gi)=>`
     <div class="mod-sel-grupo">
-      <div class="mod-sel-titulo">${grupo.grupo} <span style="font-size:10px;color:var(--ink3)">${grupo.tipo==='unico'?'(elegí uno)':'(varios)'}</span></div>
+      <div class="mod-sel-titulo">${escapeHtml(grupo.grupo)} <span style="font-size:10px;color:var(--ink3)">${grupo.tipo==='unico'?'(elegí uno)':'(varios)'}</span></div>
       <div class="mod-sel-opciones">${(grupo.opciones||[]).map((op,oi)=>`
         <div class="mod-sel-opt" id="vop-${gi}-${oi}" onclick="toggleVariante(${gi},${oi},'${grupo.tipo}')">
-          <span class="mod-sel-opt-nombre">${op.nombre}</span>
+          <span class="mod-sel-opt-nombre">${escapeHtml(op.nombre)}</span>
           <span class="mod-sel-opt-precio">${op.precio>0?`+${fmt(op.precio)}`:'sin cargo'}</span>
         </div>`).join('')}
       </div>
@@ -6884,7 +6890,7 @@ function confirmarVariantes(){
 // ══════════════════════════════════════════════════
 function popularClienteSelectReserva(selId){
   const sel=$('res-cliente');if(!sel)return;
-  sel.innerHTML=`<option value="">Sin cliente</option>`+clientes.map(c=>`<option value="${c.id}"${c.id===selId?' selected':''}>${c.nombre}</option>`).join('');
+  sel.innerHTML=`<option value="">Sin cliente</option>`+clientes.map(c=>`<option value="${c.id}"${c.id===selId?' selected':''}>${escapeHtml(c.nombre)}</option>`).join('');
 }
 function selReservaTipo(t){tipoNuevaMesaReserva=t;['salon','delivery','takeaway'].forEach(x=>{$(`rtipo-btn-${x}`).className=`tipo-btn${x===t?' sel-'+x:''}`;});}
 function setReservaPago(t){
@@ -7402,14 +7408,14 @@ function renderHistVentas(){
         <div class="hist-hdr" onclick="toggleHist(${i})">
           <div>
             <div class="hist-fecha">${fmtShort(d)}${t.hora?` · ${t.hora}`:''}</div>
-            <div class="hist-meta">${originLabel} · ${tipoLabel(t.tipo||'salon')}${t.mesa?` · ${t.mesa}`:''}${t.operador?` · ${t.operador}`:''}${t.source&&showTechSource?` · ${t.source}`:''}</div>
+            <div class="hist-meta">${originLabel} · ${tipoLabel(t.tipo||'salon')}${t.mesa?` · ${escapeHtml(t.mesa)}`:''}${t.operador?` · ${escapeHtml(t.operador)}`:''}${t.source&&showTechSource?` · ${t.source}`:''}</div>
             <div class="hist-meta">${pagosTxt} · ${(n=>n===1?'1 ítem':n+' ítems')(t.itemCount||((t.items||[]).length))}</div>
           </div>
           <div class="hist-right"><span class="hist-total">${fmt(t.total||0)}</span><span class="hist-arr" id="ha-${i}">▾</span></div>
         </div>
         <div class="hist-detail" id="hd-${i}">
           ${(t.items||[]).map(item=>`<div class="hist-row2">
-            <span><strong>${item.producto||''}</strong> ×${item.cantidad||0}${item.variantes?` · ${item.variantes}`:''}${item.nota?` · <em style="color:var(--ink3)">${item.nota}</em>`:''}</span>
+            <span><strong>${escapeHtml(item.producto||'')}</strong> ×${item.cantidad||0}${item.variantes?` · ${escapeHtml(item.variantes)}`:''}${item.nota?` · <em style="color:var(--ink3)">${escapeHtml(item.nota)}</em>`:''}</span>
             <span>${fmt(item.total||0)}</span>
           </div>`).join('')}
           <div class="hist-row2" style="padding-top:6px;border-top:1px solid var(--border);margin-top:4px">
@@ -7639,11 +7645,11 @@ function renderClientesTab(){
   if(!lista.length){el.innerHTML='<div class="empty">No hay clientes</div>';return;}
   el.innerHTML=lista.map(c=>`<div class="cliente-row" onclick="openClienteModal('${c.id}')">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <div class="cliente-nombre">${c.nombre}</div>
+      <div class="cliente-nombre">${escapeHtml(c.nombre)}</div>
       <div class="cliente-visitas">${(c.visitas||[]).length} visita${(c.visitas||[]).length===1?'':'s'}</div>
     </div>
-    <div class="cliente-meta">${[c.telefono,c.email,c.alergias?'⚠ '+c.alergias:''].filter(Boolean).join(' · ')}</div>
-    ${c.preferencias?`<div style="font-size:11px;color:var(--blue);margin-top:3px">★ ${c.preferencias}</div>`:''}
+    <div class="cliente-meta">${escapeHtml([c.telefono,c.email,c.alergias?'⚠ '+c.alergias:''].filter(Boolean).join(' · '))}</div>
+    ${c.preferencias?`<div style="font-size:11px;color:var(--blue);margin-top:3px">★ ${escapeHtml(c.preferencias)}</div>`:''}
   </div>`).join('');
 }
 function openClienteModal(id,retorno){
@@ -7747,13 +7753,13 @@ function renderCatMgr(){
   el.innerHTML=sorted.map(c=>`
     <div class="cat-mgr-row">
       <div class="cat-swatch" style="background:${c.color}" onclick="toggleCP(${c._i})"></div>
-      <span style="flex:1;font-size:13px;font-weight:500">${c.name}</span>
+      <span style="flex:1;font-size:13px;font-weight:500">${escapeHtml(c.name)}</span>
       <span style="font-size:11px;color:var(--ink3)">${c.seccion==='cafeteria'?'☕':'🍳'}</span>
       ${c.reservable?'<span style="font-size:11px;color:var(--ink3)" title="Permite reserva">📋</span>':'<span style="width:18px"></span>'}
       ${edita?`<div class="icon-btn" onclick="openCatModal(${c._i})" title="Editar">
         <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2l3 3L5 14H2v-3L11 2z"/></svg>
       </div>
-      <button class="cat-del" onclick="pedirConfirm('¿Eliminar ${c.name}?',()=>deleteCat(${c._i}))">×</button>`:''}
+      <button class="cat-del" onclick="pedirEliminarCat(${c._i})">×</button>`:''}
     </div>`).join('');
 }
 function toggleCP(i){document.querySelectorAll('.color-picker-wrap').forEach((el,j)=>{if(j!==i)el.classList.remove('open');});document.getElementById('cp-'+i)?.classList.toggle('open');}
@@ -7764,6 +7770,7 @@ function setCatReservable(i,checked){if(cats[i])cats[i].reservable=checked;save(
 function hasCatalogRemoteWriteContext(){
   return !!(config?.supabaseUrl&&config?.supabaseAnonKey&&config?.activeStoreId&&window.getSupabaseClient?.());
 }
+function pedirEliminarCat(i){const c=cats[i];if(c)pedirConfirm('¿Eliminar '+c.name+'?',()=>deleteCat(i));} // el nombre no viaja dentro del onclick (un apóstrofe o HTML lo rompía)
 async function deleteCat(i){
   const c=cats[i];if(!c)return;
   if(menu.some(p=>p.cat===c.id)){showToast('No se puede — tiene productos');return;}
@@ -7787,7 +7794,7 @@ function addCat(){
   abrirModalNuevaCat('ajustes');
 }
 function addCatFromModal(){ abrirNuevaCatDesdeProducto('ajustes'); }
-function populateCatSelect(){const el=$('m-cat');if(el)el.innerHTML=cats.sort((a,b)=>a.name.localeCompare(b.name,'es')).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');}
+function populateCatSelect(){const el=$('m-cat');if(el)el.innerHTML=cats.sort((a,b)=>a.name.localeCompare(b.name,'es')).map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');}
 function toggleIlimitado(){const ilim=$('m-ilimitado')?.checked;$('m-stock-wrap').style.display=ilim?'none':'block';}
 function adjProdStock(id,d){const p=menu.find(x=>sameId(x.id,id));if(!p||p.ilimitado)return;const n=(Number(p.stock)||0)+d;p.stock=stockServidor()?n:Math.max(0,n);save();renderMenuAdm();renderStockAlerts();syncMenuSheets();}
 function clearPhysicalCountError(input){
@@ -7837,7 +7844,7 @@ function renderMenuAdm(){
   if(!sorted.length){el.innerHTML=menu.length?'<div class="empty">Sin resultados</div>':'<div class="empty">No hay productos</div>';return;}
   el.innerHTML=sorted.map(p=>{const cat=getCat(p.cat);return`<div class="prod-adm-row">
     <div style="width:8px;height:8px;border-radius:50%;background:${cat.color};flex-shrink:0"></div>
-    <span class="prod-adm-nombre">${p.name}</span>
+    <span class="prod-adm-nombre">${escapeHtml(p.name)}</span>
     <span class="prod-adm-precio">${fmt(p.price)}</span>
     <div class="prod-adm-stock-ctrl" style="${p.ilimitado?'display:none':''}">
       <button class="qty-btn" type="button" title="Corrección: resta 1" onclick="adjProdStock('${p.id}',-1)">−</button>
@@ -7900,9 +7907,14 @@ async function eliminarProductoConfirmado(id){
 pedirEliminarProducto.__remoteFirst=true;
 function closeProdModal(){$('modal-prod').classList.remove('open');}
 function closeProdModalOutside(e){if(e.target===$('modal-prod'))closeProdModal();}
+// Precio de producto: solo enteros mayores a 0 (el campo es type=number y el navegador toma el punto como decimal: «2.500» valía 2,5 y se guardaba como $2).
+// Todo lo demás (decimales, negativos, cero, notación científica) se rechaza con aviso en vez de truncarse en silencio.
+function precioProductoValido(raw){const t=String(raw??'').trim();return /^\d{1,9}$/.test(t)&&Number(t)>0?Number(t):null;}
+const MSG_PRECIO_INVALIDO='El precio debe ser un número entero mayor a 0, sin puntos ni comas (ej.: 2500).';
 async function guardarProducto(){
-  const name=($('m-nombre')?.value||'').trim(),price=parseInt($('m-precio')?.value),cat=$('m-cat')?.value;
-  if(!name||!price){showToast('Completá nombre y precio');return;}
+  const name=($('m-nombre')?.value||'').trim(),precioTxt=String($('m-precio')?.value??'').trim(),price=precioProductoValido(precioTxt),cat=$('m-cat')?.value;
+  if(!name||!precioTxt){showToast('Completá nombre y precio');return;}
+  if(price===null){showToast(MSG_PRECIO_INVALIDO);return;}
   const ilimitado=!!$('m-ilimitado')?.checked;
   // No resetear stock a 0 al marcar ilimitado — conservar el valor para cuando se desactive
   const existing=editId?menu.find(x=>sameId(x.id,editId)):null;
@@ -7943,7 +7955,7 @@ function renderVariantesModalBody(){
   el.innerHTML=_variantesEdit.map((g,gi)=>`
     <div class="variante-grupo">
       <div class="variante-grupo-hdr">
-        <input value="${g.grupo||''}" placeholder="Nombre del grupo" oninput="_variantesEdit[${gi}].grupo=this.value">
+        <input value="${escapeAttr(g.grupo||'')}" placeholder="Nombre del grupo" oninput="_variantesEdit[${gi}].grupo=this.value">
         <select class="variante-grupo-tipo" onchange="_variantesEdit[${gi}].tipo=this.value">
           <option value="unico"${g.tipo==='unico'?' selected':''}>Único</option>
           <option value="multiple"${g.tipo==='multiple'?' selected':''}>Múltiple</option>
@@ -7952,7 +7964,7 @@ function renderVariantesModalBody(){
       </div>
       ${(g.opciones||[]).map((op,oi)=>`
         <div class="variante-opcion">
-          <input class="variante-op-nombre" placeholder="Opción" value="${op.nombre||''}" oninput="_variantesEdit[${gi}].opciones[${oi}].nombre=this.value">
+          <input class="variante-op-nombre" placeholder="Opción" value="${escapeAttr(op.nombre||'')}" oninput="_variantesEdit[${gi}].opciones[${oi}].nombre=this.value">
           <input class="variante-op-precio" type="number" min="0" placeholder="$0" value="${op.precio||0}" oninput="_variantesEdit[${gi}].opciones[${oi}].precio=parseInt(this.value)||0">
           <button class="qty-btn" onclick="delVarianteOpcion(${gi},${oi})">×</button>
         </div>`).join('')}
@@ -7986,7 +7998,7 @@ function openProdRapidoModal(contexto){
 function _rellenarModalProd(snap){
   clearPhysicalCountError($('pr-stock'));
   const sortedCats=cats.slice().sort((a,b)=>a.name.localeCompare(b.name,'es'));
-  $('pr-cat').innerHTML=sortedCats.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  $('pr-cat').innerHTML=sortedCats.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
   if(snap){
     $('pr-nombre').value=snap.nombre||'';
     $('pr-precio').value=snap.precio||'';
@@ -8009,10 +8021,11 @@ function closeModalProdRapido(e){if(e.target===$('modal-prod-rapido'))cerrarModa
 
 async function guardarProdRapido(){
   const name=($('pr-nombre')?.value||'').trim();
-  const price=parseInt($('pr-precio')?.value)||0;
+  const precioTxt=String($('pr-precio')?.value??'').trim(),price=precioProductoValido(precioTxt);
   const cat=$('pr-cat')?.value;
   const ilimitado=!!$('pr-ilimitado')?.checked;
-  if(!name||!price){showToast('Completá nombre y precio');return;}
+  if(!name||!precioTxt){showToast('Completá nombre y precio');return;}
+  if(price===null){showToast(MSG_PRECIO_INVALIDO);return;}
   const stock=ilimitado?0:physicalCountValue($('pr-stock'));
   if(stock===null)return;
   const newId='prod_'+Date.now();
@@ -8956,7 +8969,7 @@ if(config.webappUrl){loadFromSheets();}
       if(storeSel){
         const currentStoreId=config.activeStoreId||'';
         storeSel.innerHTML=`<option value="">${storeCount?'Seleccioná…':'Sin stores asignadas'}</option>`+
-          supabaseStores.map(s=>`<option value="${s.id}"${s.id===currentStoreId?' selected':''}>${s.name}${canTech && s.role?` · ${s.role}`:''}</option>`).join('');
+          supabaseStores.map(s=>`<option value="${s.id}"${s.id===currentStoreId?' selected':''}>${escapeHtml(s.name)}${canTech && s.role?` · ${s.role}`:''}</option>`).join('');
       }
     }
     // Mostrar/ocultar selector según cantidad de tiendas (nunca mostrar error mientras carga)
@@ -13255,11 +13268,11 @@ if(config.webappUrl){loadFromSheets();}
       if(!lista.length){el.innerHTML='<div class="empty">No hay clientes</div>';renderCrSupabaseUi();return;}
       el.innerHTML=lista.map(c=>`<div class="cliente-row" onclick="openClienteModal('${c.id}')">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div class="cliente-nombre">${c.nombre}</div>
+          <div class="cliente-nombre">${escapeHtml(c.nombre)}</div>
           <div class="cliente-visitas">${customerVisitCount(c)} visita${customerVisitCount(c)===1?'':'s'}</div>
         </div>
-        <div class="cliente-meta">${[c.telefono,c.email,c.alergias?'⚠ '+c.alergias:''].filter(Boolean).join(' · ')}</div>
-        ${c.preferencias?`<div style="font-size:11px;color:var(--blue);margin-top:3px">★ ${c.preferencias}</div>`:''}
+        <div class="cliente-meta">${escapeHtml([c.telefono,c.email,c.alergias?'⚠ '+c.alergias:''].filter(Boolean).join(' · '))}</div>
+        ${c.preferencias?`<div style="font-size:11px;color:var(--blue);margin-top:3px">★ ${escapeHtml(c.preferencias)}</div>`:''}
       </div>`).join('');
       renderCrSupabaseUi();
     };
@@ -14006,7 +14019,7 @@ if(config.webappUrl){loadFromSheets();}
         <div><strong>Turno activo local:</strong> ${turno&&turno.abierto?'Sí':'No'}</div>
         <div><strong>Turno activo Supabase:</strong> ${shiftsRemoteOpen?'Sí':'No'}</div>
         <div><strong>Shift ID actual:</strong> ${turno?._sb_id||'—'}</div>
-        <div><strong>Operador:</strong> ${turno?.operador||'—'}</div>
+        <div><strong>Operador:</strong> ${escapeHtml(turno?.operador||'—')}</div>
         <div><strong>Apertura:</strong> ${turno?.apertura||'—'}</div>
         <div><strong>Store activa:</strong> ${shiftsCurrentStoreName||'Sin store activa'}</div>
         <div><strong>Store ID:</strong> ${getShiftsStoreId()||'—'}</div>
@@ -16638,12 +16651,14 @@ if(config.webappUrl){loadFromSheets();}
     if(!ok) showToast('Herramienta disponible sólo en modo técnico.');
     return ok;
   }
+  // El respaldo/diagnóstico local sirve para recuperar datos de operación: las credenciales de sesión (supabase-js guarda sb-<proyecto>-auth-token en localStorage) nunca deben salir en el archivo.
+  const CLAVE_CREDENCIAL=/^sb-.+-auth-token|token|secret|password/i;
   function readStorageObject(storage){
     const out={};
     try{
       for(let i=0;i<storage.length;i++){
         const key=storage.key(i);
-        out[key]=storage.getItem(key);
+        out[key]=CLAVE_CREDENCIAL.test(key)?'[REDACTADO: credencial de sesión]':storage.getItem(key);
       }
     }catch(err){
       out.__read_error=err?.message||String(err);
