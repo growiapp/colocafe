@@ -20,10 +20,15 @@ const KEYFILE = path.join(STATE, 'anon.key');
 const fixtureOrders = new Set();
 const PUBLIC_HOSTS =new Set(['cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com']);
 
+// Credencial aceptada (SOLO claves públicas): (1) la clave «anon» clásica, un JWT (eyJ…) con role=anon y ref=staging, verificable; o
+// (2) una clave «publishable» nueva (sb_publishable_…), cuyo formato no permite comprobar el proyecto: queda protegida porque la red del arnés
+// solo habla con staging. Se rechazan service_role, sb_secret_ y cualquier JWT de otro proyecto.
 function validAnonKey(key) {
+  const k = String(key || '').trim();
+  if (/^sb_publishable_[A-Za-z0-9_-]{20,}$/.test(k)) return true;
   try {
-    const c = JSON.parse(Buffer.from(String(key).split('.')[1], 'base64url').toString());
-    return c.role === 'anon' && c.ref === 'wjymdgfqmqutihadffec';
+    const c = JSON.parse(Buffer.from(k.split('.')[1], 'base64url').toString());
+    return k.split('.').length === 3 && c.role === 'anon' && c.ref === 'wjymdgfqmqutihadffec';
   } catch (_) { return false; }
 }
 
@@ -72,6 +77,7 @@ async function openDevice(name, {origin, audit, mode = 'readonly', fixtureStore 
     const req = route.request(), url = new URL(req.url()), m = req.method();
     if (url.origin === origin) {
       if (m === 'GET' || m === 'HEAD') return route.continue();
+      if (m === 'POST' && name === 'setup' && url.pathname === '/__setup') return route.continue(); // único envío permitido: el formulario local de la clave pública (127.0.0.1)
       state.violations.push(`ORIGEN_LOCAL_METODO:${m}`); return route.abort('blockedbyclient');
     }
     if (url.host === PROD) { log({host:url.host, method:m, result:'BLOCKED_PROD'}); state.violations.push('PROD'); return route.abort('blockedbyclient'); }

@@ -16,18 +16,30 @@ const HTML = {'content-type':'text/html; charset=utf-8'};
     if (req.method === 'POST') {
       let b = ''; req.on('data', d => { b += d; }); req.on('end', () => {
         const key = (new URLSearchParams(b).get('key') || '').trim();
-        if (!validAnonKey(key)) { res.writeHead(400, HTML); return res.end('<p>Esa clave no es la anon de wjymdgfqmqutihadffec. <a href="/__setup">Volver</a></p>'); }
+        if (!validAnonKey(key)) { res.writeHead(400, HTML); return res.end('<p>Esa clave no corresponde: se esperaba la clave PÚBLICA de staging (anon «eyJ…» con ref wjymdgfqmqutihadffec, o «sb_publishable_…»). Nunca service_role ni sb_secret_. <a href="/__setup">Volver</a></p>'); }
         fs.writeFileSync(KEYFILE, key); res.writeHead(200, HTML); res.end('<p>Listo. Se abren las ventanas de login.</p>'); keyReady();
       });
       return;
     }
     res.writeHead(200, HTML);
-    res.end('<!doctype html><title>Clave publica de staging</title><form method=post style="font:16px sans-serif;margin:40px"><p>Pegá la clave <b>anon</b> de colo-cafe-staging (Dashboard, Connect):</p><input name=key style="width:80%" autofocus> <button>Continuar</button></form>');
+    res.end('<!doctype html><title>Clave publica de staging</title><form method=post style="font:16px sans-serif;margin:40px"><p>Pegá la clave <b>pública</b> del proyecto de staging <code>wjymdgfqmqutihadffec</code>: la <b>anon</b> (empieza con <code>eyJ</code>) o la <b>publishable</b> (<code>sb_publishable_…</code>). <b>No</b> pegues service_role ni secret. Dashboard → Project Settings → API Keys.</p><input name=key style="width:80%" autofocus> <button>Continuar</button></form>');
   });
   const audit = [];
   if (!fs.existsSync(KEYFILE)) {
-    const s = await openDevice('setup', {origin, audit, headless:false});
+    const s = await openDevice('setup', {origin, audit, headless: process.env.LOGIN_HEADLESS === '1'});
     await s.page.goto(`${origin}/__setup`);
+    if (process.env.LOGIN_SELFTEST) {   // autotest: ¿carga el formulario y el envío (POST) llega al servidor local? Usa una clave inválida a propósito: no guarda nada.
+      const r = {};
+      r.campo = await s.page.locator('input[name=key]').count();
+      r.otroPostBloqueado = await s.page.evaluate(() => fetch('/otra-ruta', {method: 'POST', body: 'x'}).then(() => false).catch(() => true));   // la excepción es SOLO /__setup
+      r.violacionesSonda = s.state.violations.length; s.state.violations.length = 0;
+      await s.page.fill('input[name=key]', 'esto-no-es-una-clave');
+      await s.page.locator('button, input[type=submit]').first().click();
+      await s.page.waitForTimeout(2000);
+      r.url = s.page.url(); r.texto = (await s.page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 160);
+      r.violaciones = s.state.violations; r.claveGuardada = fs.existsSync(KEYFILE);
+      console.log('SELFTEST ' + JSON.stringify(r)); await s.ctx.close(); server.close(); process.exit(0);
+    }
     await Promise.race([gotKey, new Promise((_, no) => setTimeout(() => no(new Error('sin clave')), LIMIT))]);
     await s.ctx.close();
   }
