@@ -2797,7 +2797,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
       </div>
       <div class="accordion-body" id="acc-body-datos">
         <p style="font-size:12px;color:var(--ink2);margin-bottom:12px;line-height:1.5">Borrá ventas e historial local. Menú y Ajustes no se ven afectados.</p>
-        <button class="btn-sm" data-solo-admin style="color:var(--red);border-color:rgba(176,48,48,.3)" onclick="pedirConfirm('¿Limpiar todo el historial local de ventas?',limpiarVentas,'Limpiar','var(--red)','🗑')">🗑 Limpiar ventas e historial</button>
+        <button class="btn-sm" data-solo-admin-estricto style="color:var(--red);border-color:rgba(176,48,48,.3)" onclick="pedirConfirm('¿Limpiar todo el historial local de ventas?',limpiarVentas,'Limpiar','var(--red)','🗑')">🗑 Limpiar ventas e historial</button>
         <!-- Diagnóstico mesas abiertas (solo modo técnico) -->
         <div id="oo-sb-box" style="display:none;margin-top:14px">
           <div style="font-size:11px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Mesas abiertas · Estado de sincronización</div>
@@ -5665,7 +5665,14 @@ function renderVentasFiltroChips(){
 }
 function setVentasFiltro(t){ventasFiltroTipo=t;renderVentasFiltroChips();renderMesasSection();renderReservasSection();}
 
+// Los repintados periódicos (lecturas del servidor, tiempo real) reemplazan las tarjetas: se conserva el foco de teclado en la misma tarjeta y el mismo control.
 function renderMesasSection(){
+  const c=$('mesas-container'),a=document.activeElement,card=c&&a&&c.contains(a)?a.closest('.mesa-card[data-mesa]'):null;
+  const foco=card?{id:card.dataset.mesa,sel:a===card?'':'.'+[...a.classList].join('.')}:null;
+  try{return renderMesasSectionInterno();}
+  finally{if(foco){const n=[...c.querySelectorAll('.mesa-card[data-mesa]')].find(x=>x.dataset.mesa===foco.id),t=n&&(foco.sel?n.querySelector(foco.sel):n);if(t&&t!==document.activeElement)t.focus({preventScroll:true});}}
+}
+function renderMesasSectionInterno(){
   const c=$('mesas-container'),e=$('mesas-empty');if(!c)return;
   renderCajaPendingBanner(); // un conflicto o una sync nueva cambia el aviso de la misma vista
   const ooSync=window.getOpenOrdersSyncState?.();
@@ -7738,7 +7745,7 @@ function renderAjustes(){
 }
 // Solo la interfaz: el servidor (RLS) ya rechaza el alta/edición de catálogo para el operador. Rol desconocido (sin sesión) = no se oculta nada.
 function puedeEditarCatalogo(){const r=String(window.getSupabaseActiveRole?.()||window.getActiveStoreRole?.()||'').toLowerCase();return !r||r==='owner'||r==='admin';}
-function aplicarPermisosCatalogo(){const ok=puedeEditarCatalogo();document.querySelectorAll('[data-solo-admin]').forEach(b=>{b.style.display=ok?'':'none';});return ok;}
+function aplicarPermisosCatalogo(){const ok=puedeEditarCatalogo();document.querySelectorAll('[data-solo-admin]').forEach(b=>{b.style.display=ok?'':'none';});const estricto=isSupabaseAdminRole();document.querySelectorAll('[data-solo-admin-estricto]').forEach(b=>{b.style.display=estricto?'':'none';}); /* acciones destructivas: rol sin resolver = oculto */return ok;}
 function renderCatMgr(){
   const el=$('cat-mgr');if(!el)return;
   const edita=aplicarPermisosCatalogo();

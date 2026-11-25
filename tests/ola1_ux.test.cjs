@@ -179,3 +179,16 @@ test('O7: «Justo» no muestra faltante cuando el total tiene centavos (12.400,4
   await page.click('.cobro-rec [data-r]');                                           // «Justo»
   assert.deepEqual(await vuelto(page), {t: 'Vuelto $0', falta: false});
 }));
+
+// ── O8: el repintado de las tarjetas no le quita el foco al teclado ──
+test('O8: un repintado de las tarjetas conserva el foco en el mismo control de la misma mesa (× y tarjeta)', async () => abrir(async page => {
+  for (const sel of ['.mesa-close', '']) {
+    const r = await page.evaluate(sel => {
+      const card = document.querySelectorAll('.mesa-card[data-mesa]')[2], id = card.dataset.mesa, objetivo = sel ? card.querySelector(sel) : card;
+      objetivo.focus(); renderMesasSection();
+      const a = document.activeElement;
+      return {misma: a.closest('.mesa-card')?.dataset.mesa === id, tipo: sel ? a.classList.contains('mesa-close') : a.classList.contains('mesa-card'), conectado: a.isConnected};
+    }, sel);
+    assert.deepEqual(r, {misma: true, tipo: true, conectado: true}, `selector «${sel}»`);
+  }
+}));
