@@ -1,5 +1,7 @@
 # Preflight de publicación — versión consolidada (Colo Café)
 
+> **Preflight FINAL de producción (solo lectura, 2026-11-25): ver `PLAN_PUBLICACION_PRODUCCION.md`** (commit exacto, hash del sitio, SQL y reversa, comparación de políticas 54/54, orden de ejecución, paradas y rollback, riesgos).
+
 **Estado: NO publicado. Nada se subió, mezcló ni desplegó. Producción sigue en `334df6c`.** Este documento es la lista de verificación para cuando la persona responsable decida publicar.
 
 ## 1. Qué se publicaría
