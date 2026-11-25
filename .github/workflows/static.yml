@@ -22,11 +22,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Single deploy job since we're just deploying
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  # Build and upload in one job, deploy in another: deploy-pages must not look up
+  # the artifact right after it is finalized (actions/deploy-pages#451).
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -41,6 +39,14 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: '_site'
+
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
