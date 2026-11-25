@@ -1,28 +1,37 @@
 'use strict';
-// Preflight de SOLO LECTURA (barrera 'readonly': ninguna escritura a /rest/v1). Por cuenta: rol, locales visibles y local activo.
+// Preflight de SOLO LECTURA (barrera 'readonly': ninguna escritura a /rest/v1). Se identifica a cada cuenta por su USUARIO, no por el nombre de la ventana.
+// Por perfil: proyecto/URL, usuario, rol, locales visibles (id corto, nombre, rol), local activo, claves de credencial (SOLO nombres) y errores. No escribe nada.
 const fs = require('node:fs'), path = require('node:path');
-const {openDevice, frozenServer, saveAudit, EVID} = require('./lib.cjs');
-const DEVICES = ['owner', 'admin', 'caja'];
+const {openDevice, frozenServer, saveAudit, EVID, STAGING} = require('./lib.cjs');
+const PERFILES = ['owner', 'admin', 'caja'];
+const LOGICA = {'7cd84c4f': 'owner', 'eef11ffb': 'admin', '48075b31': 'operator (caja)'};
 (async () => {
   const {server, origin} = await frozenServer();
   const audit = [], out = {};
-  for (const name of DEVICES) {
-    const d = await openDevice(name, {origin, audit, mode: 'readonly', headless: true});
+  for (const perfil of PERFILES) {
+    const d = await openDevice(perfil, {origin, audit, mode: 'readonly', headless: true});
     try {
       await d.page.goto(`${origin}/`);
-      await d.page.waitForFunction(() => typeof window.__sesionUserId === 'function', null, {timeout: 20000}).catch(() => {});
-      await d.page.waitForTimeout(6000);
-      out[name] = await d.page.evaluate(() => ({
+      await d.page.waitForFunction(() => typeof window.__sesionUserId === 'function' && !!window.__sesionUserId(), null, {timeout: 30000}).catch(() => {});
+      await d.page.waitForTimeout(8000);
+      const r = await d.page.evaluate(() => ({
         sesion: !!(window.__sesionUserId && window.__sesionUserId()),
         user8: String((window.__sesionUserId && window.__sesionUserId()) || '').slice(0, 8),
-        rol: (window.getSupabaseActiveRole && window.getSupabaseActiveRole()) || null,
-        locales: [...document.querySelectorAll('#sb-store-sel option, #sb-store-sel-modal option')].map(o => o.value.slice(0, 8) + ':' + o.textContent.trim().slice(0, 40)),
-        encabezado: (document.querySelector('#ctx-local .ctx-v') || {}).textContent || null,
+        urlHost: (() => { try { return new URL(config.supabaseUrl).host; } catch (_) { return null; } })(),
+        localActivo: String((config && config.activeStoreId) || '').slice(0, 8),
+        rolActivo: (window.getSupabaseActiveRole && window.getSupabaseActiveRole()) || '',
+        rolEstricto: (window.getActiveStoreRole && window.getActiveStoreRole()) || '',
+        locales: (Array.isArray(window.supabaseStores) ? window.supabaseStores : []).map(s => `${String(s.id || '').slice(0, 8)}|${String(s.name || '').slice(0, 40)}|${s.role || ''}|activo=${s.active}`),
+        encabezado: ((document.querySelector('#ctx-local .ctx-v') || {}).textContent || '').trim(),
         mesas: document.querySelectorAll('.mesa-card').length,
+        clavesCredencial: Object.keys(localStorage).filter(k => /^sb-.+-auth-token/.test(k)).map(k => k.replace(/^(sb-[^-]{0,6}).*(-auth-token.*)$/, '$1…$2')),
       }));
-    } catch (e) { out[name] = {error: String(e.message).slice(0, 200)}; }
-    out[name].violaciones = d.state.violations.slice();
-    out[name].erroresConsola = d.consoleErrors.slice(0, 5);
+      r.cuenta = LOGICA[r.user8] || 'DESCONOCIDA';
+      r.esStaging = r.urlHost === STAGING;
+      out[perfil] = r;
+    } catch (e) { out[perfil] = {error: String(e.message).slice(0, 200)}; }
+    out[perfil].violaciones = d.state.violations.slice();
+    out[perfil].erroresConsola = d.consoleErrors.slice(0, 4);
     await d.ctx.close();
   }
   saveAudit(audit, 'network_preflight.jsonl');

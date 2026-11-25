@@ -107,7 +107,8 @@ async function openDevice(name, {origin, audit, mode = 'readonly', fixtureStore 
   });
   await ctx.routeWebSocket(/.*/, ws => {
     const url = new URL(ws.url());
-    if (url.origin === `https://${STAGING}` && url.pathname === '/realtime/v1/websocket') { log({host:url.host, method:'WS', path:url.pathname, result:'ALLOWED'}); ws.connectToServer(); return; }
+    // El websocket de realtime de staging usa wss://; antes se comparaba contra https:// y se bloqueaba siempre.
+    if (url.protocol === 'wss:' && url.host === STAGING && url.pathname === '/realtime/v1/websocket') { log({host:url.host, method:'WS', path:url.pathname, result:'ALLOWED'}); ws.connectToServer(); return; }
     log({host:url.host, method:'WS', result:'BLOCKED'}); state.violations.push(`WS_NO_AUTORIZADO:${url.host}${url.pathname}`); ws.close();
   });
   ctx.on('response', res => { const pendiente = (async () => {
