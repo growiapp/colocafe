@@ -1,192 +1,166 @@
 'use strict';
-// Recorridos de staging de la ola 1 (cinco mejoras + B1/B2/B4/B5/B23 donde aplique). SOLO sobre el local sintético ZZ_E2E_OLA1_* de staging.
-// Requisitos: login.cjs ya ejecutado (perfiles con sesión), fixtures.sql aplicado por la persona, E2E_REPO/E2E_FROZEN/E2E_STATE/E2E_EVID definidos.
-// Antes de CUALQUIER escritura, por cuenta: proyecto, URL, usuario, rol y local se verifican; si algo no coincide, se aborta esa cuenta.
+// Ciclo de escritura de la ola 1 en STAGING, SOLO dentro del local sintético ZZ_E2E_OLA1 (la política del arnés bloquea cualquier otra escritura).
+// Por cuenta (identificada por su USUARIO y rol): cambia al local sintético por el diálogo real, abre turno, cobra (efectivo con vuelto, transferencia, mixto, centavos)
+// y elimina una mesa. Antes de CADA bloque de escrituras se verifica proyecto, URL, usuario, rol y local; si no coinciden, se aborta esa cuenta sin escribir.
+// Requisitos: login ya hecho, fixtures.sql aplicado, E2E_REPO/E2E_FROZEN/E2E_STATE/E2E_EVID definidos.
 const fs = require('node:fs'), path = require('node:path');
 const {openDevice, frozenServer, saveAudit, EVID, STAGING} = require('./lib.cjs');
 const {FIXTURE_STORE} = require('./policy.cjs');
 const CUENTAS = {owner: {user8: '7cd84c4f', rol: 'owner'}, admin: {user8: 'eef11ffb', rol: 'admin'}, caja: {user8: '48075b31', rol: 'operator'}};
-const SOLO = (process.env.OLA1_SOLO || 'owner,admin,caja').split(',');   // filtro por CUENTA (owner, admin, caja=operador), no por nombre de ventana
-const PERFILES = ['owner', 'admin', 'caja'];                              // perfiles de navegador; qué cuenta tiene cada uno se descubre por su usuario
-const identidades = {};
-const ESC = {width: 1280, height: 800}, MOV = {width: 390, height: 844};
-const res = []; // {cuenta, dispositivo, flujo, ok, detalle}
-const reg = (cuenta, dispositivo, flujo, ok, detalle = '') => { res.push({cuenta, dispositivo, flujo, ok: !!ok, detalle: String(detalle).slice(0, 300)}); console.log(`${ok ? 'OK ' : 'FALLA'} [${cuenta}/${dispositivo}] ${flujo}${detalle ? ' · ' + String(detalle).slice(0, 160) : ''}`); };
-const shot = (d, nombre) => d.page.screenshot({path: path.join(EVID, `${d.cuenta || d.name}_${nombre}.png`)}).catch(() => {});   // evidencia nombrada por CUENTA autenticada, no por la ventana
+const SOLO = (process.env.OLA1_SOLO || 'owner,admin,caja').split(',');          // filtro por CUENTA, no por ventana
+const BLOQUES = (process.env.OLA1_BLOQUES || 'turno,cobros,eliminar').split(',');
+const PERFILES = ['owner', 'admin', 'caja'];
+const res = [], identidades = {}, capturas = [];
+const reg = (cuenta, flujo, ok, detalle = '') => { res.push({cuenta, flujo, ok: ok === null ? null : !!ok, detalle: String(detalle).slice(0, 400)}); console.log(`${ok === null ? 'INFO ' : ok ? 'OK   ' : 'FALLA'} [${cuenta}] ${flujo}${detalle ? ' · ' + String(detalle).slice(0, 220) : ''}`); };
+const shot = (d, n) => d.page.screenshot({path: path.join(EVID, `${d.cuenta || d.name}_${n}.png`)}).catch(() => {});
+const fm = n => '$' + Math.round(n).toLocaleString('es-AR');
 
-// Verificación previa de escritura (proyecto, URL, usuario, rol, local). Devuelve null si todo coincide.
-async function verificarEntorno(d, esperado) {
-  const e = await d.page.evaluate(() => ({
-    url: (typeof config === 'object' && config.supabaseUrl) || '', store: (typeof config === 'object' && config.activeStoreId) || '',
-    uid: String((window.__sesionUserId && window.__sesionUserId()) || ''), rol: (window.getSupabaseActiveRole && window.getSupabaseActiveRole()) || '',
-    local: (document.querySelector('#ctx-local .ctx-v') || {}).textContent || '',
-  }));
+// ── Verificación previa a escribir: proyecto, URL, usuario, rol y local ──
+async function verificarEntorno(d, cuenta) {
+  const e = await d.page.evaluate(() => ({url: (config && config.supabaseUrl) || '', store: (config && config.activeStoreId) || '', uid: String((window.__sesionUserId && window.__sesionUserId()) || ''), rol: (window.getActiveStoreRoleEstricto && window.getActiveStoreRoleEstricto()) || '', local: ((document.querySelector('#ctx-local .ctx-v') || {}).textContent || '')}));
   const fallas = [];
   if (new URL(e.url || 'http://x').host !== STAGING) fallas.push('URL≠staging:' + e.url);
   if (e.store !== FIXTURE_STORE) fallas.push('local activo≠sintético:' + e.store);
-  if (!e.uid.startsWith(esperado.user8)) fallas.push('usuario inesperado:' + e.uid.slice(0, 8));
-  if (e.rol !== esperado.rol) fallas.push(`rol ${e.rol}≠${esperado.rol}`);
-  if (!/ZZ_E2E_OLA1/.test(e.local)) fallas.push('nombre de local no es el sintético:' + e.local);
+  if (!e.uid.startsWith(CUENTAS[cuenta].user8)) fallas.push('usuario inesperado:' + e.uid.slice(0, 8));
+  if (e.rol !== CUENTAS[cuenta].rol) fallas.push(`rol ${e.rol}≠${CUENTAS[cuenta].rol}`);
+  if (!/ZZ_E2E_OLA1/.test(e.local)) fallas.push('nombre de local no sintético:' + e.local);
   return fallas.length ? fallas.join(' | ') : null;
 }
-const montoPagado = body => { try { const b = JSON.parse(body); const f = Array.isArray(b) ? b : [b]; return f; } catch (_) { return null; } };
-
-async function nuevaMesa(d, nombre, productos) {   // recorrido real: + Mesa → nombre → productos → Abrir mesa
-  await d.page.getByText('+ Mesa', {exact: true}).first().click();
-  await d.page.locator('#nueva-mesa-input').fill(nombre);
-  for (const [prod, veces] of productos) for (let i = 0; i < veces; i++) await d.page.locator('.order-modal-shell .prod-card', {hasText: prod}).first().click();
-  await d.page.getByRole('button', {name: /Abrir mesa/}).click();
-  await d.page.waitForSelector('.mesa-card', {timeout: 15000});
-  await d.page.waitForFunction(n => [...document.querySelectorAll('.mesa-card')].some(c => c.textContent.includes(n)), nombre, {timeout: 20000});
+async function cambiarAlSintetico(d) {                                           // el recorrido real: «Local» → Elegí la tienda → Continuar
+  const p = d.page;
+  await p.click('#ctx-local'); await p.waitForSelector('#sb-store-sel-modal', {state: 'visible', timeout: 10000});
+  await p.selectOption('#sb-store-sel-modal', FIXTURE_STORE);
+  await p.getByRole('button', {name: 'Continuar'}).click();
+  await p.waitForFunction(() => /ZZ_E2E_OLA1/.test((document.querySelector('#ctx-local .ctx-v') || {}).textContent || ''), null, {timeout: 25000});
+  await p.waitForFunction(() => typeof menu !== 'undefined' && menu.length === 6, null, {timeout: 25000}).catch(() => {});
+  await p.waitForTimeout(2500);
 }
-const abrirCobroUI = async (d, nombre, prep) => {
-  await d.page.locator('.mesa-card', {hasText: nombre}).first().click();
-  if (prep) await prep();                                   // p. ej. aplicar un descuento antes de cobrar
-  await d.page.locator('#btn-confirm').click();
-  await d.page.waitForSelector('#cobro-screen:not([hidden]) .cobro-medios', {timeout: 15000});
-};
-const textoVuelto = d => d.page.$eval('#cobro-vuelto', e => e.textContent.trim()).catch(() => null);
-
-async function recorridoCobros(d) {   // owner, escritorio: importes, vuelto, Justo, centavos, transferencia, mixto, preservación de datos
-  const posts = []; const onReq = r => { if (r.method() === 'POST' && /\/rest\/v1\/(sales|sale_items|sale_payments)$/.test(r.url())) posts.push({t: r.url().split('/').pop(), body: r.postData()}); };
-  d.page.on('request', onReq);
-  const cobrar = async (nombre, productos, accionesCobro, prep) => {
-    await nuevaMesa(d, nombre, productos); await abrirCobroUI(d, nombre, prep);
-    const total = Number((await d.page.$eval('.cobro-tk .tk-total b', e => e.textContent)).replace(/\D/g, ''));
-    await accionesCobro(total);
-    await d.page.waitForFunction(() => document.querySelectorAll('.cobro-ops [data-o]').length > 0, null, {timeout: 20000});
-    await d.page.locator('.cobro-ops [data-o]').first().click();
-    const antes = posts.length;
-    await d.page.locator('.btn-confirmar[data-c=confirmar]').click();
-    await d.page.waitForFunction(() => !document.querySelector('#cobro-screen:not([hidden])') || document.querySelector('#modal-comprobante.open'), null, {timeout: 30000}).catch(() => {});
-    await d.page.waitForTimeout(1500);
-    await d.page.evaluate(() => { try { cerrarComprobante(); } catch (_) {} });
-    return {total, nuevos: posts.slice(antes)};
-  };
-  try {
-    // Efectivo: importe entregado mayor al total (vuelto), insuficiente (faltante) y exacto (Justo). Total esperado 2200+900 = 3100.
-    let r = await cobrar('ZZ-AUD-EF', [['ZZE2E Cafe', 1], ['ZZE2E Medialuna', 1]], async total => {
-      await d.page.fill('#cobro-rec-in', '5000'); const v1 = await textoVuelto(d);
-      await d.page.fill('#cobro-rec-in', '2000'); const v2 = await textoVuelto(d);
-      await d.page.locator('.cobro-rec [data-r]').first().click(); const v3 = await textoVuelto(d);
-      reg('owner', 'escritorio', 'Efectivo: vuelto / faltante / exacto', total === 3100 && v1 === 'Vuelto $1.900' && v2 === 'Faltan $1.100' && v3 === 'Vuelto $0', `total=${total} ${v1} | ${v2} | ${v3}`);
-      await d.page.fill('#cobro-rec-in', '5000');   // se confirma con vuelto calculado: no debe alterar la venta
-    });
-    const pagos = r.nuevos.filter(x => x.t === 'sale_payments').flatMap(x => montoPagado(x.body) || []);
-    const ventas = r.nuevos.filter(x => x.t === 'sales').flatMap(x => montoPagado(x.body) || []);
-    const sumaPagos = pagos.reduce((s, p) => s + Number(p.amount || 0), 0);
-    reg('owner', 'escritorio', 'Efectivo con vuelto calculado: la venta no cambia (total, pagos, sin campos nuevos)', ventas.length >= 1 && sumaPagos === 3100 && !/recib|vuelto|5000/i.test(JSON.stringify(r.nuevos)), `ventas=${ventas.length} sumaPagos=${sumaPagos}`);
-    // Centavos: 1 × $100 con descuento 12,5 % en la línea → 87,5 (se muestra $88; «Justo» no debe dar faltante)
-    r = await cobrar('ZZ-AUD-CTV', [['ZZE2E Cien', 1]], async total => {
-      const vJusto = await (async () => { await d.page.locator('.cobro-rec [data-r]').first().click(); return textoVuelto(d); })();
-      reg('owner', 'escritorio', 'Efectivo con centavos (12,5 % sobre $100) y «Justo»: sin faltante', /^Vuelto \$0$/.test(vJusto || ''), `total mostrado=${total} · ${vJusto}`);
-    }, async () => {
-      await d.page.locator('#cart-rows .c-act-desc').first().click();
-      await d.page.locator('#desc-tipo-pct').click(); await d.page.fill('#descuento-valor', '12.5');
-      await d.page.getByRole('button', {name: /Aplicar/}).first().click(); await d.page.waitForTimeout(500);
-    });
-    const sc = r.nuevos.filter(x => x.t === 'sale_payments').flatMap(x => montoPagado(x.body) || []).reduce((s2, p) => s2 + Number(p.amount || 0), 0);
-    reg('owner', 'escritorio', 'Centavos: el pago registrado conserva el importe exacto (87,5)', Math.abs(sc - 87.5) < 0.005, `suma pagos=${sc}`);
-    // Transferencia: sin cálculo de vuelto
-    r = await cobrar('ZZ-AUD-TR', [['ZZE2E Cafe', 1]], async total => {
-      await d.page.locator('[data-m="transferencia"]').click();
-      reg('owner', 'escritorio', 'Transferencia: sin cálculo de vuelto', (await d.page.$('#cobro-rec-in')) === null && total === 2200, `total=${total}`);
-    });
-    reg('owner', 'escritorio', 'Transferencia: pago registrado por el total', r.nuevos.filter(x => x.t === 'sale_payments').flatMap(x => montoPagado(x.body) || []).every(p => /transfer/i.test(p.method || '')), JSON.stringify(r.nuevos.map(x => x.t)));
-    // Mixto: sin cálculo de vuelto; la suma de pagos = total
-    r = await cobrar('ZZ-AUD-MX', [['ZZE2E Tostado', 1]], async total => {
-      await d.page.locator('[data-m="mixed"]').click();
-      await d.page.fill('#mpay-efectivo', '1000'); await d.page.fill('#mpay-transferencia', String(total - 1000));
-      reg('owner', 'escritorio', 'Mixto: sin cálculo de vuelto', (await d.page.$('#cobro-rec-in')) === null && total === 4500, `total=${total}`);
-    });
-    const sm = r.nuevos.filter(x => x.t === 'sale_payments').flatMap(x => montoPagado(x.body) || []).reduce((s, p) => s + Number(p.amount || 0), 0);
-    reg('owner', 'escritorio', 'Mixto: suma de pagos = total', sm === 4500, `suma=${sm}`);
-  } catch (e) { reg('owner', 'escritorio', 'Recorrido de cobros', false, e.message); }
-  d.page.off('request', onReq);
+// ── Captura de lo que la app ENVÍA y de lo que el servidor RESPONDE ──
+function instalarCaptura(d, cuenta) {
+  d.page.on('request', r => { if (r.method() !== 'GET' && /\/rest\/v1\//.test(r.url())) { let body = null; try { body = JSON.parse(r.postData() || 'null'); } catch (_) {} capturas.push({cuenta, id: capturas.length, m: r.method(), t: new URL(r.url()).pathname.replace('/rest/v1/', ''), q: new URL(r.url()).search.slice(0, 120), body, estado: null}); r.__cap = capturas.length - 1; } });
+  d.page.on('response', async resp => { const r = resp.request(); if (r.__cap !== undefined) { capturas[r.__cap].estado = resp.status(); if (resp.status() >= 400) { try { capturas[r.__cap].error = String((await resp.json()).message || '').slice(0, 160); } catch (_) {} } } });
 }
+const desde = n => capturas.slice(n);
 
-async function recorridoEliminarMesa(d, cuenta, dispositivo) {   // permisos y comportamiento por rol, confirmación y teclado
-  try {
-    const nombre = `ZZ-DEL-${cuenta}`;
-    await nuevaMesa(d, nombre, [['ZZE2E Cien', 1]]);
-    const n0 = await d.page.$$eval('.mesa-card', e => e.length);
-    const btn = d.page.locator('.mesa-card', {hasText: nombre}).locator('.mesa-close');
-    reg(cuenta, dispositivo, 'Eliminar mesa: es un botón con nombre accesible', (await btn.evaluate(b => b.tagName === 'BUTTON' && /^Eliminar /.test(b.getAttribute('aria-label') || ''))), '');
-    await btn.focus(); await d.page.keyboard.press('Enter');
-    await d.page.waitForSelector('#modal-confirm.open', {timeout: 5000});
-    reg(cuenta, dispositivo, 'Eliminar mesa: pide confirmación y no elimina antes', (await d.page.$$eval('.mesa-card', e => e.length)) === n0, '');
-    await d.page.locator('#modal-confirm .btn-cancel, #modal-confirm button:has-text("Cancelar")').first().click().catch(() => d.page.keyboard.press('Escape'));
-    reg(cuenta, dispositivo, 'Eliminar mesa: cancelar no elimina', (await d.page.$$eval('.mesa-card', e => e.length)) === n0, '');
-    await btn.click(); await d.page.waitForSelector('#modal-confirm.open'); await d.page.locator('#confirm-btn-ok').click();
-    await d.page.waitForTimeout(4000);
-    const quedan = await d.page.$$eval('.mesa-card', (e, n) => e.filter(c => c.textContent.includes(n)).length, nombre);
-    reg(cuenta, dispositivo, `Eliminar mesa confirmada: resultado del servidor para rol ${CUENTAS[cuenta].rol}`, true, quedan === 0 ? 'ELIMINADA' : 'NO ELIMINADA (el servidor la rechazó o quedó pendiente)');
-  } catch (e) { reg(cuenta, dispositivo, 'Eliminar mesa', false, e.message); }
+async function nuevaMesa(d, nombre, productos) {                                 // + Mesa → nombre → productos → Abrir mesa
+  const p = d.page;
+  await p.getByText('+ Mesa', {exact: true}).first().click();
+  await p.locator('#nueva-mesa-input').fill(nombre);
+  for (const [prod, veces] of productos) for (let i = 0; i < veces; i++) await p.locator('.order-modal-shell .prod-card', {hasText: prod}).first().click();
+  await p.getByRole('button', {name: /Abrir mesa/}).click();
+  await p.waitForFunction(n => [...document.querySelectorAll('.mesa-card')].some(c => c.textContent.includes(n)), nombre, {timeout: 25000});
+  await p.waitForTimeout(1500);
+}
+async function abrirTurno(d, cuenta) {
+  const p = d.page;
+  const estado = await p.$eval('#ctx-turno .ctx-v', e => e.textContent.trim()).catch(() => '');
+  if (!/Sin turno/i.test(estado)) { reg(cuenta, 'Turno: ya hay uno abierto en este dispositivo', true, estado); return; }
+  const falla = await verificarEntorno(d, cuenta); if (falla) { reg(cuenta, 'Turno: verificación previa a escribir', false, falla); return; }
+  const n0 = capturas.length;
+  await p.click('#ctx-turno'); await p.waitForSelector('#modal-turno.open', {timeout: 8000});
+  await p.selectOption('#turno-operador-sel', {label: 'ZZE2E Operador'}).catch(async () => { const v = await p.$$eval('#turno-operador-sel option', o => o.map(x => x.value).filter(Boolean)); await p.selectOption('#turno-operador-sel', v[0]); });
+  await p.fill('#turno-fondo', '5000');
+  await p.locator('#modal-turno .btn-save').click();
+  await p.waitForFunction(() => !/Sin turno/i.test((document.querySelector('#ctx-turno .ctx-v') || {}).textContent || ''), null, {timeout: 25000}).catch(() => {});
+  await p.waitForTimeout(2000);
+  const nuevos = desde(n0).filter(c => /shifts/.test(c.t));
+  reg(cuenta, 'Turno: apertura (POST shifts en el local sintético)', nuevos.length >= 1 && nuevos.every(c => c.estado && c.estado < 300), nuevos.map(c => `${c.m} ${c.t} ${c.estado}${c.error ? ' ' + c.error : ''}`).join(' | ') + ' · ' + (await p.$eval('#ctx-turno .ctx-v', e => e.textContent.trim())));
+}
+async function cobrar(d, cuenta, etiqueta, nombre, productos, o) {
+  const p = d.page, falla = await verificarEntorno(d, cuenta);
+  if (falla) { reg(cuenta, `${etiqueta}: verificación previa a escribir`, false, falla); return null; }
+  await nuevaMesa(d, nombre, productos);
+  await p.locator('.mesa-card', {hasText: nombre}).first().click(); await p.waitForTimeout(800);
+  if (o.descuentoPct) { await p.locator('#cart-rows .c-act-desc').first().click(); await p.locator('#desc-tipo-pct').click(); await p.fill('#descuento-valor', String(o.descuentoPct)); await p.locator('#descuento-aplicar').click(); await p.waitForTimeout(1500); }
+  await p.locator('#btn-confirm').click(); await p.waitForSelector('#cobro-screen:not([hidden]) .cobro-medios', {timeout: 15000});
+  const total = Number((await p.$eval('.cobro-tk .tk-total b', e => e.textContent)).replace(/\D/g, ''));
+  const obs = {};
+  if (o.medio === 'ef') {
+    if (o.recibido) { await p.fill('#cobro-rec-in', String(o.recibido)); obs.vuelto = await p.$eval('#cobro-vuelto', e => e.textContent.trim()); }
+    if (o.justo) { await p.locator('.cobro-rec [data-r]').first().click(); obs.justo = await p.$eval('#cobro-vuelto', e => e.textContent.trim()); }
+  } else if (o.medio === 'tr') { await p.locator('[data-m="transferencia"]').click(); obs.sinVuelto = (await p.$('#cobro-rec-in')) === null; }
+  else if (o.medio === 'mixed') { await p.locator('[data-m="mixed"]').click(); await p.fill('#mpay-efectivo', String(o.mixEf)); await p.fill('#mpay-transferencia', String(o.mixTr)); obs.sinVuelto = (await p.$('#cobro-rec-in')) === null; }
+  await p.waitForFunction(() => document.querySelectorAll('.cobro-ops [data-o]').length > 0, null, {timeout: 25000});
+  await p.locator('.cobro-ops [data-o]').first().click();
+  await shot(d, `cobro_${etiqueta}`);
+  const n0 = capturas.length;
+  await p.locator('.btn-confirmar[data-c=confirmar]').click();
+  await p.waitForFunction(() => !document.querySelector('#cobro-screen:not([hidden])') || document.querySelector('#modal-comprobante.open'), null, {timeout: 40000}).catch(() => {});
+  await p.waitForTimeout(3500);
+  await p.evaluate(() => { try { cerrarComprobante(); } catch (_) {} });
+  return {total, obs, escrituras: desde(n0)};
+}
+const METODOS = {EF: 'cash', TR: 'transfer', MX: 'cash+transfer', CTV: 'cash'};
+const filas = (cs, t) => cs.filter(c => c.t === t && c.m === 'POST').flatMap(c => [].concat(c.body || []));
+function evaluarCobro(cuenta, etiqueta, r, esperado) {
+  if (!r) return;
+  const ventas = filas(r.escrituras, 'sales'), pagos = filas(r.escrituras, 'sale_payments'), items = filas(r.escrituras, 'sale_items');
+  const fallos = r.escrituras.filter(c => c.estado && c.estado >= 400);
+  const totalVenta = ventas.reduce((s, v) => s + Number(v.total_amount || 0), 0), totalItems = items.reduce((s, i) => s + Number(i.line_total || 0), 0), totalPagos = pagos.reduce((s, x) => s + Number(x.amount || 0), 0);
+  reg(cuenta, `${etiqueta}: total mostrado en Cobrar = esperado`, r.total === Math.round(esperado), `mostrado=${fm(r.total)} esperado=${esperado}`);
+  reg(cuenta, `${etiqueta}: la venta se registró (POST sales/sale_items/sale_payments sin errores)`, ventas.length === 1 && pagos.length >= 1 && items.length >= 1 && fallos.length === 0, `ventas=${ventas.length} pagos=${pagos.length} items=${items.length} errores=${fallos.map(c => c.t + ' ' + c.estado + ' ' + (c.error || '')).join(',') || 'ninguno'}`);
+  reg(cuenta, `${etiqueta}: integridad de importes (venta = suma de pagos = suma de ítems = esperado)`, Math.abs(totalVenta - esperado) < 0.005 && Math.abs(totalPagos - esperado) < 0.005 && Math.abs(totalItems - esperado) < 0.005, `venta=${totalVenta} pagos=${totalPagos} items=${totalItems} esperado=${esperado}`);
+  reg(cuenta, `${etiqueta}: medios de pago registrados`, [...new Set(pagos.map(p => p.method))].sort().join('+') === METODOS[etiqueta.split('_')[0]], [...new Set(pagos.map(p => p.method))].sort().join('+'));
+  reg(cuenta, `${etiqueta}: el vuelto / «paga con» NO viaja al servidor`, !/recib|vuelto|paga_con|tender/i.test(JSON.stringify(r.escrituras.map(c => c.body))), '');
 }
 
-async function recorridoTeclado(d, cuenta) {
-  try {
-    await d.page.focus('#ventas-filtro-chips .chip:not(.active)'); await d.page.keyboard.press('Enter');
-    reg(cuenta, 'escritorio', 'Teclado: Enter en filtro conserva el foco', await d.page.evaluate(() => !!document.activeElement.closest('#ventas-filtro-chips')), '');
-    await d.page.keyboard.press('Space');
-    reg(cuenta, 'escritorio', 'Teclado: Espacio en filtro conserva el foco', await d.page.evaluate(() => !!document.activeElement.closest('#ventas-filtro-chips')), '');
-  } catch (e) { reg(cuenta, 'escritorio', 'Teclado', false, e.message); }
-}
-
-async function recorridoMovil(d, cuenta) {
-  try {
-    await d.page.setViewportSize(MOV); await d.page.waitForTimeout(800);
-    const h = await d.page.$eval('#ctx-local .ctx-v', e => ({t: e.textContent.trim(), cortado: e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).textOverflow === 'ellipsis', alto: e.getBoundingClientRect().height}));
-    reg(cuenta, 'móvil', 'Nombre del local visible completo', !h.cortado && /ZZ_E2E_OLA1|Colo|Palermo/i.test(h.t), JSON.stringify(h));
-    await shot(d, 'movil_caja');
-    reg(cuenta, 'móvil', 'Caja sin desborde horizontal', await d.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), '');
-    await d.page.setViewportSize(ESC);
-  } catch (e) { reg(cuenta, 'móvil', 'Encabezado', false, e.message); }
+async function bloqueEliminar(d, cuenta) {
+  const p = d.page, falla = await verificarEntorno(d, cuenta);
+  if (falla) { reg(cuenta, 'Eliminar mesa: verificación previa a escribir', false, falla); return; }
+  const nombre = `ZZ-DEL-${cuenta}`;
+  await nuevaMesa(d, nombre, [['ZZE2E Cien', 1]]);
+  const card = p.locator('.mesa-card', {hasText: nombre}).first(), x = card.locator('.mesa-close');
+  const n0 = await p.$$eval('.mesa-card', e => e.length);
+  reg(cuenta, 'Eliminar mesa: botón accesible con nombre', await x.evaluate(b => b.tagName === 'BUTTON' && /^Eliminar /.test(b.getAttribute('aria-label') || '')), '');
+  await x.focus(); await p.keyboard.press('Enter'); await p.waitForSelector('#modal-confirm.open', {timeout: 6000});
+  reg(cuenta, 'Eliminar mesa: por teclado pide confirmación y no elimina antes', (await p.$$eval('.mesa-card', e => e.length)) === n0, '');
+  await p.locator('#modal-confirm button:has-text("Cancelar"), #modal-confirm .btn-cancel').first().click();
+  reg(cuenta, 'Eliminar mesa: Cancelar no elimina', (await p.$$eval('.mesa-card', e => e.length)) === n0, '');
+  const c0 = capturas.length;
+  await x.click(); await p.waitForSelector('#modal-confirm.open'); await p.locator('#confirm-btn-ok').click();
+  await p.waitForTimeout(6000);
+  const quedan = await p.$$eval('.mesa-card', (e, n) => e.filter(c => c.textContent.includes(n)).length, nombre);
+  const eventos = desde(c0), borrado = eventos.find(c => c.m === 'DELETE' && c.t === 'open_orders');
+  reg(cuenta, `Eliminar mesa (confirmada) con rol ${CUENTAS[cuenta].rol}: resultado en el servidor`, !!borrado && borrado.estado < 300 && quedan === 0, `DELETE open_orders → ${borrado ? borrado.estado + (borrado.error ? ' ' + borrado.error : '') : 'no se emitió'} · en pantalla quedan=${quedan} · ${eventos.map(c => c.m + ' ' + c.t + ' ' + c.estado).join(' | ')}`);
 }
 
 (async () => {
-  const {server, origin} = await frozenServer();
-  const audit = [];
-  const credencialesEnLocalStorage = {};
+  const {server, origin} = await frozenServer(), audit = [];
   for (const perfil of PERFILES) {
-    const d = await openDevice(perfil, {origin, audit, mode: 'fixture', fixtureStore: FIXTURE_STORE, activeStore: FIXTURE_STORE, headless: true});
+    const d = await openDevice(perfil, {origin, audit, mode: 'fixture', fixtureStore: FIXTURE_STORE, headless: true});
     let cuenta = perfil;
     try {
       await d.page.goto(`${origin}/`);
       await d.page.waitForFunction(() => typeof window.__sesionUserId === 'function' && !!window.__sesionUserId(), null, {timeout: 30000});
-      const user8 = (await d.page.evaluate(() => String(window.__sesionUserId())).catch(() => '')).slice(0, 8);
-      cuenta = Object.keys(CUENTAS).find(k => CUENTAS[k].user8 === user8);
-      identidades[perfil] = {user8, cuenta: cuenta || 'DESCONOCIDA'};
-      if (!cuenta) { reg(perfil, 'escritorio', 'Identidad de la sesión', false, `el usuario ${user8} no corresponde a ninguna cuenta esperada`); await d.ctx.close(); continue; }
+      const user8 = (await d.page.evaluate(() => String(window.__sesionUserId()))).slice(0, 8);
+      cuenta = Object.keys(CUENTAS).find(k => CUENTAS[k].user8 === user8); identidades[perfil] = {user8, cuenta: cuenta || 'DESCONOCIDA'};
+      if (!cuenta) { reg(perfil, 'Identidad de la sesión', false, `usuario ${user8} desconocido`); await d.ctx.close(); continue; }
       if (!SOLO.includes(cuenta)) { await d.ctx.close(); continue; }
-      d.cuenta = cuenta;
-      await d.page.waitForFunction(() => document.querySelectorAll('#ctx-local .ctx-v').length && !/Cargando/.test(document.querySelector('#ctx-local .ctx-v').textContent), null, {timeout: 30000}).catch(() => {});
-      await d.page.waitForTimeout(3000);
-      const falla = await verificarEntorno(d, CUENTAS[cuenta]);
-      if (falla) { reg(cuenta, 'escritorio', 'Verificación previa a escribir', false, falla); await d.ctx.close(); continue; }
-      reg(cuenta, 'escritorio', 'Verificación previa a escribir (proyecto, URL, usuario, rol y local)', true, `perfil=${perfil} usuario=${CUENTAS[cuenta].user8} rol=${CUENTAS[cuenta].rol}`);
-      await shot(d, 'caja_escritorio');
-      await recorridoTeclado(d, cuenta);
-      if (cuenta === 'owner') await recorridoCobros(d);
-      await recorridoEliminarMesa(d, cuenta, 'escritorio');
-      await recorridoMovil(d, cuenta);
-      // B23: nombres de claves de credencial en localStorage (SOLO nombres, nunca valores) y que el respaldo no contiene el valor real
-      credencialesEnLocalStorage[cuenta] = await d.page.evaluate(async () => {
-        const claves = Object.keys(localStorage).filter(k => /^sb-.+-auth-token/.test(k));
-        const valores = claves.map(k => { try { const j = JSON.parse(localStorage.getItem(k)); return j && (j.access_token || j.refresh_token) || ''; } catch (_) { return ''; } }).filter(Boolean);
-        const json = JSON.stringify(await window.getLocalRecoveryBackupPayload());
-        return {claves, filtra: valores.some(v => json.includes(v)), hayRedaccion: json.includes('REDACTADO')};
-      }).catch(e => ({error: e.message}));
-      reg(cuenta, 'escritorio', 'B23: el respaldo local no contiene el token de sesión real', credencialesEnLocalStorage[cuenta].filtra === false, JSON.stringify(credencialesEnLocalStorage[cuenta]));
-      // Regresiones de lectura: Caja, Reportes, Clientes, Gestión cargan sin errores de página
-      for (const tab of ['dashboard', 'clientes', 'ajustes']) { await d.page.evaluate(t => goTab(t), tab); await d.page.waitForTimeout(1200); }
-      reg(cuenta, 'escritorio', 'Reportes, Clientes y Gestión cargan sin errores de página', d.consoleErrors.filter(e => /pageerror/.test(e)).length === 0, d.consoleErrors.slice(0, 2).join(' | '));
-    } catch (e) { reg(cuenta, 'escritorio', 'Sesión', false, e.message); }
-    reg(cuenta, '—', 'Sin violaciones de la barrera de red', d.state.violations.length === 0, d.state.violations.slice(0, 3).join(' | '));
+      d.cuenta = cuenta; instalarCaptura(d, cuenta);
+      await d.page.waitForFunction(() => document.querySelectorAll('.mesa-card').length > 0 && !/Cargando/.test((document.querySelector('#ctx-local .ctx-v') || {}).textContent || 'Cargando'), null, {timeout: 40000});
+      await cambiarAlSintetico(d);
+      const falla = await verificarEntorno(d, cuenta);
+      if (falla) { reg(cuenta, 'Verificación previa a escribir (proyecto, URL, usuario, rol, local)', false, falla); await d.ctx.close(); continue; }
+      reg(cuenta, 'Verificación previa a escribir (proyecto, URL, usuario, rol, local)', true, `perfil=${perfil} usuario=${CUENTAS[cuenta].user8} rol=${CUENTAS[cuenta].rol} local=sintético`);
+      await shot(d, 'local_sintetico');
+      if (BLOQUES.includes('turno')) await abrirTurno(d, cuenta);
+      if (BLOQUES.includes('cobros')) {
+        let r = await cobrar(d, cuenta, `EF_${cuenta}`, `ZZ-EF-${cuenta}`, [['ZZE2E Cafe', 1], ['ZZE2E Medialuna', 1]], {medio: 'ef', recibido: 5000});
+        if (r) { reg(cuenta, 'Efectivo: vuelto calculado (paga con $5.000 sobre $3.100)', r.obs.vuelto === 'Vuelto $1.900', r.obs.vuelto); evaluarCobro(cuenta, `EF_${cuenta}`, r, 3100); }
+        r = await cobrar(d, cuenta, `TR_${cuenta}`, `ZZ-TR-${cuenta}`, [['ZZE2E Tostado', 1]], {medio: 'tr'});
+        if (r) { reg(cuenta, 'Transferencia: sin cálculo de vuelto', r.obs.sinVuelto === true, ''); evaluarCobro(cuenta, `TR_${cuenta}`, r, 4500); }
+        r = await cobrar(d, cuenta, `MX_${cuenta}`, `ZZ-MX-${cuenta}`, [['ZZE2E Jugo', 1], ['ZZE2E Cien', 1]], {medio: 'mixed', mixEf: 1000, mixTr: 1700});
+        if (r) { reg(cuenta, 'Mixto: sin cálculo de vuelto', r.obs.sinVuelto === true, ''); evaluarCobro(cuenta, `MX_${cuenta}`, r, 2700); }
+        r = await cobrar(d, cuenta, `CTV_${cuenta}`, `ZZ-CTV-${cuenta}`, [['ZZE2E Cien', 1]], {medio: 'ef', descuentoPct: 12.5, justo: true});
+        if (r) { reg(cuenta, 'Centavos (12,5 % sobre $100 = 87,5): «Justo» sin faltante', /^Vuelto \$0$/.test(r.obs.justo || ''), `mostrado=${fm(r.total)} · ${r.obs.justo}`); evaluarCobro(cuenta, `CTV_${cuenta}`, r, 87.5); }
+      }
+      if (BLOQUES.includes('eliminar')) await bloqueEliminar(d, cuenta);
+    } catch (e) { reg(cuenta, 'Recorrido', false, e.message.split('\n')[0]); await shot(d, 'error'); }
+    reg(cuenta, 'Sin violaciones de la barrera de red (escrituras sólo al local sintético)', d.state.violations.length === 0, d.state.violations.slice(0, 4).join(' | '));
     await d.ctx.close();
   }
-  saveAudit(audit, 'network_ola1.jsonl');
-  fs.writeFileSync(path.join(EVID, 'resultados_ola1.json'), JSON.stringify({identidades, res, credencialesEnLocalStorage}, null, 1));
-  console.log(`\n${res.filter(r => r.ok).length}/${res.length} comprobaciones OK`);
+  saveAudit(audit, 'network_ciclo_escritura.jsonl');
+  fs.writeFileSync(path.join(EVID, 'resultados_ciclo_escritura.json'), JSON.stringify({identidades, res, capturas: capturas.map(c => ({...c, body: c.body && JSON.stringify(c.body).slice(0, 1500)}))}, null, 1));
+  console.log(`\n${res.filter(r => r.ok).length}/${res.filter(r => r.ok !== null).length} comprobaciones OK`);
   server.close();
-})().catch(e => { console.error('ESCENARIOS_FALLARON', e.message); process.exit(1); });
+})().catch(e => { console.error('CICLO_FALLO', e.message); process.exit(1); });
