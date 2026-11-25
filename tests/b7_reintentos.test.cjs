@@ -178,3 +178,49 @@ test('B7: tras recuperarse, 20 reintentos y reconexiones más no cambian nada en
   assert.equal(r.antes, r.despues); assert.equal(JSON.parse(r.despues).reduce((n, x) => n + x[1], 0), 2);
   assert.equal(r.rpcsExtra, 0, 'sin pendientes no se envía nada');
 });
+
+// Hallazgos de la revisión independiente (Codex + revisión nativa), cada uno con su prueba.
+test('revisión: una sesión vencida (PGRST301 / JWT expired) NO se trata como rechazo permanente: se reintenta y se recupera', async () => {
+  const r = await conPagina(page => page.evaluate(async () => {
+    __nueva('rv1'); __abrir('rv1');
+    const real = window.__coloSupabaseClient.rpc.bind(window.__coloSupabaseClient); let n = 0;
+    window.__coloSupabaseClient.rpc = async (a, b) => { if (n++ < 2) { __sim.rpcs++; return {data: null, error: {code: 'PGRST301', message: 'JWT expired'}}; } return real(a, b); };
+    addItem('prod-test'); await new Promise(r => setTimeout(r, 500));
+    const tras1 = {parados: window.getOOReintentosParados().length};
+    await __ticks(12);
+    return {tras1, parados: window.getOOReintentosParados().length, server: __sim.orders.get('rv1').rows.length, banner: __banner()};
+  }));
+  assert.equal(r.tras1.parados, 0); assert.equal(r.parados, 0); assert.equal(r.server, 1); assert.doesNotMatch(r.banner, /rechaz/i);
+});
+
+test('revisión: una mesa con cobro hecho y cierre pendiente (que estos reintentos no envían) no acumula fallos ni muestra «dejamos de reintentar»', async () => {
+  const r = await conPagina(page => page.evaluate(async () => {
+    const m = __nueva('rv2'); m._close_pending = true; m.status = 'close_pending'; m._sync_status = 'close_pending'; save();
+    await __ticks(20);
+    return {parados: window.getOOReintentosParados().length, banner: __banner()};
+  }));
+  assert.equal(r.parados, 0); assert.doesNotMatch(r.banner, /dejamos de reintentar|rechaz/i);
+});
+
+test('revisión: «Reintentar» tocado mientras corre un reintento automático igual reinicia y envía la mesa detenida', async () => {
+  const r = await conPagina(page => page.evaluate(async () => {
+    __nueva('rvA'); __abrir('rvA'); addItem('prod-test'); await new Promise(r => setTimeout(r, 300));
+    __nueva('rvB'); __abrir('rvB'); addItem('prod-test'); await new Promise(r => setTimeout(r, 300));
+    const real = window.__coloSupabaseClient.rpc.bind(window.__coloSupabaseClient); let fase = 'caido';
+    window.__coloSupabaseClient.rpc = async (n, a) => {
+      if (fase === 'caido') { __sim.rpcs++; if (a.p_open_order_id === 'rvA') return {data: null, error: {code: '42501', message: 'permission denied'}}; throw new TypeError('Failed to fetch'); }
+      await new Promise(r => setTimeout(r, 400)); return real(n, a); };
+    // las mesas ya sincronizaron una vez antes de caer: se vuelve a editar con el servidor caído
+    __abrir('rvA'); addItem('prod-test'); __abrir('rvB'); addItem('prod-test'); await new Promise(r => setTimeout(r, 400));
+    await __ticks(2);
+    const parada = window.getOOReintentosParados().map(p => p.id);
+    fase = 'ok'; window.__off += 600000;
+    const auto = window.retryPendingOpenOrderWrites({reason: 'interval'});   // B esperaba y corre en este turno (lento)
+    const manual = window.retryPendingOpenOrderWrites({reason: 'manual'});   // se toca Reintentar con el turno en curso
+    await auto; await manual; await new Promise(r => setTimeout(r, 300));
+    const cant = id => __sim.orders.get(id).rows.reduce((n, x) => n + Number(x.quantity), 0);
+    return {parada, A: cant('rvA'), B: cant('rvB'), quedan: window.getOOReintentosParados().length};
+  }));
+  assert.ok(r.parada.includes('rvA'), 'A quedó detenida por el rechazo permanente');
+  assert.equal(r.A, 2, 'el Reintentar manual envió A aunque corría un turno automático'); assert.equal(r.B, 2); assert.equal(r.quedan, 0);
+});

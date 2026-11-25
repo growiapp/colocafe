@@ -5612,7 +5612,8 @@ function renderCajaPendingBanner(){
   parados.forEach(p=>lineas.push({cls:'accion',texto:p.permanente
     ?`<strong>El servidor rechazó los cambios de ${escapeHtml(p.nombre)}.</strong> Quedan guardados en este dispositivo y no se reintenta solo: avisá al administrador.`
     :`<strong>No pudimos guardar los cambios de ${escapeHtml(p.nombre)}.</strong> Quedan guardados en este dispositivo; dejamos de reintentar solo. Tocá Reintentar cuando haya conexión.`,reintentar:true}));
-  if(state.errors.length&&!parados.length)lineas.push({cls:'error',texto:`<strong>No pudimos sincronizar ${n(state.errors.length,'operación','operaciones')}.</strong> Se reintenta sola; podés reintentar ahora.`,reintentar:true});
+  const erroresOtros=state.errors.filter(op=>{const j=JSON.stringify(op||{});return !parados.some(p=>j.includes(p.id));});
+  if(erroresOtros.length)lineas.push({cls:'error',texto:`<strong>No pudimos sincronizar ${n(erroresOtros.length,'operación','operaciones')}.</strong> Se reintenta sola; podés reintentar ahora.`,reintentar:true});
   if(state.confirming.length)lineas.push({cls:'espera',texto:`<strong>${n(state.confirming.length,'venta cobrada','ventas cobradas')} esperando confirmación del servidor.</strong> Ya está${state.confirming.length===1?'':'n'} guardada${state.confirming.length===1?'':'s'} acá: no la${state.confirming.length===1?'':'s'} cobres de nuevo.`,reintentar:true});
   if(state.pending.length)lineas.push({cls:'espera',texto:`<strong>${n(state.pending.length,'operación pendiente','operaciones pendientes')}.</strong> No cierres la app hasta que se sincronice.`,reintentar:true});
   if(state.slow.length)lineas.push({cls:'espera',texto:`Terminando de sincronizar ${n(state.slow.length,'operación','operaciones')}.`});
@@ -9998,6 +9999,7 @@ if(config.webappUrl){loadFromSheets();}
     }catch(err){
       mesa._lastSyncError=err?.message||String(err)||'Error desconocido';
       ooRememberError(err,{table:'open_orders',operation:'insert',query:'insert open_order with label/table_label',store_id:storeId});
+      mesa._sync_error_code=err?.code||'';
       console.warn('[open_orders] create failed:',{
         code:err?.code||'',
         message:err?.message||String(err)||'',
@@ -10025,6 +10027,7 @@ if(config.webappUrl){loadFromSheets();}
       return true;
     }catch(err){
       ooRememberError(err,{table:'open_orders',operation:'update',query:'update open_order label/table_label',store_id:storeId});
+      mesa._sync_error_code=err?.code||'';
       console.warn('[open_orders] update label failed:',{
         code:err?.code||'',
         message:err?.message||String(err)||'',
@@ -10210,6 +10213,7 @@ if(config.webappUrl){loadFromSheets();}
     mesa._syncing=!conflicto&&(!ok||nuevaEdicion);
     mesa._sync_status=conflicto?'conflict':(nuevaEdicion?'pending':(ok?'confirmed':'partial_error'));
     mesa._sync_error=ok?'':(conflicto?'La mesa cambió en otro dispositivo':'No pudimos actualizar todos los ítems de la mesa');
+    if(ok)mesa._sync_error_code='';
     if(ok&&!nuevaEdicion){mesa._items_dirty=false;mesa._items_confirmed_at=Date.now();delete mesa._sync_started_at;}
     const idx=(mesas||[]).findIndex(m=>[m.id,m._sb_id,m.open_order_id,m.legacy_local_id].some(v=>String(v||'')===String(mesa.id)||String(v||'')===String(mesa._sb_id)||String(v||'')===String(previousId)));
     if(idx>=0){
@@ -10741,12 +10745,13 @@ if(config.webappUrl){loadFromSheets();}
   const ooReintentos=new Map(); // id del pedido → {fallos,proximo,parado,permanente}
   function ooErrorPermanente(code){
     code=String(code||'');
-    // permisos, restricciones, datos inválidos, reglas del servidor, sesión. Sin código (red, tiempo agotado), 08/53/57/55P03 y desconocidos: se reintenta, con espera y tope.
-    return /^(42|23|22|P0|PGRST[1-9])/.test(code)||/^(401|403)$/.test(code);
+    // permisos, restricciones, datos inválidos, reglas del servidor. Sin código (red, tiempo agotado), 08/53/57/55P03 y desconocidos: se reintenta, con espera y tope.
+    // La sesión vencida (401, PGRST3xx) la renueva el cliente solo y 23505 (unicidad) es una carrera entre dispositivos: se reintentan con espera y tope.
+    return /^(42|22|P0|PGRST[12]|23(?!505))/.test(code)||code==='403';
   }
   function ooPendientesDeReintento(){
     const out=new Map();
-    (mesas||[]).filter(m=>mesaPendiente(m)&&!m._items_conflict&&origenEnviable(m,'mesa')).forEach(m=>out.set(String(m._sb_id||m.id),{nombre:m.nombre,code:''}));
+    (mesas||[]).filter(m=>mesaPendiente(m)&&!m._items_conflict&&origenEnviable(m,'mesa')).forEach(m=>out.set(String(m._sb_id||m.id),{nombre:m.nombre,code:m._sync_error_code||''}));
     (pendingOpenOrderItemSyncs||[]).filter(e=>e&&e.status!=='synced'&&origenEnviable(e,'cola')).forEach(e=>{
       const k=String(e.open_order_id||'');const m=findMesaByAnyId(k);
       if(m?._items_conflict)return;
@@ -10756,11 +10761,11 @@ if(config.webappUrl){loadFromSheets();}
   }
   function ooClavesASaltear(ahora){return new Set([...ooReintentos].filter(([,s])=>s.parado||s.proximo>ahora).map(([k])=>k));}
   window.getOOReintentosParados=()=>{const quedan=ooPendientesDeReintento();for(const k of [...ooReintentos.keys()])if(!quedan.has(k))ooReintentos.delete(k);return [...ooReintentos].filter(([,s])=>s.parado).map(([k,s])=>({id:k,nombre:findMesaByAnyId(k)?.nombre||'Una mesa',permanente:!!s.permanente}));};
-  function ooRegistrarResultadoReintento(saltear,manual){
+  function ooRegistrarResultadoReintento(intentadas,manual){
     const quedan=ooPendientesDeReintento(),ahora=Date.now();
     for(const k of [...ooReintentos.keys()])if(!quedan.has(k))ooReintentos.delete(k);
     quedan.forEach((info,k)=>{
-      if(saltear.has(k))return; // en espera: no se intentó en este turno
+      if(!intentadas.has(k))return; // no se intentó en este turno (en espera, o no es de las colas que se reintentan: p. ej. cierre de mesa pendiente)
       const antes=ooReintentos.get(k)||{fallos:0},fallos=antes.fallos+1,permanente=ooErrorPermanente(info.code);
       const parado=permanente||fallos>=OO_MAX_FALLOS_AUTO;
       ooReintentos.set(k,{fallos,permanente,parado,proximo:ahora+OO_ESPERAS_MS[Math.min(fallos,OO_ESPERAS_MS.length)-1]});
@@ -10770,7 +10775,7 @@ if(config.webappUrl){loadFromSheets();}
     });
   }
   function retryPendingOpenOrderWrites({reason='auto'}={}){
-    if(ooPendingWriteRetryPromise)return ooPendingWriteRetryPromise;
+    if(ooPendingWriteRetryPromise)return OO_REINTENTO_REINICIA.has(reason)?ooPendingWriteRetryPromise.then(()=>retryPendingOpenOrderWrites({reason}),()=>retryPendingOpenOrderWrites({reason})):ooPendingWriteRetryPromise;
     const initialTables=(mesas||[]).filter(m=>mesaPendiente(m)).length;
     const initialItems=(pendingOpenOrderItemSyncs||[]).filter(entry=>entry&&entry.status!=='synced').length;
     const initialTotal=initialTables+initialItems;
@@ -10781,6 +10786,9 @@ if(config.webappUrl){loadFromSheets();}
     const saltear=ooClavesASaltear(Date.now());
     const candidatos=ooPendientesDeReintento();
     if(candidatos.size&&[...candidatos.keys()].every(k=>saltear.has(k)))return Promise.resolve({ok:false,reason:'backoff',total:initialTotal,synced:0,failed:initialTotal});
+    // Lo que SE VA A INTENTAR en este turno (calculado antes de esperar): mesas sin enviar o a medio sincronizar y entradas de la cola de ítems.
+    const intentadas=new Set([...(mesas||[]).filter(m=>m&&!m._items_conflict&&((!m._sb_id)||m._syncing)&&origenEnviable(m,'mesa')).map(m=>String(m._sb_id||m.id)),
+      ...(pendingOpenOrderItemSyncs||[]).filter(e=>e&&e.status!=='synced'&&origenEnviable(e,'cola')).map(e=>String(e.open_order_id||''))].filter(k=>!saltear.has(k)));
     ooPendingWriteRetryPromise=(async()=>{
       // La sync de la mesa ya reenvía sus ítems: reenviarlos otra vez en el mismo turno duplicaba el tráfico sin ganar nada.
       const deLaMesa=(mesas||[]).filter(m=>m&&!m._items_conflict&&((!m._sb_id)||m._syncing)&&origenEnviable(m,'mesa')&&!saltear.has(String(m._sb_id||m.id))).map(m=>String(m._sb_id||m.id));
@@ -10789,7 +10797,7 @@ if(config.webappUrl){loadFromSheets();}
       const remainingTables=(mesas||[]).filter(m=>mesaPendiente(m)).length;
       const remainingItems=(pendingOpenOrderItemSyncs||[]).filter(entry=>entry&&entry.status!=='synced').length;
       const remaining=remainingTables+remainingItems;
-      ooRegistrarResultadoReintento(saltear,manual);
+      ooRegistrarResultadoReintento(intentadas,manual);
       ooTechLog('pending writes retry',{reason,remainingTables,remainingItems});
       return {ok:remaining===0,reason,total:remaining,synced:remaining===0?1:0,failed:remaining?1:0};
     })().finally(()=>{
