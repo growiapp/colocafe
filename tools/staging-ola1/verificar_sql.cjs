@@ -52,6 +52,17 @@ create table public.stock_store_activation (store_id uuid primary key references
 create table public.profiles (id uuid primary key, user_id uuid);
 ${extra.includes('hijo_sin_store') ? `create table public.sale_events (id uuid primary key default gen_random_uuid(), sale_id uuid references public.sales(id)${od});` : ''}
 ${extra.includes('trigger_stock') ? `create function public.stock_guard() returns trigger language plpgsql as $f$ begin return new; end $f$; create trigger stock_guard_trg before insert on public.sales for each row execute function public.stock_guard();` : ''}
+${extra.includes('real') ? `
+alter table public.open_orders add column status text default 'open', add column metadata jsonb default '{}'::jsonb, add column customer_id uuid references public.customers(id) on delete set null, add column reservation_id uuid references public.reservations(id) on delete set null, add column shift_id uuid references public.shifts(id) on delete set null;
+alter table public.sales add column open_order_id uuid references public.open_orders(id) on delete set null, add column shift_id uuid references public.shifts(id) on delete set null, add column customer_id uuid references public.customers(id) on delete set null, add column reservation_id uuid references public.reservations(id) on delete set null, add column sold_at timestamptz, add column legacy_id text;
+alter table public.sale_items drop constraint sale_items_product_id_fkey, add constraint sale_items_product_id_fkey foreign key (product_id) references public.products(id) on delete set null;
+alter table public.products drop constraint products_category_id_fkey, add constraint products_category_id_fkey foreign key (category_id) references public.categories(id) on delete set null;
+alter table public.reservations add column customer_id uuid references public.customers(id) on delete set null;
+alter table public.stock_ledger drop constraint stock_ledger_store_id_fkey;
+create table public.audit_logs (id uuid primary key default gen_random_uuid(), store_id uuid not null references public.stores(id) on delete cascade, action text not null, entity_type text not null, payload jsonb not null default '{}'::jsonb, actor_user_id uuid references auth.users(id) on delete set null);
+create function public.close_open_order_after_sale() returns trigger language plpgsql as $f$ begin if new.open_order_id is not null then update public.open_orders set status = 'closed', metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('close_reason', 'paid', 'closed_by_sale_id', new.id) where id = new.open_order_id and store_id = new.store_id and status = 'open'; end if; return new; end $f$;
+create trigger trg_close_open_order_after_sale after insert or update on public.sales for each row execute function public.close_open_order_after_sale();
+` : ''}
 insert into auth.users values ('${U[0]}','owner@x'),('${U[1]}','caja@x'),('${U[2]}','admin@x'),('${U[3]}','otro@x');
 insert into public.profiles values (gen_random_uuid(), '${U[0]}'),(gen_random_uuid(), '${U[3]}');
 -- Datos PREEXISTENTES de un local real (no deben cambiar nunca) + una venta con store_id nulo
@@ -65,6 +76,7 @@ insert into public.sale_payments (sale_id, store_id) values ('44444444-4444-4444
 insert into public.open_orders (store_id) values ('${R}'); insert into public.shifts (store_id) values ('${R}'); insert into public.expenses (store_id) values ('${R}');
 insert into public.customers (store_id, nombre) values ('${R}','Cliente real');
 ${extra.includes('hijo_sin_store') ? `insert into public.sale_events (sale_id) values ('44444444-4444-4444-8444-444444444444');` : ''}
+${extra.includes('real') ? `insert into public.audit_logs (store_id, action, entity_type) values ('${R}', 'sale.create', 'sale'); update public.sales set open_order_id = (select id from public.open_orders where store_id = '${R}' limit 1), shift_id = (select id from public.shifts where store_id = '${R}' limit 1) where id = '44444444-4444-4444-8444-444444444444'; insert into public.stock_ledger (store_id) values ('${R}');` : ''}
 `;
 };
 // Escrituras que haría la app en el local sintético durante los recorridos
@@ -80,8 +92,14 @@ insert into public.expenses (store_id) values ('${F}');
 ${extra.includes('hijo_sin_store') ? `insert into public.sale_events (sale_id) values ('e2e02026-1123-4122-8000-0000000000d1');` : ''}
 `;
 
+const escriturasReal = () => `
+insert into public.sales (id, store_id, total, open_order_id, shift_id, sold_at, legacy_id) values ('e2e02026-1123-4122-8000-0000000000d3','${F}',900,'e2e02026-1123-4122-8000-0000000000b1',(select id from public.shifts where store_id = '${F}' limit 1), now(), 't_x');
+insert into public.audit_logs (store_id, action, entity_type) values ('${F}', 'sale.create', 'sale'), ('${F}', 'shift.open', 'shift');
+insert into public.stock_ledger (store_id) values ('${F}');
+`;
 const TABLAS = ['stores', 'store_users', 'categories', 'operators', 'products', 'sales', 'sale_items', 'sale_payments', 'shifts', 'open_orders', 'open_order_items', 'open_order_dispatches', 'reservations', 'customers', 'expenses', 'stock_ledger', 'stock_store_activation', 'profiles'];
-const foto = async db => { const o = {}; for (const t of TABLAS) { const c = t === 'stores' ? 'id' : t === 'profiles' ? 'id' : 'store_id'; o[t] = {real: Number((await db.query(`select count(*) n from public.${t} ${t === 'profiles' ? '' : `where ${c} is distinct from '${F}'`}`)).rows[0].n), sint: t === 'profiles' ? 0 : Number((await db.query(`select count(*) n from public.${t} where ${c} = '${F}'`)).rows[0].n)}; } return o; };
+const existeTabla = async (db, t) => (await db.query(`select to_regclass('public.${t}') r`)).rows[0].r !== null;
+const foto = async db => { const o = {}; for (const t of [...TABLAS, ...((await existeTabla(db, 'audit_logs')) ? ['audit_logs'] : [])]) { const c = t === 'stores' ? 'id' : t === 'profiles' ? 'id' : 'store_id'; o[t] = {real: Number((await db.query(`select count(*) n from public.${t} ${t === 'profiles' ? '' : `where ${c} is distinct from '${F}'`}`)).rows[0].n), sint: t === 'profiles' ? 0 : Number((await db.query(`select count(*) n from public.${t} where ${c} = '${F}'`)).rows[0].n)}; } return o; };
 const preexistente = f => JSON.stringify(Object.fromEntries(Object.entries(f).map(([k, v]) => [k, v.real])));
 const correr = async (db, sql) => { try { await db.exec(sql); return {ok: true}; } catch (e) { await db.exec('rollback').catch(() => {}); return {ok: false, msg: String(e.message)}; } };
 const nuevo = async o => { const db = new PGlite(); await db.exec(esquema(o)); return db; };
@@ -112,6 +130,20 @@ const caso = async (nombre, fn) => { try { await fn(); resultados.push([nombre, 
       assert.ok(Object.entries(d).every(([t, v]) => v.sint === 0), 'residuos del local sintético: ' + JSON.stringify(d));
     });
   }
+  await caso('TOPOLOGÍA REAL de staging (FK cascade + SET NULL, stock_ledger sin FK, audit_logs, trigger de cierre): ciclo completo, preexistente intacto y 0 residuos', async () => {
+    const db = await nuevo({fk: 'cascade', extra: ['real']}); const a = await foto(db);
+    assert.equal((await correr(db, fix)).ok, true); await db.exec(escrituras()); await db.exec(escriturasReal());
+    assert.equal(Number((await db.query(`select count(*) n from public.open_orders where id = 'e2e02026-1123-4122-8000-0000000000b1' and status = 'closed'`)).rows[0].n), 1, 'el trigger de cierre debe haber cerrado la mesa del local sintético');
+    const lleno = await foto(db); assert.ok(lleno.audit_logs.sint === 2 && lleno.stock_ledger.sint === 1, JSON.stringify(lleno.audit_logs));
+    const e = await correr(db, cleEnsayo); assert.match(e.msg, /ENSAYO_OK_SE_REVIERTE: borraria/); assert.equal(JSON.stringify(await foto(db)), JSON.stringify(lleno));
+    const r = await correr(db, cle); assert.equal(r.ok, true, r.msg);
+    const d = await foto(db);
+    assert.equal(preexistente(a), preexistente(d), 'cambió lo preexistente');
+    assert.ok(Object.entries(d).every(([, v]) => v.sint === 0), 'residuos: ' + JSON.stringify(d));
+    // lo preexistente conserva sus vinculos (los SET NULL no deben haber tocado filas del local real)
+    const v = (await db.query(`select open_order_id is not null as oo, shift_id is not null as sh from public.sales where id = '44444444-4444-4444-8444-444444444444'`)).rows[0];
+    assert.deepEqual(v, {oo: true, sh: true});
+  });
   await caso('el ENSAYO de fixtures no deja nada y avisa', async () => {
     const db = await nuevo(); const a = await foto(db);
     const e = await correr(db, fixEnsayo); assert.match(e.msg, /ENSAYO_OK_SE_REVIERTE/);
