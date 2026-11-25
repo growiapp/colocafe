@@ -305,14 +305,21 @@ function montarAtencion(){
 // en sucesión (misma firma de cobro, mismas validaciones y mismos contratos de confirmación).
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let opElegido='';
+let recibido=''; // efectivo entregado por el cliente (solo para calcular el vuelto; no se guarda con la venta)
 let mixedHome=null;
 let firmaVista='',cobrando=false;
 const firmaCobro=()=>{try{const m=(typeof mesaDe==='function'&&mesaDe(mesaActivaId))||{};return JSON.stringify([m._items_version??null,Object.entries(carrito||{}).filter(([,i])=>Number(i.qty)>0).map(([k,i])=>[k,Number(i.qty),i.desc||i.descuento||null,typeof carritoItemTotal==='function'?carritoItemTotal(i):0]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))),typeof totalCobroActual==='function'?totalCobroActual():0]);}catch(_){return '';}};
 const medioActual=()=>{try{const ps=getCurrentPaymentState();return ps.payment_mode==='mixed'?'mixed':((ps.pagos&&ps.pagos[0]?.metodo)==='transferencia'?'transferencia':'ef');}catch(_){return 'ef';}};
 function destinoCobro(){try{const t=getCurrentVentaTarget();return t?.nombre||t?.cliente||'Mesa';}catch(_){return 'Mesa';}}
+const montoRecibido=()=>Number(recibido)||0;
+function textoVuelto(total){total=Math.round(Number(total)||0);const r=montoRecibido(); // fm() muestra el total redondeado: se compara contra ese mismo importe
+  if(!r)return{t:'',falta:false};return r>=total?{t:`Vuelto ${fm(r-total)}`,falta:false}:{t:`Faltan ${fm(total-r)}`,falta:true};}
+function opcionesRecibido(total){total=Math.round(total);const s=new Set();[1000,5000,10000,20000].forEach(b=>{const v=Math.ceil(total/b)*b;if(v>total)s.add(v);});return[...s].slice(0,3);}
+function pintarVuelto(){const e=$('cobro-vuelto');if(!e)return;const v=textoVuelto(typeof totalCobroActual==='function'?totalCobroActual():0);e.textContent=v.t;e.classList.toggle('falta',v.falta);}
 function msgCobro(t){const m=$('cobro-msg');if(m){m.textContent=t||'';}}
 function pintarCobro(){
   const sc=$('cobro-screen');if(!sc)return;
+  const ae=document.activeElement,enRec=ae&&ae.id==='cobro-rec-in'&&sc.contains(ae),selRec=enRec?[ae.selectionStart,ae.selectionEnd]:null; // un repintado (p. ej. al llegar los operadores) no debe sacar el foco del importe
   firmaVista=firmaCobro();
   { const cx=$('mixed-payments-box'); if(cx&&sc.contains(cx)&&mixedHome) mixedHome.appendChild(cx); } // el repintado no debe destruir los campos del pago mixto
   const items=Object.values(carrito||{}).filter(i=>Number(i.qty)>0),total=typeof totalCobroActual==='function'?totalCobroActual():0;
@@ -328,6 +335,10 @@ function pintarCobro(){
       <h2 class="sec2">Medio de pago</h2>
       <div class="cobro-medios" role="radiogroup" aria-label="Medio de pago">${medios.map(([k,l,ic])=>`<button type="button" role="radio" aria-checked="${k===m}" data-m="${k}">${svg(ic,22)}<span>${l}</span></button>`).join('')}</div>
       <div id="cobro-mixto-slot"></div>
+      ${m==='ef'&&total>0?`<div class="cobro-rec"><label for="cobro-rec-in">Paga con <small>(opcional, para calcular el vuelto)</small></label>
+        <div class="cr-fila"><input id="cobro-rec-in" type="text" inputmode="numeric" autocomplete="off" placeholder="$ recibido" value="${esc(recibido)}">
+        <button type="button" data-r="${Math.round(total)}">Justo</button>${opcionesRecibido(total).map(v=>`<button type="button" data-r="${v}">${fm(v)}</button>`).join('')}</div>
+        <p id="cobro-vuelto" class="cobro-vuelto${textoVuelto(total).falta?' falta':''}" aria-live="polite">${textoVuelto(total).t}</p></div>`:''}
       <h2 class="sec2">Quién atendió</h2>
       <div class="cobro-ops" role="radiogroup" aria-label="Quién atendió">${estOps==='cargando'?'<span class="hint">Cargando quién está activo…</span>':estOps==='no_disponible'?'<span class="hint">No pudimos leer las personas activas del local. <button type="button" class="btn-sm" data-c="ops">Reintentar</button></span>':ops.length?ops.map(o=>`<button type="button" role="radio" aria-checked="${o===opElegido}" data-o="${esc(o)}">${esc(o)}${o===ultimo?' <small>última vez</small>':''}</button>`).join(''):'<span class="hint">No hay personas activas cargadas. Pedile a administración que las agregue.</span>'}</div>
       ${ultimo?'<p class="hint">Se propone la última persona elegida en este dispositivo.</p>':''}
@@ -338,6 +349,7 @@ function pintarCobro(){
       <ul class="tk-lines">${items.map(i=>{const p=findProductById(i.prodId);return `<li><span class="q">${Number(i.qty)}×</span><span class="n">${esc(p?.name||i.prodId)}</span><span class="v">${fm(carritoItemTotal(i))}</span></li>`;}).join('')}</ul>
       <div class="tk-total"><span>Total · ${cant} producto${cant!==1?'s':''}</span><b>${fm(total)}</b></div></aside>
   </div>`;
+  if(enRec){const n=$('cobro-rec-in');if(n){n.focus();try{n.setSelectionRange(selRec[0],selRec[1]);}catch(_){}}}
   const slot=$('cobro-mixto-slot'),box=$('mixed-payments-box');
   if(slot&&box){if(m==='mixed'){slot.appendChild(box);slot.hidden=false;}else{slot.hidden=true;if(box.parentNode===slot&&mixedHome)mixedHome.appendChild(box);}}
 }
@@ -352,6 +364,7 @@ function abrirCobro(){
   const sc=$('cobro-screen');if(!sc)return;
   if(!Object.values(carrito||{}).some(i=>Number(i.qty)>0)){showToast('El pedido está vacío');return;}
   if(!mixedHome)mixedHome=$('mixed-payments-box')?.parentNode||null;
+  recibido='';
   pintarCobro();sc.hidden=false;tabC().classList.add('cobro-abierto');window.scrollTo(0,0);
   setTimeout(()=>sc.querySelector('[data-m][aria-checked="true"]')?.focus(),30);
   refrescarOperadoresCobro();
@@ -392,6 +405,15 @@ async function confirmarCobro(btn){
     const sc=$('cobro-screen');
     if(sc&&!sc.hidden){const vivo=sc.querySelector('.btn-confirmar');if(vivo){vivo.disabled=false;vivo.textContent=`Confirmar cobro · ${fm(typeof totalCobroActual==='function'?totalCobroActual():0)}`;}}}
 }
+// Teclado: los <div role="button"> (filtros, acordeones, chips) se activan con Enter o Espacio, como un botón. La tarjeta de mesa ya lo resuelve por su cuenta.
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Enter'&&e.key!==' ')return;
+  const t=e.target;if(!t||t.getAttribute?.('role')!=='button'||/^(BUTTON|A|INPUT)$/.test(t.tagName)||t.matches('.mesa-card'))return;
+  e.preventDefault();
+  const pa=t.parentElement,i=pa?[...pa.children].indexOf(t):-1;
+  t.click();
+  if(!t.isConnected&&pa?.isConnected&&i>=0)pa.children[i]?.focus?.(); // si el clic repintó los filtros, el foco vuelve al mismo lugar
+});
 function montarCobro(){
   if($('cobro-screen'))return;
   const sc=document.createElement('section');sc.id='cobro-screen';sc.className='cobro-screen';sc.hidden=true;sc.setAttribute('aria-label','Cobro');tabC().appendChild(sc);
@@ -400,13 +422,15 @@ function montarCobro(){
     e.preventDefault();e.stopImmediatePropagation();if(!b.disabled)abrirCobro();
   },true);
   sc.addEventListener('click',e=>{
-    const x=e.target.closest('[data-m],[data-o],[data-c]');if(!x)return;
-    if(x.dataset.m){try{setPago(x.dataset.m);}catch(_){}pintarCobro();sc.querySelector(`[data-m="${x.dataset.m}"]`)?.focus();}
+    const x=e.target.closest('[data-m],[data-o],[data-c],[data-r]');if(!x)return;
+    if(x.dataset.r!==undefined){recibido=String(Math.round(Number(x.dataset.r)||0));const i=$('cobro-rec-in');if(i)i.value=recibido;pintarVuelto();i?.focus();}
+    else if(x.dataset.m){try{setPago(x.dataset.m);}catch(_){}pintarCobro();sc.querySelector(`[data-m="${x.dataset.m}"]`)?.focus();}
     else if(x.dataset.o){opElegido=x.dataset.o;pintarCobro();sc.querySelector(`[data-o="${CSS.escape(opElegido)}"]`)?.focus();}
     else if(x.dataset.c==='volver')cerrarCobro();
     else if(x.dataset.c==='ops'){pintarCobro();refrescarOperadoresCobro();}
     else if(x.dataset.c==='confirmar')confirmarCobro(x);
   });
+  sc.addEventListener('input',e=>{if(e.target.id!=='cobro-rec-in')return;recibido=e.target.value.replace(/\D/g,'').slice(0,9);if(e.target.value!==recibido)e.target.value=recibido;pintarVuelto();});
   sc.addEventListener('keydown',e=>{if(e.key==='Escape')cerrarCobro();});
   const vp=vped();if(vp)new MutationObserver(()=>{if(vp.style.display==='none')cerrarCobro();}).observe(vp,{attributes:true,attributeFilter:['style']});
   let tm=0;const alCambiar=()=>{if(sc.hidden||firmaCobro()===firmaVista)return;clearTimeout(tm);tm=setTimeout(()=>{if(sc.hidden||firmaCobro()===firmaVista)return;const bloqueado=sc.querySelector('.btn-confirmar')?.disabled;pintarCobro();msgCobro(bloqueado?'El pedido cambió mientras se cobraba. Revisá el detalle antes de volver a confirmar.':'El pedido cambió. Revisá el detalle y confirmá de nuevo.');},50);};
