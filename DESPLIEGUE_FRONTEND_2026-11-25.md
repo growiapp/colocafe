@@ -1,0 +1,12 @@
+# Registro del despliegue del frontend — 2026-11-25
+
+**Dictamen: `DEPLOYED_VERIFIED`** (frontend). No se ejecutó SQL en producción ni se instaló el guard B5.
+
+- **Commit publicado:** `4bcf451fcc69740307236ef12e4488ae657d959a` → `main` (fast-forward `334df6c..4bcf451`, sin `--force`; el commit posterior de documentación NO se incluyó).
+- **Run de Actions:** `45692694386` (push) — `build` y `deploy` en **success** (https://github.com/growiapp/colocafe/actions/runs/45692694386).
+- **Sitio servido (sin caché):** `index.html` sha256 `85ed2aa0a43dfaf2e1f89a51b3bdb336e88dbbc3f35117774d3d18d391b75290`, 1.080.801 bytes, `APP_VERSION 2026-11-25-b5-b7-consolidada`; `otra-pestana.html`, `manifest.json`, `logo.png`, `logo.svg`, `preview.jpg` con los mismos hashes que antes del despliegue. `Cache-Control: max-age=600`.
+- **Preflight:** `origin/main` = `334df6c` justo antes del push; candidata sin cambios; árbol limpio; paquete: sólo `index.html`; `apply.py --check` = COINCIDE; sin credenciales ni datos sensibles nuevos (único patrón: un JWT de juguete en un test; `index.html` conserva los mismos 2 JWT públicos, incluida la clave *anon*).
+- **Pruebas no destructivas (navegador aislado, sin sesión, escrituras a Supabase bloqueadas):** carga sin errores de consola ni de página en escritorio y móvil; versión nueva; funciones nuevas presentes; validación de precio (B2) y escape de texto (B1) correctos; B4 niega sin sesión; el aviso «Nueva versión disponible» aparece una vez para quien tenía la versión anterior y no se repite; navegación por las 6 pestañas sin errores; 0 escrituras; sólo hosts estáticos (github.io, fuentes, jsdelivr).
+- **No verificado (por diseño):** lecturas autenticadas, cobros, mesas, stock y cualquier escritura real (validación supervisada en la operación normal); qué dispositivos de caja ya cargaron la versión nueva (no hay evidencia individual).
+- **Respaldo:** el más reciente es `colocafe_prod_20261124T155358Z` (2026-11-24 15:54 UTC, ~28 h; hashes íntegros hoy; restauración desde cero probada en contenedor aislado; **una sola copia local, no `BACKUP_READY`**). No se pudo preparar uno nuevo: `COLO_BACKUP_URL` no está configurada y el procedimiento manual requiere tipear la contraseña. El despliegue no toca Supabase.
+- **Rollback del frontend (no necesario):** nuevo commit que restaura `index.html` (y sus fuentes) de `334df6c`, push fast-forward, verificar `apply.py --check` y que el sitio vuelva a servir `b5100e9c16ce3e1e985917ab0f0b33b52e0840ed624ad72ead3f32e2f491858b`.
