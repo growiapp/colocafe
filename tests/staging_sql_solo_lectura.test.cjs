@@ -56,7 +56,8 @@ for (const archivo of ['esquema_gate.sql', 'politicas_rls.sql', 'auditoria_trigg
     assert.deepEqual(analizar(fs.readFileSync(path.join(dir, archivo), 'utf8')), []);
   });
 }
-const AGREGADOS = {'stock_paridad.sql': ['stock_store_activation', 'stock_ledger']};
+const TABLAS_STORE = ['audit_logs', 'categories', 'customers', 'expenses', 'open_order_dispatches', 'open_order_items', 'open_orders', 'operators', 'products', 'reservations', 'sale_items', 'sale_payments', 'sales', 'shifts', 'stock_ledger', 'stock_store_activation', 'store_users'];
+const AGREGADOS = {'stock_paridad.sql': ['stock_store_activation', 'stock_ledger'], 'inventario_sintetico.sql': ['stores', ...TABLAS_STORE], 'linea_base.sql': ['stores', 'profiles', ...TABLAS_STORE]};
 for (const [archivo, permitidas] of Object.entries(AGREGADOS)) {
   test(`${archivo}: solo catálogos y AGREGADOS de ${permitidas.join(', ')} (nunca filas, ids ni columnas sueltas)`, () => {
     assert.deepEqual(analizar(fs.readFileSync(path.join(dir, archivo), 'utf8'), permitidas), []);

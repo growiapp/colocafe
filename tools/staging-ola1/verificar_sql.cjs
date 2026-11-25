@@ -67,7 +67,7 @@ insert into auth.users values ('${U[0]}','owner@x'),('${U[1]}','caja@x'),('${U[2
 insert into public.profiles values (gen_random_uuid(), '${U[0]}'),(gen_random_uuid(), '${U[3]}');
 -- Datos PREEXISTENTES de un local real (no deben cambiar nunca) + una venta con store_id nulo
 insert into public.stores values ('${R}','REAL-1','Palermo');
-insert into public.store_users values ('${R}','${U[3]}','owner',true,now());
+insert into public.store_users values ('${R}','${U[3]}','owner',true,now()),('${R}','${U[0]}','owner',true,now()),('${R}','${U[2]}','admin',true,now()),('${R}','${U[1]}','operator',true,now());
 insert into public.categories values ('22222222-2222-4222-8222-222222222222','${R}','C1','Cafe');
 insert into public.products values ('33333333-3333-4333-8333-333333333333','${R}','P1','22222222-2222-4222-8222-222222222222','Espresso',1600,0,true);
 insert into public.sales values ('44444444-4444-4444-8444-444444444444','${R}',1600),('55555555-5555-4555-8555-555555555555',null,50);
@@ -144,6 +144,88 @@ const caso = async (nombre, fn) => { try { await fn(); resultados.push([nombre, 
     const v = (await db.query(`select open_order_id is not null as oo, shift_id is not null as sh from public.sales where id = '44444444-4444-4444-8444-444444444444'`)).rows[0];
     assert.deepEqual(v, {oo: true, sh: true});
   });
+
+  // ── RECUPERACIÓN ANTE INTERRUPCIONES (topología real) ──
+  // «Contenido ajeno»: hash del CONTENIDO COMPLETO (cada fila) de todo lo que no pertenece al local sintético, tabla por tabla.
+  const TABS_STORE = ['audit_logs', 'categories', 'customers', 'expenses', 'open_order_dispatches', 'open_order_items', 'open_orders', 'operators', 'products', 'reservations', 'sale_items', 'sale_payments', 'sales', 'shifts', 'stock_ledger', 'stock_store_activation', 'store_users'];
+  const contenido = async db => { const o = {}; for (const t of ['stores', ...TABS_STORE, 'profiles']) { if (!(await existeTabla(db, t))) continue; const filtro = t === 'stores' ? `x.id <> '${F}'` : t === 'profiles' ? 'true' : `x.store_id is distinct from '${F}'`; o[t] = (await db.query(`select count(*)::int n, md5(coalesce(string_agg(x::text, '|' order by x::text), '')) h from public.${t} x where ${filtro}`)).rows[0]; } return JSON.stringify(o); };
+  const accesos = db => db.query(`select user_id::text u, store_id::text s, role::text r, active a from public.store_users where store_id = '${R}' order by user_id`).then(r => JSON.stringify(r.rows));
+  const sinSintetico = async db => (await foto(db)) && Object.entries(await foto(db)).every(([, v]) => v.sint === 0);
+  const entorno = async () => { const db = await nuevo({fk: 'cascade', extra: ['real']}); return {db, base: await contenido(db), acc: await accesos(db)}; };
+  const verificarRestauracion = async ({db, base, acc}, motivo) => {
+    assert.equal(await contenido(db), base, motivo + ': el contenido de lo ajeno cambió');
+    assert.equal(await accesos(db), acc, motivo + ': cambió el acceso de alguna cuenta al local preexistente');
+    assert.ok(await sinSintetico(db), motivo + ': quedan residuos del local sintético');
+    assert.equal(Number((await db.query(`select count(*) n from public.store_users where store_id = '${R}' and user_id in ('${U[0]}','${U[1]}','${U[2]}')`)).rows[0].n), 3, motivo + ': una cuenta de prueba perdió su membresía en el local preexistente');
+  };
+  await caso('RECUPERACIÓN A: interrupción justo después de crear el local, membresías y productos → la limpieza deja todo como antes', async () => {
+    const E = await entorno(); assert.equal((await correr(E.db, fix)).ok, true);
+    const r = await correr(E.db, cle); assert.equal(r.ok, true, r.msg); await verificarRestauracion(E, 'A');
+  });
+  await caso('RECUPERACIÓN B: interrupción tras crear mesas (pedidos, ítems, comandas) → la limpieza deja todo como antes', async () => {
+    const E = await entorno(); await correr(E.db, fix);
+    await E.db.exec(`insert into public.open_orders (id, store_id) values ('e2e02026-1123-4122-8000-0000000000b1','${F}'); insert into public.open_order_items (open_order_id, store_id) values ('e2e02026-1123-4122-8000-0000000000b1','${F}'); insert into public.open_order_dispatches (open_order_id, store_id) values ('e2e02026-1123-4122-8000-0000000000b1','${F}');`);
+    const r = await correr(E.db, cle); assert.equal(r.ok, true, r.msg); await verificarRestauracion(E, 'B');
+  });
+  await caso('RECUPERACIÓN C: interrupción tras ventas, pagos, turno, auditoría y stock_ledger (con el trigger de cierre) → la limpieza deja todo como antes', async () => {
+    const E = await entorno(); await correr(E.db, fix); await E.db.exec(escrituras()); await E.db.exec(escriturasReal());
+    const r = await correr(E.db, cle); assert.equal(r.ok, true, r.msg); await verificarRestauracion(E, 'C');
+  });
+  await caso('RECUPERACIÓN D: la limpieza misma se interrumpe a mitad (falla un borrado) → se revierte TODO, nada queda a medias y se puede reanudar', async () => {
+    const E = await entorno(); await correr(E.db, fix); await E.db.exec(escrituras()); await E.db.exec(escriturasReal());
+    const lleno = await foto(E.db);
+    await E.db.exec(`create function public.interrumpir() returns trigger language plpgsql as $f$ begin if old.store_id = '${F}' then raise exception 'INTERRUPCION_SIMULADA'; end if; return old; end $f$; create trigger t_interrumpir before delete on public.sale_payments for each row execute function public.interrumpir();`);
+    const r1 = await correr(E.db, cle); assert.equal(r1.ok, false); assert.match(r1.msg, /INTERRUPCION_SIMULADA/);
+    assert.equal(JSON.stringify(await foto(E.db)), JSON.stringify(lleno), 'tras la interrupción el estado debe ser EXACTAMENTE el anterior (nada borrado a medias)');
+    assert.equal(await accesos(E.db), E.acc, 'las cuentas conservan su acceso al local preexistente aun con la limpieza interrumpida');
+    await E.db.exec('drop trigger t_interrumpir on public.sale_payments');          // se retira el obstáculo y se reanuda
+    const e = await correr(E.db, cleEnsayo); assert.match(e.msg, /ENSAYO_OK_SE_REVIERTE: borraria/);
+    const r2 = await correr(E.db, cle); assert.equal(r2.ok, true, r2.msg); await verificarRestauracion(E, 'D (reanudada)');
+  });
+  await caso('RECUPERACIÓN E: alguien borró el local a mano (quedan filas SIN FK, p. ej. stock_ledger) → la limpieza se reanuda y elimina solo esos residuos', async () => {
+    const E = await entorno(); await correr(E.db, fix); await E.db.exec(escrituras()); await E.db.exec(escriturasReal());
+    await E.db.exec(`delete from public.stores where id = '${F}'`);                  // el cascade se lleva casi todo; stock_ledger (sin FK) queda huérfano
+    const huerfanas = Number((await E.db.query(`select count(*) n from public.stock_ledger where store_id = '${F}'`)).rows[0].n); assert.ok(huerfanas > 0, 'el escenario debe dejar filas huérfanas');
+    const e = await correr(E.db, cleEnsayo); assert.match(e.msg, /ENSAYO_OK_SE_REVIERTE: borraria stock_ledger=/);
+    assert.equal(Number((await E.db.query(`select count(*) n from public.stock_ledger where store_id = '${F}'`)).rows[0].n), huerfanas, 'el ensayo no debe borrar');
+    const r = await correr(E.db, cle); assert.equal(r.ok, true, r.msg); await verificarRestauracion(E, 'E');
+  });
+  await caso('RECUPERACIÓN F: hijos borrados parcialmente a mano (ventas ya eliminadas) → la limpieza igual termina sin tocar lo ajeno', async () => {
+    const E = await entorno(); await correr(E.db, fix); await E.db.exec(escrituras()); await E.db.exec(escriturasReal());
+    await E.db.exec(`delete from public.sale_payments where store_id = '${F}'; delete from public.sale_items where store_id = '${F}'; delete from public.sales where store_id = '${F}'`);
+    const r = await correr(E.db, cle); assert.equal(r.ok, true, r.msg); await verificarRestauracion(E, 'F');
+  });
+  await caso('RECUPERACIÓN G: el ciclo se puede repetir (fixtures → limpieza → fixtures → limpieza) y la limpieza ya hecha aborta sin tocar nada', async () => {
+    const E = await entorno();
+    for (let i = 0; i < 2; i++) { assert.equal((await correr(E.db, fix)).ok, true); await E.db.exec(escrituras()); const r = await correr(E.db, cle); assert.equal(r.ok, true, r.msg); await verificarRestauracion(E, 'G' + i); }
+    const otra = await correr(E.db, cle); assert.match(otra.msg, /OLA1_CLEANUP_NADA_QUE_LIMPIAR/); await verificarRestauracion(E, 'G (repetida)');
+  });
+  await caso('RECUPERACIÓN H: una fila AJENA metida a propósito en el local sintético (producto real) → la limpieza aborta y NO borra nada', async () => {
+    const E = await entorno(); await correr(E.db, fix);
+    await E.db.exec(`insert into public.products values (gen_random_uuid(),'${F}','REAL-P','e2e02026-1123-4122-8000-0000000000c1','Real',1,0,true)`);
+    const antes = await foto(E.db); const r = await correr(E.db, cle); assert.match(r.msg, /OLA1_CLEANUP_PRODUCTO_AJENO/); assert.equal(JSON.stringify(await foto(E.db)), JSON.stringify(antes));
+    assert.equal(await accesos(E.db), E.acc);
+  });
+  await caso('INVENTARIO y LÍNEA BASE (solo lectura): la huella de lo ajeno es idéntica antes de crear y después de limpiar; el inventario muestra el local sintético mientras existe y cero al final', async () => {
+    const INV = fs.readFileSync(path.join(HERE, 'inventario_sintetico.sql'), 'utf8'), BASE = fs.readFileSync(path.join(HERE, 'linea_base.sql'), 'utf8');
+    const sl = async (db, sql) => { await db.exec('set default_transaction_read_only = on'); try { return (await db.query(sql)).rows; } finally { await db.exec('set default_transaction_read_only = off'); } };
+    const db = await nuevo({fk: 'cascade', extra: ['real']});
+    // el local preexistente de staging empieza con 89401a44…: se agrega con las 3 cuentas de prueba
+    await db.exec(`insert into public.stores values ('89401a44-acc2-4e32-8860-000000000000','REAL-STAGING','Colo Café Staging'); insert into public.store_users values ('89401a44-acc2-4e32-8860-000000000000','${U[0]}','owner',true,now()),('89401a44-acc2-4e32-8860-000000000000','${U[2]}','admin',true,now()),('89401a44-acc2-4e32-8860-000000000000','${U[1]}','operator',true,now());`);
+    const mapa = filas => Object.fromEntries(filas.map(f => [f.tipo + '|' + f.detalle, f.valor]));
+    const base1 = mapa(await sl(db, BASE)); const inv0 = mapa(await sl(db, INV));
+    assert.equal(inv0['LOCAL_SINTETICO|stores'], '0'); assert.ok(Object.entries(inv0).filter(([k]) => k.startsWith('FILAS_DEL_SINTETICO')).every(([, v]) => v === '0'));
+    assert.deepEqual(['7cd84c4f (owner)', 'eef11ffb (admin)', '48075b31 (operator)'].map(c => inv0['MEMBRESIA_EN_LOCAL_PREEXISTENTE|' + c]), ['1', '1', '1']);
+    await correr(db, fix); await db.exec(escrituras()); await db.exec(escriturasReal());
+    const inv1 = mapa(await sl(db, INV));
+    assert.equal(inv1['LOCAL_SINTETICO|stores'], '1'); assert.equal(inv1['FILAS_DEL_SINTETICO|store_users'], '3'); assert.equal(inv1['FILAS_DEL_SINTETICO|products'], '6'); assert.ok(Number(inv1['FILAS_DEL_SINTETICO|sales']) >= 2); assert.equal(inv1['FILAS_DEL_SINTETICO|audit_logs'], '2');
+    assert.equal(inv1['OTRO_LOCAL_ZZ_E2E|stores'], '0');
+    assert.deepEqual(mapa(await sl(db, BASE)), base1, 'la línea base de lo ajeno no debe cambiar mientras existe el sintético');
+    const r = await correr(db, cle); assert.equal(r.ok, true, r.msg);
+    assert.deepEqual(mapa(await sl(db, BASE)), base1, 'tras la limpieza la huella de lo ajeno debe ser idéntica a la de antes de crear');
+    const inv2 = mapa(await sl(db, INV)); assert.equal(inv2['LOCAL_SINTETICO|stores'], '0'); assert.ok(Object.entries(inv2).filter(([k]) => k.startsWith('FILAS_DEL_SINTETICO')).every(([, v]) => v === '0'));
+    assert.deepEqual(['7cd84c4f (owner)', 'eef11ffb (admin)', '48075b31 (operator)'].map(c => inv2['MEMBRESIA_EN_LOCAL_PREEXISTENTE|' + c]), ['1', '1', '1']);
+  });
   await caso('el ENSAYO de fixtures no deja nada y avisa', async () => {
     const db = await nuevo(); const a = await foto(db);
     const e = await correr(db, fixEnsayo); assert.match(e.msg, /ENSAYO_OK_SE_REVIERTE/);
@@ -161,12 +243,12 @@ const caso = async (nombre, fn) => { try { await fn(); resultados.push([nombre, 
   });
   await caso('limpieza sobre un entorno sin local sintético → aborta sin tocar nada', async () => {
     const db = await nuevo(); const a = await foto(db);
-    const r = await correr(db, cle); assert.match(r.msg, /OLA1_CLEANUP_IDENTIDAD/);
+    const r = await correr(db, cle); assert.match(r.msg, /OLA1_CLEANUP_NADA_QUE_LIMPIAR/);
     assert.equal(JSON.stringify(await foto(db)), JSON.stringify(a));
   });
   await caso('limpieza dos veces → la segunda aborta (no hay nada que borrar), sin colaterales', async () => {
     const db = await nuevo(); await correr(db, fix); await correr(db, cle); const a = await foto(db);
-    const r = await correr(db, cle); assert.match(r.msg, /OLA1_CLEANUP_IDENTIDAD/); assert.equal(JSON.stringify(await foto(db)), JSON.stringify(a));
+    const r = await correr(db, cle); assert.match(r.msg, /OLA1_CLEANUP_NADA_QUE_LIMPIAR/); assert.equal(JSON.stringify(await foto(db)), JSON.stringify(a));
   });
   await caso('con un segundo local ZZ_E2E% la limpieza aborta (alcance ambiguo) y nada cambia', async () => {
     const db = await nuevo(); await correr(db, fix); await db.exec("insert into public.stores values (gen_random_uuid(),'X','ZZ_E2E_otro')"); const a = await foto(db);
