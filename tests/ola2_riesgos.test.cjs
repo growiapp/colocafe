@@ -83,9 +83,22 @@ test('B1 (historial): producto, variante, nota, mesa y operador con HTML se mues
   assert.ok((await page.$$eval('#hist-list .hist-row2 strong', e => e.map(x => x.textContent))).includes(PAY), 'el producto debe verse literal');
 }));
 
+test('B1 (resumen del turno y Reportes): nombre de operador y de producto con HTML se muestran como texto', async () => abrir(async page => {
+  await page.evaluate(p => {
+    pintarResumenTurno({ef: 0, mp: 0, tr: 0, otro: 0, tot: 0, cafe: 0, cocina: 0, porOp: {[p]: 100, Ana: 50}}, '', false);
+    const base = ventas[0];
+    ventas.push({...base, id: 'zz_v9', ticket_id: 'zz_t9', producto: p, fecha: today(), timestamp: new Date().toISOString(), total: 100, cantidad: 3});
+    setDashFiltro('hoy'); renderDashboard();
+  }, PAY);
+  await page.waitForTimeout(500);
+  assert.equal(await xss(page), 0, 'se ejecutó el payload');
+  assert.ok((await page.$$eval('#top-list .top-name', e => e.map(x => x.textContent))).includes(PAY), 'el producto del ranking debe verse literal');
+  assert.ok((await page.$$eval('#turno-modal-body span', e => e.map(x => x.textContent))).includes(PAY), 'el operador del resumen debe verse literal');
+}));
+
 test('B1 (estático): ninguna plantilla HTML interpola texto libre (nombres, notas, teléfonos…) sin escapar', () => {
   const lineas = fs.readFileSync(path.join(process.env.HF_INDEX_ROOT || root, 'index.html'), 'utf8').split('\n');
-  const campos = /\.(?:name|nombre|alergias|preferencias|nota|telefono|email|clienteNombre|direccion|variantes|grupo|producto|operador|mesa|cliente)\b/;
+  const campos = /\.(?:name|nombre|alergias|preferencias|nota|telefono|email|clienteNombre|direccion|variantes|grupo|producto|operador|mesa|cliente)\b|^(?:op|t\.n)$/;
   // Expresiones que NO son texto libre: constantes de la propia app o textos armados por el código.
   const permitido = /^(?:item\.desc\?|m\.label$|q\.label$|t\.source$)/;
   const sospechosas = [];
@@ -128,29 +141,36 @@ for (const [forma, ids] of [['formulario de producto', {nom: 'm-nombre', pre: 'm
 }
 
 // ── B4: limpiar historial local de ventas ──
-const limpiar = (page, rol, turnoAbierto) => page.evaluate(([rol, turnoAbierto]) => {
-  window.getSupabaseActiveRole = () => rol; window.getActiveStoreRole = () => rol;
+// Rol del LOCAL ACTIVO: supabaseStores + config.activeStoreId (getSupabaseActiveRole cae al primer local; no se usa para decidir)
+const limpiar = (page, {stores, activo = 'sx', sesion = true, turnoAbierto = false}) => page.evaluate(([stores, activo, sesion, turnoAbierto]) => {
+  window.supabaseStores = stores; config.activeStoreId = activo; window.__sesionUserId = () => (sesion ? 'u1' : '');
   turno = turnoAbierto ? {...(turno || {}), abierto: true} : null;
   ventas = ventas.filter(v => v && v.id); const antes = ventas.length; let toast = '';
   const t = window.showToast; window.showToast = m => { toast = String(m); };
   limpiarVentas(); window.showToast = t;
   return {antes, despues: ventas.length, toast};
-}, [rol, turnoAbierto]);
-test('B4: solo owner/admin pueden limpiar el historial, nunca con turno abierto; un operador o un rol sin resolver no puede', async () => abrir(async page => {
-  for (const rol of ['operator', '', null]) {
-    const r = await limpiar(page, rol, false);
-    assert.equal(r.despues, r.antes, `rol «${rol}» no debe poder limpiar`); assert.match(r.toast, /dueño o un administrador/);
-  }
+}, [stores, activo, sesion, turnoAbierto]);
+test('B4: solo owner/admin DEL LOCAL ACTIVO, con sesión y sin turno abierto; operador, rol vacío, otro local owner o sin sesión no pueden', async () => abrir(async page => {
+  const negado = async (nombre, o) => { const r = await limpiar(page, o); assert.equal(r.despues, r.antes, `${nombre}: no debe poder limpiar`); assert.match(r.toast, /dueño o un administrador/, nombre); };
+  await negado('operador', {stores: [{id: 'sx', role: 'operator'}]});
+  await negado('rol vacío', {stores: [{id: 'sx', role: ''}]});
+  await negado('primer local owner y local activo SIN rol (caso de la revisión independiente)', {stores: [{id: 'otro', role: 'owner'}, {id: 'sx', role: ''}]});
+  await negado('primer local owner y local activo operador', {stores: [{id: 'otro', role: 'owner'}, {id: 'sx', role: 'operator'}]});
+  await negado('local activo que no está en la lista', {stores: [{id: 'otro', role: 'owner'}]});
+  await negado('sin local activo', {stores: [{id: 'sx', role: 'owner'}], activo: ''});
+  await negado('sin sesión', {stores: [{id: 'sx', role: 'owner'}], sesion: false});
   for (const rol of ['owner', 'admin']) {
-    const r = await limpiar(page, rol, true);
+    const r = await limpiar(page, {stores: [{id: 'sx', role: rol}], turnoAbierto: true});
     assert.equal(r.despues, r.antes, `${rol} con turno abierto no debe poder limpiar`); assert.match(r.toast, /Cerrá el turno/);
   }
-  const ok = await limpiar(page, 'owner', false);
-  assert.ok(ok.antes > 0 && ok.despues === 0, 'el dueño sin turno abierto sí puede');
+  const ok = await limpiar(page, {stores: [{id: 'otro', role: 'operator'}, {id: 'sx', role: 'owner'}]});
+  assert.ok(ok.antes > 0 && ok.despues === 0, 'el dueño del local activo, sin turno abierto, sí puede');
 }));
-test('B4: el botón «Limpiar» queda oculto para quien no es owner/admin', async () => abrir(async page => {
-  await page.evaluate(() => { window.getSupabaseActiveRole = () => 'operator'; window.getActiveStoreRole = () => 'operator'; goTab('ajustes'); toggleAccordion('datos'); aplicarPermisosCatalogo(); });
-  assert.equal(await page.$eval('#acc-body-datos button[onclick*="limpiarVentas"]', b => getComputedStyle(b).display), 'none');
+test('B4: el botón «Limpiar» queda oculto salvo para owner/admin del local activo', async () => abrir(async page => {
+  const visible = stores => page.evaluate(stores => { window.supabaseStores = stores; config.activeStoreId = 'sx'; window.__sesionUserId = () => 'u1'; goTab('ajustes'); if (!document.getElementById('acc-body-datos').classList.contains('open')) toggleAccordion('datos'); aplicarPermisosCatalogo(); return getComputedStyle(document.querySelector('#acc-body-datos button[onclick*="limpiarVentas"]')).display !== 'none'; }, stores);
+  assert.equal(await visible([{id: 'sx', role: 'operator'}]), false);
+  assert.equal(await visible([{id: 'otro', role: 'owner'}, {id: 'sx', role: ''}]), false);
+  assert.equal(await visible([{id: 'sx', role: 'admin'}]), true);
 }));
 
 // ── B5: eliminar mesa con fallo/timeout remoto mientras se trabaja en otras mesas ──
@@ -169,6 +189,19 @@ test('B5: si falla el borrado remoto solo vuelve la mesa eliminada; los cambios 
   assert.equal(r.volvio, true, 'la mesa eliminada debe volver (no se pudo borrar en el servidor)');
   assert.equal(r.conservaNota, 'cambio-en-curso', 'se perdió un cambio hecho en otra mesa');
   assert.equal(r.conservaNueva, true, 'se perdió una mesa creada mientras tanto');
+}));
+test('B5: si al fallar el borrado ya se cambió de cuenta o de local, la mesa NO se escribe en el contexto nuevo', async () => abrir(async page => {
+  for (const cambio of ['cuenta', 'local']) {
+    const r = await page.evaluate(async ([id, cambio]) => {
+      // El cambio ocurre en el instante exacto del fallo (la app vuelve a fijar la sesión si se cambia antes)
+      window.deleteOpenOrderFromSupabase = () => new Promise(res => setTimeout(() => { if (cambio === 'cuenta') window.__sesionUserId = () => 'otra-cuenta'; else config.activeStoreId = 'otro-local'; mesas = []; save(); res(false); }, 400));
+      pedirEliminarMesa(id); ejecutarConfirm();
+      await new Promise(r => setTimeout(r, 900));
+      return {volvio: !!findMesaByAnyId(id), cantidad: mesas.length};
+    }, [MESA, cambio]);
+    assert.deepEqual(r, {volvio: false, cantidad: 0}, `cambio de ${cambio}: se escribió la mesa de la cuenta anterior`);
+    await page.reload(); await page.waitForFunction(() => document.querySelectorAll('.mesa-card').length >= 6);
+  }
 }));
 test('B5: si el borrado remoto sale bien la mesa NO reaparece y nada más cambia', async () => abrir(async page => {
   const r = await page.evaluate(async id => {

@@ -5236,7 +5236,7 @@ function pintarResumenTurno({ef,mp,tr,otro,tot,cafe,cocina,porOp},nota,delTurno)
       <div class="turno-stat"><div class="turno-stat-lbl">☕ Cafetería</div><div class="turno-stat-val">${fmt(cafe)}</div></div>
       <div class="turno-stat"><div class="turno-stat-lbl">🍳 Cocina</div><div class="turno-stat-val">${fmt(cocina)}</div></div>
     </div>
-    ${Object.keys(porOp).length>1?`<div style="margin-bottom:14px;font-size:12px">${Object.entries(porOp).map(([op,t])=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)"><span>${op}</span><span style="font-weight:500">${fmt(t)}</span></div>`).join('')}</div>`:''}
+    ${Object.keys(porOp).length>1?`<div style="margin-bottom:14px;font-size:12px">${Object.entries(porOp).map(([op,t])=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)"><span>${escapeHtml(op)}</span><span style="font-weight:500">${fmt(t)}</span></div>`).join('')}</div>`:''}
     <div class="modal-actions">
       <button class="btn-cancel" onclick="cerrarModalTurno()">Seguir</button>
       <button class="btn-save" style="background:var(--green)" onclick="pedirCerrarTurno(${ef},${mp},${tr},${otro},${tot},${cafe},${cocina},${delTurno?1:0})">Cerrar turno</button>
@@ -5347,9 +5347,15 @@ function renderAjustesConfig(){
   if($('cfg-sheet-adj')&&config.sheetId)$('cfg-sheet-adj').value=config.sheetId;
   if($('cfg-url-adj')&&config.webappUrl)$('cfg-url-adj').value=config.webappUrl;
 }
+// Rol del local ACTIVO, sin caer en el primer local de la lista (getSupabaseActiveRole lo hace) y con sesión: para acciones destructivas.
+function esAdminDelLocalActivo(){
+  const id=String(config?.activeStoreId||'');if(!id||!window.__sesionUserId?.())return false;
+  const st=window.getActiveStore?.();
+  return !!st&&String(st.id||'')===id&&['owner','admin'].includes(String(st.role||'').toLowerCase());
+}
 function limpiarVentas(){
   // Borra el historial LOCAL: el cierre de turno sin conexión se calcula con él (getLocalShiftCloseTotals). Solo owner/admin y nunca con turno abierto (mismo criterio que DEC-07). Rol sin resolver = no permitido.
-  if(!isSupabaseAdminRole()){showToast('Solo el dueño o un administrador puede limpiar el historial local.');return;}
+  if(!esAdminDelLocalActivo()){showToast('Solo el dueño o un administrador puede limpiar el historial local.');return;}
   if(turno&&turno.abierto){showToast('Cerrá el turno antes de limpiar el historial de ventas.');return;}
   const pending=window.findPendingSalesSyncGroups?.(ventas||[])||[];
   if(pending.length){
@@ -5929,6 +5935,7 @@ function pedirEliminarMesa(id){
   pedirConfirm(`¿Eliminar "${m.nombre}"? Se perderán los ítems.`,async()=>{
     // Solo se guarda LA mesa eliminada (copia y posición): restaurar el arreglo completo pisaba lo hecho en otras mesas durante los hasta 10 s del borrado remoto.
     let quitada=null;try{quitada=JSON.parse(JSON.stringify(m));}catch(_){quitada=null;}
+    const ctxDe=()=>String(window.__sesionUserId?.()||'')+'|'+String(config?.activeStoreId||''),ctxAlBorrar=ctxDe();
     const posicion=findMesaIndexByAnyId(id);
     const sbId=m._sb_id||null;
     removeMesaByAnyId(id);save();syncMesasSheets();
@@ -5942,6 +5949,7 @@ function pedirEliminarMesa(id){
       showToast('Mesa eliminada.');
       setTimeout(()=>window.triggerOORefresh?.('post_action'),500);
     }catch(err){
+      if(ctxDe()!==ctxAlBorrar)return; // se cambió de cuenta o de local mientras el borrado seguía en curso: no se escribe nada en el contexto nuevo
       if(quitada&&!findMesaByAnyId(id)){const i=Math.min(Math.max(posicion,0),(mesas||[]).length);mesas.splice(i,0,quitada);}
       save();renderMesasSection();
       window.triggerOORefresh?.('delete_failed'); // el servidor tiene la última palabra: si el borrado sí se aplicó, la mesa se retira en la próxima lectura
@@ -7209,7 +7217,7 @@ function renderDashboard(){
   const conteo={};vh.forEach(v=>{if(!conteo[v.producto])conteo[v.producto]={qty:0,rev:0};conteo[v.producto].qty+=Number(v.cantidad)||0;conteo[v.producto].rev=money2(conteo[v.producto].rev+money2(v.total));});
   const top=Object.entries(conteo).sort((a,b)=>b[1].qty-a[1].qty).slice(0,5).map(([n,c])=>({n,c:c.qty,rev:c.rev}));
   const maxC=top[0]?.c||1;
-  $('top-list').innerHTML=top.length?top.map((t,i)=>`<div class="top-row"><span class="top-rank">${i+1}</span><span class="top-name">${t.n}</span>
+  $('top-list').innerHTML=top.length?top.map((t,i)=>`<div class="top-row"><span class="top-rank">${i+1}</span><span class="top-name">${escapeHtml(t.n)}</span>
     <div class="top-bar-bg"><div class="top-bar-fill" style="width:${Math.round(t.c/maxC*100)}%"></div></div>
     <span class="top-cnt">${t.c} ud. · ${fmt(t.rev)}</span></div>`).join(''):'<div style="font-size:13px;color:var(--ink2);padding:12px 0">Todavía no hay ventas en este período.</div>';
 
@@ -7745,7 +7753,7 @@ function renderAjustes(){
 }
 // Solo la interfaz: el servidor (RLS) ya rechaza el alta/edición de catálogo para el operador. Rol desconocido (sin sesión) = no se oculta nada.
 function puedeEditarCatalogo(){const r=String(window.getSupabaseActiveRole?.()||window.getActiveStoreRole?.()||'').toLowerCase();return !r||r==='owner'||r==='admin';}
-function aplicarPermisosCatalogo(){const ok=puedeEditarCatalogo();document.querySelectorAll('[data-solo-admin]').forEach(b=>{b.style.display=ok?'':'none';});const estricto=isSupabaseAdminRole();document.querySelectorAll('[data-solo-admin-estricto]').forEach(b=>{b.style.display=estricto?'':'none';}); /* acciones destructivas: rol sin resolver = oculto */return ok;}
+function aplicarPermisosCatalogo(){const ok=puedeEditarCatalogo();document.querySelectorAll('[data-solo-admin]').forEach(b=>{b.style.display=ok?'':'none';});const estricto=esAdminDelLocalActivo();document.querySelectorAll('[data-solo-admin-estricto]').forEach(b=>{b.style.display=estricto?'':'none';}); /* acciones destructivas: rol sin resolver = oculto */return ok;}
 function renderCatMgr(){
   const el=$('cat-mgr');if(!el)return;
   const edita=aplicarPermisosCatalogo();
