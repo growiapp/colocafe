@@ -18,6 +18,14 @@
 ## Estado (2026-11-25)
 Las consultas de solo lectura de este directorio **ya se ejecutaron en staging** (panel de Supabase autenticado, proyecto `wjymdgfqmqutihadffec`, contenido verificado por SHA-256 contra el archivo del commit antes de cada ejecución): `politicas_rls.sql`, `esquema_gate.sql`, `auditoria_triggers.sql`, `funciones_triggers.sql`, `columnas_fixtures.sql` y `restricciones_fixtures.sql`. Resultados en `AUDITORIA_360_REPORT.md` §3.1c. `validacion_solo_lectura.cjs` valida las mejoras sobre el local real de staging **sin ninguna escritura** (66/66). Lo que sigue (`fixtures.sql`, `escenarios_ola1.cjs`, `cleanup.sql`) escribe y exige autorización explícita.
 
+## Si el ciclo se interrumpe (recuperación)
+1. `inventario_sintetico.sql` (solo lectura, solo conteos): qué hay del local `ZZ_E2E_OLA1` en cada tabla y que las 3 cuentas conservan su membresía en el local preexistente.
+2. `cleanup_ENSAYO.sql`: informa qué borraría y se revierte siempre.
+3. `cleanup.sql`: borra **solo** lo sintético (por `store_id`), en una transacción; si falla, no queda nada a medias y se puede repetir. Si el local ya no existe pero quedan residuos sin FK (p. ej. `stock_ledger`), los limpia igual.
+4. `inventario_sintetico.sql` y `linea_base.sql` de nuevo: cero residuos y huella de lo ajeno idéntica a la registrada antes de crear (`linea_base.sql` se ejecuta **antes** de `fixtures.sql`).
+5. `harness/recuperacion_cliente.cjs`: las cuentas vuelven al local preexistente.
+Detalle y demostración (31 casos): `AUDITORIA_360_REPORT.md` §3.1f.
+
 ## Paso 1 (histórico): los scripts de SOLO LECTURA
 
 **Acceso:** quien audita no tiene acceso al SQL Editor de Supabase (sólo sesiones de la app con la clave pública), por lo que los ejecuta la persona. No se pide ninguna contraseña ni clave.

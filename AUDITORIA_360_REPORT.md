@@ -89,10 +89,55 @@ Seis consultas `SELECT` sobre catálogos del sistema, cada una verificada por SH
 - **Idempotencia de ventas:** índice único `sales_store_legacy_unique_idx (store_id, legacy_id) WHERE legacy_id IS NOT NULL`: la hipótesis sobre la restricción UNIQUE queda **confirmada**.
 - `has_store_role`: `SECURITY DEFINER`, `search_path` fijo.
 - **Esquema para la limpieza:** rol del editor `postgres` con `bypassrls`; **0 filas `STOP_*`** (no hay tablas hijas sin `store_id`; `reservations` existe); **0 FKs que bloqueen el borrado**; 17 tablas con `store_id` (incluye `audit_logs` y `stock_ledger`); **16 FKs hacia `stores`, todas `ON DELETE CASCADE`** (`stock_ledger` no tiene FK y la limpieza lo borra explícitamente); 11 FKs `SET NULL`, todas entre tablas del mismo local.
-- **Triggers (20):** `updated_at`, versionado de ítems, etiquetas de pedido, `trg_close_open_order_after_sale` (el servidor cierra la mesa al entrar una venta con `open_order_id`) y `stores_create_owner_membership`, que crea membresía **sólo si `created_by` no es nulo**: `fixtures.sql` no lo informa, así que sus «exactamente 3 membresías» son correctas. **Ningún trigger escribe en `audit_logs` y `index.html` nunca la usa.** **No hay triggers de Stock Durability en `public`: en staging ese módulo no está instalado.**
+- **Triggers (20):** `updated_at`, versionado de ítems, etiquetas de pedido, `trg_close_open_order_after_sale` (el servidor cierra la mesa al entrar una venta con `open_order_id`) y `stores_create_owner_membership`, que crea membresía **sólo si `created_by` no es nulo**: `fixtures.sql` no lo informa, así que sus «exactamente 3 membresías» son correctas. **Ningún trigger escribe en `audit_logs` y `index.html` nunca la usa.** **No hay triggers de Stock Durability en `public`** (ver la corrección de la paridad en §3.1e: mi frase inicial «no está instalado» era una simplificación incorrecta).
 - **`fixtures.sql` contra el esquema real (sin ejecutarlo):** las 56 columnas de `stores`, `store_users`, `categories`, `operators` y `products` se leyeron; **todas las columnas que el script informa existen y no falta ninguna obligatoria sin valor por defecto**; sus valores no chocan con `UNIQUE (store_id, name)`, `UNIQUE (store_id, normalized_name)`, `UNIQUE (slug)` (queda nulo), `CHECK price>=0` ni `CHECK stock>=0`.
-- **Copia aislada con la topología real** (`verificar_sql.cjs`, 22/22): fixtures → escrituras de la app (venta ligada a su mesa con el trigger de cierre, auditoría, `stock_ledger`) → ensayo → limpieza deja lo preexistente intacto (incluidos sus vínculos `SET NULL`) y 0 residuos.
+- **Copia aislada con la topología real** (`verificar_sql.cjs`, ahora 31/31, ver §3.1f): fixtures → escrituras de la app (venta ligada a su mesa con el trigger de cierre, auditoría, `stock_ledger`) → ensayo → limpieza deja lo preexistente intacto (incluidos sus vínculos `SET NULL`) y 0 residuos.
 - **Efecto lateral en el panel:** el SQL Editor guardó automáticamente un fragmento «Untitled query» con la última consulta (metadato del panel, no dato de la base). Se puede borrar a mano; no se borró.
+
+### 3.1e Paridad de Stock Durability (STAGING, solo lectura) — corrige una afirmación mía
+
+Consulta `stock_paridad.sql` (catálogos + sólo agregados de las dos tablas de configuración), ejecutada en staging y contrastada con lo que crea `stock_durability.sql` (2 tablas, 1 columna, 1 índice, 10 funciones, 9 triggers):
+
+| Objeto | Esperado por `stock_durability.sql` | En staging |
+|---|---|---|
+| Tablas `stock_store_activation`, `stock_ledger` | 2 | **2 (existen, vacías: 0 filas de activación, 0 en el ledger)** |
+| Columna `products.stock_counted_at` | 1 | **existe** |
+| Índice `sale_items_stock_incidents_idx` | 1 | **existe** |
+| Funciones (`sale_items_stock_*`, `sales_stock_*`, `products_stock_*`, `stock_apply_adjustment`, `stock_store_activation_guard`) | 10 | **0** |
+| Triggers | 9 | **0** (y ningún otro trigger o función con «stock» en ningún esquema) |
+
+**Diagnóstico:** Stock Durability **no está «no instalado»**: la **estructura** está (tablas, columna, índice) y falta **todo el comportamiento** (funciones y triggers). Es exactamente el estado que deja `stock_durability_rollback.sql`, que según su cabecera **conserva** tablas, columnas y `stock_ledger` «como registro inerte» y **borra** todos los triggers y funciones. También es compatible con una instalación que sólo recibió la parte estructural. **No se puede distinguir** entre esas dos historias sin el historial de migraciones de staging; lo que sí se sabe es que **nunca se movió stock desde el servidor** (ledger vacío, sin activación).
+
+**Diferencia con el diagnóstico anterior («instalado e inactivo»):** esa fórmula describe la instalación **completa** con todos los locales sin activar (funciones y triggers presentes, inertes por estado). Staging está **un paso más atrás**: sin funciones ni triggers. La diferencia es de **nivel de instalación**, no de activación: en ambos casos Stock Durability está **inactivo**. **No se instaló ni se modificó nada.** La paridad con producción **no se verificó** (no se consultó producción).
+
+**Efecto en el ciclo de staging:** ninguno negativo. `fixtures.sql` exige `stock_store_activation` vacío (se cumple: 0 filas), la limpieza borra `stock_ledger` por `store_id` (0 filas) y la guarda `OLA1_CLEANUP_STOCK_ACTIVO` no se dispara. **Contrapartida:** el comportamiento del servidor de Stock (compuertas de venta/producto) **no se puede probar en staging** tal como está; fuera del alcance de esta auditoría.
+
+### 3.1f Recuperación ante interrupciones del ciclo de staging
+
+**Cómo se identifica exactamente lo sintético:** por identidad fija, sin depender de ningún estado de la sesión: `id = e2e02026-1123-4122-8000-000000000001`, `legacy_id = 'ZZE2E-STORE'`, `name LIKE 'ZZ_E2E%'`, y dentro de él todas las filas con ese `store_id` (17 tablas). `inventario_sintetico.sql` (sólo lectura, sólo conteos) lista qué hay en cada tabla y confirma que no existe otro local `ZZ_E2E%`.
+
+**Hallazgo real que corregí:** si el local se borrara a mano, `stock_ledger` (sin FK a `stores`) dejaría filas huérfanas y la limpieza **abortaba por «local inexistente» sin poder retirarlas**. Ahora `cleanup.sql` **se reanuda**: sin local pero con residuos por `store_id`, limpia sólo esos residuos; sin local y sin residuos, aborta con `OLA1_CLEANUP_NADA_QUE_LIMPIAR`. Además compara por **hash** el contenido de todos los demás locales y **todas las membresías** ajenas (`OLA1_CLEANUP_COLATERAL_LOCALES` / `_MEMBRESIAS`).
+
+**Demostración en la copia aislada con la topología real (31/31 casos):**
+
+| Interrupción | Resultado |
+|---|---|
+| A. Después de crear local, membresías y productos | La limpieza deja todo como antes |
+| B. Después de crear mesas (pedidos, ítems, comandas) | Igual |
+| C. Después de ventas, pagos, turno, auditoría y `stock_ledger` (con el trigger de cierre) | Igual |
+| D. La **limpieza misma** se interrumpe a mitad (falla un borrado) | Se **revierte todo** (estado idéntico al anterior), se retira el obstáculo, se reanuda y termina |
+| E. El local fue borrado a mano y quedan filas sin FK | **Rojo con la limpieza anterior, verde ahora**: se reanuda y borra sólo los residuos |
+| F. Hijos ya borrados parcialmente a mano | Termina sin tocar lo ajeno |
+| G. Ciclo repetido (crear → limpiar → crear → limpiar) y limpieza ya hecha | Repetible; la repetida aborta sin tocar nada |
+| H. Una fila **ajena** colada en el local sintético | La limpieza **aborta y no borra nada** |
+
+En **todos** se comprueba: (1) el **contenido completo** (hash de cada fila) de todo lo ajeno es idéntico al de **antes de crear** los fixtures; (2) las filas exactas de `store_users` del local preexistente no cambian; (3) las 3 cuentas conservan su membresía en el local preexistente; (4) 0 residuos del sintético.
+
+**Línea base real de staging (STAGING, solo lectura):** `linea_base.sql` registró, antes de crear nada, cantidad y huella md5 de las 19 tablas (`evid/linea_base_staging_2026-11-25.txt`: p. ej. 41 `open_orders`, 26 `sales`, 51 `sale_items`, 3 `store_users`); `inventario_sintetico.sql` confirma hoy **0 locales sintéticos, 0 filas del sintético en las 17 tablas** y **1 membresía de cada cuenta (owner, admin, operator) en el local preexistente**. Caveat: si alguien trabaja en «Colo Café Staging» durante el ciclo, los timestamps de las filas cambian y la huella puede diferir; en ese caso se revisa el motivo (la limpieza verifica por su cuenta, dentro de su transacción, los hashes de locales y membresías).
+
+**Recuperación del cliente (STAGING, solo lectura):** con el local sintético «recordado» como activo pero inexistente, las 3 cuentas de prueba vuelven solas al local preexistente (`89401a44`), con su rol correcto (owner / admin / operator), 15 mesas, 0 violaciones y 0 errores de página.
+
+**Procedimiento si el proceso se interrumpe (sin pedir tareas técnicas a la persona):** (1) `inventario_sintetico.sql` → qué hay; (2) `cleanup_ENSAYO.sql` → qué borraría (se revierte siempre); (3) `cleanup.sql` → borra sólo lo sintético; (4) `inventario_sintetico.sql` y `linea_base.sql` → cero residuos y huella ajena idéntica a la registrada; (5) `recuperacion_cliente.cjs` → las cuentas vuelven al local preexistente. Todo se ejecuta desde el panel ya autenticado y puede repetirse.
 
 ### 3.1d Validación en staging SIN escrituras — **STAGING, 66/66 comprobaciones OK**
 
