@@ -119,3 +119,62 @@ test('B7: un conflicto de estado (otro dispositivo cambió la mesa) no entra en 
   assert.equal(r.conflicto, true);
   assert.equal(r.rpcs, 0, 'con un conflicto abierto no se reenvía nada hasta que el cajero elige');
 });
+
+// B5 (cliente): si el servidor rechaza el cierre de una eliminación, la app NO sigue borrando ítems ni la fila (antes lo hacía como «plan B»).
+test('B5: una eliminación rechazada por el servidor no borra ítems ni fila', async () => {
+  const r = await conPagina(page => page.evaluate(async () => {
+    __nueva('b5x'); __sim.orders.get('b5x').rows = [{id: 'i1', product_id: 'prod-test', quantity: 2, unit_price: 100, variants: [], note: '', metadata: {}}];
+    const c = window.__coloSupabaseClient, from = c.from; window.__del = {items: 0, filas: 0};
+    c.from = t => { const b = from(t);
+      if (t === 'open_orders') { const u = b.update, d = b.delete; b.update = v => { u(v); b.maybeSingle = async () => ({data: null, error: {code: '42501', message: 'rls'}}); return b; }; b.delete = () => { window.__del.filas++; return d(); }; }
+      if (t === 'open_order_items') { const d = b.delete; b.delete = () => { window.__del.items++; return d(); }; }
+      return b; };
+    return null;
+  }).then(() => page.evaluate(async () => {
+    const real = window.deleteOpenOrderFromSupabase;
+    const eliminar = await real('b5x');
+    const tras = {eliminar, ...window.__del};
+    return {tras};
+  })));
+  assert.equal(r.tras.eliminar, false); assert.equal(r.tras.items, 0, 'no se borran ítems'); assert.equal(r.tras.filas, 0, 'no se borra la fila');
+});
+
+// B7 (verificación final): reconexiones y reintentos NO duplican ítems ni alteran cantidades.
+test('B7: respuesta perdida (el servidor SÍ aplicó el cambio pero la app vio un corte), reconexión y reintentos repetidos: mismas filas y cantidades que la pantalla', async () => {
+  const r = await conPagina(page => page.evaluate(async () => {
+    __nueva('b7e'); __abrir('b7e');
+    const real = window.__coloSupabaseClient.rpc.bind(window.__coloSupabaseClient);
+    let perderRespuestas = 2;
+    window.__coloSupabaseClient.rpc = async (n, a) => { const res = await real(n, a); if (perderRespuestas > 0) { perderRespuestas--; throw new TypeError('Failed to fetch'); } return res; }; // aplicó y la respuesta se perdió
+    addItem('prod-test'); addItem('prod-test'); addItem('prod-test'); // 3 unidades
+    await new Promise(r => setTimeout(r, 600));
+    const m = () => findMesaByAnyId('b7e');
+    const cant = () => __sim.orders.get('b7e').rows.reduce((n, x) => n + Number(x.quantity), 0);
+    const trasCorte = {server: cant(), filas: __sim.orders.get('b7e').rows.length, pend: pendingOpenOrderItemSyncs.filter(e => e.open_order_id === 'b7e').length};
+    // se edita mientras está caído y luego vuelve la red; varios reintentos (manual, interval, online) seguidos
+    addItem('prod-test'); await new Promise(r => setTimeout(r, 400));          // 4 unidades
+    for (const reason of ['manual', 'interval', 'online', 'manual', 'manual']) { window.__off += 15000; await window.retryPendingOpenOrderWrites({reason}); }
+    await window.retryPendingOpenOrdersSync({silent: true}); await window.retryPendingOpenOrderItemSyncs({silent: true});
+    await new Promise(r => setTimeout(r, 300));
+    return {trasCorte, qtyPantalla: Object.values(m().items).reduce((n, i) => n + i.qty, 0), server: cant(), filas: __sim.orders.get('b7e').rows.length, pend: pendingOpenOrderItemSyncs.filter(e => e.open_order_id === 'b7e').length, dirty: m()._items_dirty, conflicto: !!m()._items_conflict};
+  }));
+  assert.equal(r.qtyPantalla, 4);
+  assert.equal(r.server, 4, 'el servidor tiene exactamente las unidades de la pantalla (ni más ni menos)');
+  assert.equal(r.filas, 1, 'una sola fila de ítem: nada duplicado');
+  assert.equal(r.pend, 0); assert.ok(!r.dirty, 'sin cambios locales sin enviar'); assert.equal(r.conflicto, false);
+});
+
+test('B7: tras recuperarse, 20 reintentos y reconexiones más no cambian nada en el servidor (idempotencia)', async () => {
+  const r = await conPagina(page => page.evaluate(async () => {
+    __nueva('b7f'); __abrir('b7f');
+    __sim.failRpc = 1; addItem('prod-test'); addItem('prod-test');
+    await new Promise(r => setTimeout(r, 600));
+    for (let i = 0; i < 5; i++) { window.__off += 15000; await window.retryPendingOpenOrderWrites({reason: 'manual'}); }
+    const snap = () => JSON.stringify(__sim.orders.get('b7f').rows.map(x => [x.product_id, Number(x.quantity)]));
+    const antes = snap(), rpcs = __sim.rpcs;
+    for (let i = 0; i < 20; i++) { window.__off += 15000; await window.retryPendingOpenOrderWrites({reason: i % 2 ? 'online' : 'manual'}); await window.retryPendingOpenOrderItemSyncs({silent: true}); }
+    return {antes, despues: snap(), rpcsExtra: __sim.rpcs - rpcs};
+  }));
+  assert.equal(r.antes, r.despues); assert.equal(JSON.parse(r.despues).reduce((n, x) => n + x[1], 0), 2);
+  assert.equal(r.rpcsExtra, 0, 'sin pendientes no se envía nada');
+});

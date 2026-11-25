@@ -10347,7 +10347,8 @@ if(config.webappUrl){loadFromSheets();}
         store_id:storeId,
         reason
       });
-      if(opts.deleteRow||opts.deleteRowOnCloseFailure){
+      // B5: solo el cierre POR COBRO (venta ya registrada) puede borrar ítems y fila como plan B. Una eliminación/cancelación (deleteRow sin cobro) que el servidor rechaza NO debe seguir borrando ítems.
+      if(opts.deleteRowOnCloseFailure){
         try{
           ooRememberOperation('open_order_items','delete_after_close_failure',`delete items after close failure ${sbId}`);
           const itemDelete=await ooWithTimeout(client
