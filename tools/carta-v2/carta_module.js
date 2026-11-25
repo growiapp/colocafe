@@ -192,9 +192,11 @@ function pintarMesas(){
   });
 }
 function actualizarBotonComanda(){
-  const b=document.querySelector('#view-pedido button[onclick="abrirComandaMesa()"]');if(!b)return;
   const n=pend.get(String(typeof mesaActivaId!=='undefined'?mesaActivaId:''))||0;
-  const t=n>0?`Comanda · ${n} sin enviar`:'Comanda';if(b.textContent!==t)b.textContent=t;
+  const t=n>0?`Comanda · ${n} sin enviar`:'Comanda';
+  const bp=document.querySelector('#atn-slot-cart [data-act="comanda"]');if(bp&&bp.textContent!==t)bp.textContent=t;   // panel lateral (escritorio)
+  const b=document.querySelector('#view-pedido button[onclick="abrirComandaMesa()"]');if(!b)return;
+  if(b.textContent!==t)b.textContent=t;
   const tg=document.querySelector('.cart-head2 .tag');if(tg){tg.hidden=!(n>0);const x=`${n} sin enviar`;if(tg.textContent!==x)tg.textContent=x;}
 }
 function anotarCarrito(){
@@ -220,10 +222,11 @@ function aside(){
   let a=$('atn-side');
   if(!a){
     a=document.createElement('aside');a.id='atn-side';a.className='atn-side';a.setAttribute('aria-label','Reservas y pedido');
-    a.innerHTML='<div id="atn-slot-res"></div><div id="atn-slot-cart" class="tk" hidden><div id="atn-head"></div><div id="atn-slot-body"></div><div class="tk-more"><button type="button" class="btn-sm" data-act="abrir">Agregar productos</button></div></div>';
+    a.innerHTML='<div id="atn-slot-res"></div><div id="atn-slot-cart" class="tk" hidden><div id="atn-head"></div><div id="atn-slot-body"></div><div class="tk-more"><button type="button" class="btn-sm" data-act="comanda">Comanda</button><button type="button" class="btn-sm" data-act="abrir">Agregar productos</button></div></div>';
     tabC().appendChild(a);
     a.addEventListener('click',async e=>{const b=e.target.closest('[data-act]');if(!b)return;
       if(b.dataset.act==='cerrar')await volverAMesas();
+      else if(b.dataset.act==='comanda'){abrirComandaMesa();}   // el mismo diálogo de la vista de la mesa: imprimir, marcar como enviada, reimprimir
       else if(b.dataset.act==='abrir'){vmesas().style.display='none';irDetalle();}});
   }
   return a;
@@ -243,7 +246,7 @@ function colocar(){
   tabC().classList.toggle('atn-panel',modo==='panel'&&lat);
   const ct=document.querySelector('#view-pedido .cart-title,#atn-slot-body .cart-title');if(ct){const w=modo==='panel'&&lat?'Total':'Pedido';if(ct.textContent!==w)ct.textContent=w;}
 }
-function irPanel(id){modo='panel';sel=String(id);vmesas().style.display='block';colocar();pintarMesas();pintarCabecera();}
+function irPanel(id){modo='panel';sel=String(id);vmesas().style.display='block';colocar();pintarMesas();pintarCabecera();actualizarBotonComanda();}
 function irDetalle(){modo='detalle';colocar();pintarMesas();}
 function irLista(){modo='lista';sel=null;colocar();pintarMesas();}
 async function seleccionar(id){

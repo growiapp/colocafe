@@ -181,6 +181,7 @@ h2.sec{font-family:'Alfa Slab One',Georgia,serif;font-weight:400;font-size:19px;
 #tab-carga.atn-panel>#view-pedido{display:none!important}
 #atn-slot-cart.tk{padding:22px 20px 24px}
 #atn-slot-cart .tk-more{margin-top:14px}
+#atn-slot-cart .tk-more{display:grid;gap:8px}
 #atn-slot-cart .tk-more .btn-sm{width:100%}
 #atn-slot-cart .carga-right{position:static;width:auto;display:block}
 #atn-slot-cart .carrito-wrap{background:transparent!important;filter:none!important;-webkit-mask:none!important;mask:none!important;padding:0!important;box-shadow:none!important;border-radius:0!important;display:flex;flex-direction:column}
