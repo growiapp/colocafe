@@ -161,16 +161,61 @@ En **todos** se comprueba: (1) el **contenido completo** (hash de cada fila) de 
 
 **Lo que esto NO demuestra** (requiere escribir datos sintéticos): que el cobro **persista** con los importes, descuentos y pagos correctos (y que el vuelto no los altere en el servidor), el caso de centavos con un total real, la eliminación real de una mesa por rol (y B5 con el servidor), B1 con una nota de un rol vista por otro, comandas, impresión y reservas.
 
-### 3.2 Fase 2: parte con ESCRITURAS — **NO EJECUTADA (requiere autorización)**
+### 3.2 Ciclo de validación con escrituras en staging — **EJECUTADO (2026-11-25), autorizado y acotado**
 
-Bloqueo real: requiere (a) la clave anon pública de staging y las contraseñas de las tres cuentas tipeadas por la persona en ventanas locales, y (b) que la persona ejecute `fixtures.sql` en el SQL Editor (y `cleanup.sql` al final, con su autorización explícita). El guion está listo (`harness/escenarios_ola1.cjs`): verifica proyecto, URL, usuario, rol y local **antes de escribir** y aborta la cuenta si algo no coincide; mide violaciones de red; registra por rol (owner, admin, operator) y dispositivo (escritorio 1280×800, móvil 390×844). **No se ha corrido ni una vez contra staging, y su primera ejecución puede requerir ajustes de selectores.**
+**Alcance autorizado:** crear únicamente el local `ZZ_E2E_OLA1` (`e2e02026-1123-4122-8000-000000000001`) y sus datos sintéticos; probar turno, mesas, productos y cobros (efectivo, transferencia, mixto, centavos) **sólo dentro de ese local**; verificar proyecto, usuario, rol y local antes de cada escritura; no tocar «Colo Café Staging»; limpiar al final; comparar la línea base; si hay una interrupción, recuperar y limpiar sólo lo sintético. Excluidos: producción, Stock Durability, SQL estructural, RLS, usuarios de Auth, respaldos y configuración.
 
-#### Resultado por rol y dispositivo
-| Cuenta | Escritorio | Móvil |
-|---|---|---|
-| owner | no ejecutado | no ejecutado |
-| admin | no ejecutado | no ejecutado |
-| operator (caja) | no ejecutado | no ejecutado |
+**Secuencia (todo con el contenido verificado por SHA-256 contra el archivo del commit antes de cada ejecución):**
+1. Pre-chequeo: línea base **idéntica** a la medición original (19/19), 0 locales sintéticos, 3 membresías.
+2. `fixtures_ENSAYO.sql` (revierte siempre): pasó todas las guardas y los `INSERT` fueron válidos contra el esquema real; sin residuos.
+3. `fixtures.sql`: `FIXTURES_OK` (1 local, 3 membresías, 1 categoría, 1 operador, 6 productos).
+4. Recorridos con las 3 cuentas (cambio de local por el diálogo real «Elegí la tienda → Continuar», turno, 4 cobros por cuenta, eliminación de mesa). Barrera de red `fixture`: sólo se permite escribir en el local sintético y sobre pedidos creados por la propia prueba.
+5. Verificación **en el servidor** de lo guardado (`verificacion_ventas_sinteticas.sql`).
+6. Línea base «durante», `cleanup_ENSAYO.sql` (informó exactamente lo inventariado y no cambió nada) y `cleanup.sql`.
+7. Inventario y línea base finales; recuperación del cliente.
+
+**Verificación previa a escribir (condición 3):** antes de cada bloque de escrituras (turno, cada cobro, eliminación) el guion comprueba proyecto/URL (`wjymdgfqmqutihadffec`), usuario (por prefijo), rol estricto del local activo y nombre del local sintético; si algo no coincide no escribe. Resultado: 0 abortos y **0 violaciones de la barrera de red en las pasadas finales**.
+
+#### Resultados de los cobros por medio de pago y rol (STAGING)
+
+Pasadas finales limpias: **owner + operator 62/62** y **admin 31/31** (los intentos anteriores, con el arnés aún con defectos, están documentados abajo). Importes verificados dos veces: lo que **la app envió** (cuerpos de `POST sales/sale_items/sale_payments`) y lo que **el servidor guardó** (31 ventas, **las 31 con total = suma de pagos = suma de ítems**, todas con turno y operador).
+
+| Medio | Mesa de prueba | Total | Lo que guarda el servidor | owner | admin | operator |
+|---|---|---|---|---|---|---|
+| Efectivo con vuelto («paga con» $5.000) | Café $2.200 + Medialuna $900 | $3.100 | `efectivo: 3100` (el vuelto **no** viaja ni se guarda) | OK | OK | OK |
+| Transferencia | Tostado $4.500 | $4.500 | `transferencia: 4500` | OK | OK | OK |
+| Mixto | Jugo $2.600 + Cien $100 | $2.700 | `efectivo: 1000 + transferencia: 1700` | OK | OK | OK |
+| Descuento 12,5 % sobre $100 + «Justo» | Cien $100 | **$87** | `efectivo: 87` | OK | OK | OK |
+
+- **Vuelto:** «Vuelto $1.900» sobre $3.100 con $5.000; sin cálculo de vuelto en transferencia ni mixto; ningún campo de «paga con»/vuelto aparece en los cuerpos enviados.
+- **«Centavos» (aclaración):** el 12,5 % de $100 son $12,50 y la app **redondea el descuento a pesos enteros** ($13): el total mostrado, enviado y guardado es **$87**, sin centavos. Mi expectativa inicial (87,5) era incorrecta. **En esta app los totales persistidos no tienen centavos**; el caso de `Justo` con total fraccionario (O7) es un seguro que hoy no se alcanza desde la interfaz.
+- **Permisos de cobro:** los tres roles (incluido el operador) cobran; el servidor lo permite (políticas `sales`/`sale_items`/`sale_payments`: insertar para owner, admin y operator).
+
+#### Eliminación de mesas y permisos (STAGING)
+
+| Rol | Botón accesible con nombre | Confirmación por teclado | «Cancelar» no elimina | Eliminación confirmada en el servidor |
+|---|---|---|---|---|
+| owner | OK | OK | OK | `PATCH` cierre 200 → `DELETE open_order_items` 204 → `DELETE open_orders` 204 |
+| admin | OK | OK | OK | igual, 204 |
+| operator | OK | OK | OK | igual, **204: el servidor permite al operador eliminar mesas** |
+
+El operador **puede** eliminar mesas (coincide con las políticas RLS leídas); es la decisión D de B5 (¿debe poder?). Sin borrados accidentales: el diálogo se cancela sin efecto y la eliminación confirmada no dejó RPC tardío en las pasadas finales.
+
+#### Evidencia de limpieza y comparación de la línea base (STAGING)
+
+- **Plan del ensayo de limpieza:** `categories=1, open_order_items=2, open_orders=33, operators=1, products=6, sale_payments=38, sales=31, shifts=1, store_users=3` (+ `sale_items=48` por cascada desde `sales`), idéntico al inventario previo, y el ensayo **no cambió nada**.
+- **Limpieza real:** el local sintético ya **no existe**, **0 filas** del sintético en las 17 tablas, 0 locales `ZZ_E2E%`, y cada cuenta (owner, admin, operator) conserva **1 membresía** en el local preexistente.
+- **Línea base posterior vs. original: 18 de 19 tablas idénticas** (incluidas las 41 `open_orders`, 26 `sales`, 51 `sale_items` y las 15 mesas abiertas de «Colo Café Staging»). **Única diferencia: `profiles`** (3 filas, contenido distinto; misma huella antes y después de limpiar, o sea que la limpieza no la tocó). **Explicación verificada, no ajena a las pruebas:** el trigger `auth_users_profile_sync_update` (`AFTER UPDATE ON auth.users` → `handle_auth_user_change`) sincroniza `profiles` cuando Auth actualiza al usuario (inicio o refresco de sesión); los `updated_at` de las 3 filas coinciden con el inicio de sesión de cada cuenta de prueba en el arnés (16:58:40, 16:58:42, 16:59:54 UTC) y **no hubo ninguna petición no-GET a `profiles`** en los logs. Evidencia preservada en `evid/linea_base_staging_*.txt`.
+- **Recuperación del cliente (corrige una conclusión mía anterior):** mi prueba previa «las cuentas vuelven solas al local real» era **vacua** (la app ignoraba el `activeStoreId` inyectado). Repetida correctamente tras el ciclo —con el local sintético ya «verificado» en el navegador de cada cuenta y eliminado— las 3 cuentas vuelven solas a «Colo Café Staging» con su rol, 15 mesas, 0 violaciones y 0 errores.
+
+#### Defectos encontrados en este ciclo y correcciones
+
+**Del arnés de pruebas (corregidos, con pruebas; ninguno afectó datos):** (1) el formulario local de la clave bloqueaba su propio `POST`; (2) el `wss` de realtime se bloqueaba siempre; (3) `manifest.json` daba 500 por CRLF del disco (ahora se sirven los bytes del commit); (4) la política de lectura de `sales` rechazaba el rango de fechas legítimo; (5) el arnés no reconocía los pedidos que la propia prueba creaba (la app pide `?select=id`) y bloqueó RPC legítimos —ahora registra el id desde la petición y lo recuerda en disco para poder **retomar**—; (6) carrera entre respuestas pendientes y la decisión de la política; (7) el guion no cerraba la pantalla «Venta guardada» ni cambiaba de local por el diálogo real. Todos fallaron en modo seguro (bloqueo sin escritura).
+
+**Del producto (observaciones; ninguna impide publicar):**
+- **B7 con evidencia en vivo (STAGING):** un envío de ítems pendiente que el arnés bloqueaba se **reintentó sin pausa (~2 peticiones/s; 3 RPC + PATCH por vuelta)**, el pedido «cambiaba» en cada vuelta y **Cobrar quedó rechazando con «El pedido cambió. Revisá el detalle y confirmá de nuevo»** junto al aviso «Error al sincronizar». Equivale a un rechazo persistente del servidor o a un corte de red prolongado. Es el hallazgo B7 (sin backoff ni tope): sube de prioridad (P2 alto) y conviene corregirlo en una versión posterior; el cobro se resolvió al permitir el reintento.
+- **Descuentos sin centavos:** diseño actual (redondeo a pesos enteros); documentarlo, no es un defecto.
+- **Operador puede eliminar mesas con ítems:** coincide con el servidor; decisión D de B5.
 
 ## 4. Investigaciones de riesgo (Fase 3)
 
@@ -297,17 +342,16 @@ Codex no ejecutó el navegador (revisión estática); las pruebas las corrí yo.
 
 ## 8. Estado final y recomendación
 
-**Recomendación de publicación: `BLOCKED` (parcial).** `STAGING_VERIFIED` **no** se declara: el comportamiento de interfaz de las cinco mejoras y de B2/B4/B23 está verificado en staging **sin escrituras** (66/66, §3.1d), pero la **persistencia** de los cobros, la eliminación real de mesas y B1 entre roles requieren datos sintéticos y autorización de escritura.
+**Recomendación de publicación: `GO` condicionado** (sobre el commit candidato indicado al final; no se publicó nada).
 
-Motivos concretos:
-1. **Falta la parte de staging que escribe datos:** cobros persistidos (efectivo con vuelto, transferencia, mixto, centavos), eliminación real de mesa por rol y B1/B5 contra el servidor. Requiere crear (y luego eliminar) un local sintético y **autorización explícita de escritura**. El procedimiento está verificado contra el esquema real (§3.1c). No hay bloqueo técnico del lado de la candidata.
-2. ~~RLS desplegado sin verificar~~ **Resuelto en staging** (§3.1c): los permisos de B1/B5 son los del servidor real. Sigue sin verificarse **producción**.
-3. **Decisiones suyas pendientes que afectan lo implementado:** B4 (¿admin además del dueño?), B5 (¿operador elimina mesas con ítems?), B2b (modificadores de variante negativos).
+**Qué quedó verificado en staging real (STAGING):** las cinco mejoras de la ola 1 (vuelto sin alterar importes, Cobrar a ancho completo en escritorio y móvil, «Eliminar mesa» accesible y con confirmación, teclado y foco con operadores reales, nombre del local en móvil); la **persistencia íntegra** de los cobros en efectivo, transferencia, mixto y con descuento para **los tres roles** (31 ventas, 31 coherentes en el servidor); B2 (precios inválidos no llegan al servidor), B4 (permisos por rol del local activo), B23 (el respaldo no contiene el token) y la eliminación real de mesas por rol; limpieza completa con **18/19 tablas idénticas** (la diferencia de `profiles` está explicada) y recuperación del cliente.
 
-Lo que **sí** está listo para publicar desde el punto de vista del código: 14 archivos de prueba / 220 pruebas en verde, `apply.py` sincronizado, tres revisiones independientes resueltas (Codex ola 1, nativa ola 1, Codex fase de riesgos).
+**Condiciones para publicar (no son defectos del código, son decisiones o aceptaciones suyas):**
+1. **B4:** confirmar que «Limpiar historial» sea sólo para owner/admin del local activo (hoy implementado así).
+2. **B5:** confirmar si el operador puede eliminar mesas con ítems (hoy el servidor lo permite; la candidata no lo cambia).
+3. **Aceptar el riesgo residual de B7** (reintentos sin retroceso, que pueden bloquear Cobrar mientras un envío falla de forma persistente) y programar su corrección.
+4. **Aceptar lo que NO se probó:** B1 con una nota escrita por un rol y vista por otro en staging (probado en local y con permisos reales del servidor, pero no el recorrido completo entre cuentas), comandas, impresión, reservas, Reportes con ventas reales, producción (sólo lectura de código/SQL versionado) y el comportamiento de Stock Durability (en staging sólo existe la estructura, sin funciones ni triggers).
 
-### Para pasar a GO
-1. Login manual de `owner`, `admin` y `caja` (ventanas locales; la persona pega la clave anon y tipea contraseñas).
-2. La persona corre, en este orden: `esquema_gate.sql` y `politicas_rls.sql` (sólo lectura) → `fixtures_ENSAYO.sql` → `fixtures.sql`.
-3. Se ejecuta `harness/escenarios_ola1.cjs` (primera ejecución: puede requerir ajustes de selectores).
-4. Con autorización explícita: `cleanup_ENSAYO.sql` → `cleanup.sql`, y verificación de que no quedan residuos.
+**Lo que NO justifica bloquear:** los defectos del arnés (corregidos), el redondeo de descuentos a pesos (diseño), ni la diferencia de `profiles` (efecto del trigger de Auth).
+
+**Riesgos residuales:** B1–B2 extremos con datos reales de producción no probados; B25 y B26 (roles/nombre de local en cachés) siguen abiertos fuera de «Limpiar»; el panel de Supabase guardó fragmentos de consulta («Untitled query») que no son datos de la base.
