@@ -7,6 +7,7 @@
 | Archivo | Qué hace |
 |---|---|
 | `esquema_gate.sql` | **Solo lectura** (copia sin cambios de `00_schema_gate.sql`). Lista FKs y tablas hijas sin `store_id`. Revisar las filas `STOP_*`. |
+| `politicas_rls.sql` | **Solo lectura.** Políticas RLS, restricciones de `products.price` e índice único de ventas desplegados: confirma qué roles pueden borrar mesas y escribir notas (B1, B5) y si el servidor valida precios (B2). |
 | `fixtures_ENSAYO.sql` | Igual que `fixtures.sql` pero termina **siempre en error** (`ENSAYO_OK_SE_REVIERTE`): no deja nada. Detecta incompatibilidades de columnas. |
 | `fixtures.sql` | Crea el local sintético: 1 local, 3 membresías (owner/admin/operator), 1 categoría, 1 operador, 6 productos. Atómico. |
 | `cleanup_ENSAYO.sql` | Igual que `cleanup.sql` pero termina siempre en error e informa **cuántas filas borraría por tabla**. |
@@ -15,7 +16,7 @@
 | `harness/` | Arnés de navegador (copia adaptada del E2E previo): sirve el commit exacto, bloquea producción por ruta y DNS, política positiva de escrituras. |
 
 ## Orden (cada paso lo aprueba la persona)
-1. `esquema_gate.sql` → revisar `STOP_*`.
+1. `esquema_gate.sql` y `politicas_rls.sql` (ambos solo lectura) → revisar `STOP_*` y las políticas.
 2. `fixtures_ENSAYO.sql` → debe fallar con `ENSAYO_OK_SE_REVIERTE`.
 3. `fixtures.sql` → `FIXTURES_OK`.
 4. Recorridos de navegador (sesiones aisladas por cuenta).
