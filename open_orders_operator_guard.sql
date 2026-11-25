@@ -27,7 +27,8 @@ security definer
 set search_path = public
 as $$
   select not exists (select 1 from public.open_order_items i where i.open_order_id = p_open_order_id)
-      or exists (select 1 from public.sales s where s.open_order_id = p_open_order_id);
+      -- la venta debe ser DEL MISMO LOCAL que la mesa: una venta de otro local que apunte a esta mesa no cuenta como cobro
+      or exists (select 1 from public.sales s join public.open_orders o on o.id = s.open_order_id and o.store_id = s.store_id where s.open_order_id = p_open_order_id);
 $$;
 revoke all on function public.open_order_operador_puede_cerrar(uuid) from public, anon;
 grant execute on function public.open_order_operador_puede_cerrar(uuid) to authenticated, service_role;
