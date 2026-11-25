@@ -86,6 +86,11 @@ test('verificacion_ventas_sinteticas.sql: solo lee filas del local sintético (c
   assert.notDeepEqual(analizarSintetico(sql.replace('public.shifts sh', 'public.customers sh'), TABLAS_VENTAS), [], 'otra tabla de negocio debe rechazarse');
   assert.notDeepEqual(analizarSintetico(sql + '\ndelete from public.sales;', TABLAS_VENTAS), [], 'DML debe rechazarse');
 });
+test('perfiles_actividad.sql: es exactamente la consulta revisada (una sola sentencia que lee solo el prefijo del id y updated_at de profiles)', () => {
+  const sql = sinLiterales(fs.readFileSync(path.join(dir, 'perfiles_actividad.sql'), 'utf8')).replace(/\s+/g, ' ').trim();
+  assert.equal(sql, "select left(id::text, 8) as perfil, updated_at::text as actualizado from public.profiles order by 1;");
+  assert.deepEqual(analizar(fs.readFileSync(path.join(dir, 'perfiles_actividad.sql'), 'utf8'), ['profiles']).filter(x => !/columna suelta/.test(x)), []);
+});
 test('modo agregados: RECHAZA leer filas, columnas sueltas, otras tablas de negocio o select *', () => {
   const base = fs.readFileSync(path.join(dir, 'stock_paridad.sql'), 'utf8'), permitidas = AGREGADOS['stock_paridad.sql'];
   const mutantes = {
