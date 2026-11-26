@@ -3391,7 +3391,7 @@ const DEFAULT_MENU=[
   {id:32,name:'Yogurt',           price:5000, cat:'beb',    stock:15, ilimitado:false, variantes:[]},
 ];
 
-const APP_VERSION='2026-11-25-b5-b7-consolidada';
+const APP_VERSION='2026-11-25-ola2-reservas-clientes-impresion';
 const APP_DATA_VERSION='2026-04-30-supabase-v1';
 const APP_DATA_VERSION_KEY='colo_app_data_version';
 const CATALOG_BACKUP_KEY='colo_catalog_backup';
@@ -7721,8 +7721,11 @@ function guardarCliente(){
   if(operacionesBloqueadasPorDiario())return;
   const nombre=($('cli-nombre')?.value||'').trim();if(!nombre){showToast('Ingresá el nombre');return false;}
   const tel=$('cli-tel').value.trim(),mail=$('cli-email').value.trim();
-  if(tel&&!/^[+\d\s().-]+$/.test(tel)||tel&&(tel.match(/\d/g)||[]).length<6||(tel.match(/\d/g)||[]).length>15){showToast('El teléfono no parece válido: usá solo números (6 a 15 dígitos).');return false;}
-  if(mail&&!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(mail)){showToast('El email no parece válido.');return false;}
+  // En edición, un dato histórico que no se toca no bloquea el guardado de otros campos: solo se valida lo que cambió.
+  const previo=editClienteId?clientes.find(x=>x.id===editClienteId):null;
+  const digitos=(tel.match(/\d/g)||[]).length;
+  if(tel&&tel!==(previo?.telefono??null)&&(!/^[+\d\s().-]+$/.test(tel)||digitos<6||digitos>15)){showToast('El teléfono no parece válido: usá solo números (6 a 15 dígitos).');return false;}
+  if(mail&&mail!==(previo?.email??null)&&!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(mail)){showToast('El email no parece válido.');return false;}
   const data={nombre,telefono:tel,email:mail,alergias:$('cli-alergias').value.trim(),preferencias:$('cli-prefs').value.trim()};
   let newId=null;
   if(editClienteId){Object.assign(clientes.find(x=>x.id===editClienteId),data);}

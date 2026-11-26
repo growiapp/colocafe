@@ -10,13 +10,13 @@ const {chromium} = require(process.env.D1_PLAYWRIGHT_MODULE || path.join(process
 const W = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(W, 'index.html'), 'utf8');
 const version = h => /const APP_VERSION='([^']+)'/.exec(h)[1];
-const PRODUCCION = version(execFileSync('git', ['show', '334df6c:index.html'], {cwd: W, encoding: 'utf8', maxBuffer: 8e6}));
+const PUBLICADA = version(execFileSync('git', ['show', '4bcf451:index.html'], {cwd: W, encoding: 'utf8', maxBuffer: 8e6}));
 
-test('APP_VERSION: formato válido y distinto de la de producción (334df6c)', () => {
+test('APP_VERSION: formato válido y distinto de la publicada (4bcf451)', () => {
   const v = version(html);
   assert.match(v, /^\d{4}-\d{2}-\d{2}-[a-z0-9-]+$/);
-  assert.notEqual(v, PRODUCCION);
-  assert.ok(v > PRODUCCION, `la versión nueva (${v}) debe ordenar después de la de producción (${PRODUCCION})`);
+  assert.notEqual(v, PUBLICADA);
+  assert.ok(v > PUBLICADA, `la versión nueva (${v}) debe ordenar después de la de producción (${PUBLICADA})`);
 });
 
 async function cargar(vistaAntes) {
@@ -44,7 +44,7 @@ async function cargar(vistaAntes) {
 }
 
 test('un dispositivo que tenía la versión de producción ve el aviso al cargar la nueva, una sola vez, y queda con la nueva guardada', async () => {
-  const r = await cargar(PRODUCCION);
+  const r = await cargar(PUBLICADA);
   assert.equal(r.primero.banner, true);
   assert.equal(r.primero.guardada, r.primero.actual);
   assert.equal(r.trasRecargar.banner, false, 'tras actualizar no vuelve a avisar');
