@@ -4336,6 +4336,8 @@ function shouldShowReservationReminder(reservation){
   return reservationReminderDismissed(key)?null:{key,targetMs,kind:'base'};
 }
 function checkReservationReminders(){
+  // Con la app en segundo plano no se muestra ni se marca como visto: se espera a que vuelva a estar visible.
+  if(document.hidden)return;
   cleanupReservationReminderState();
   if($('modal-reserva-reminder')?.classList.contains('open'))return;
   const due=(reservas||[]).map(r=>({reservation:r,info:shouldShowReservationReminder(r)})).filter(x=>x.info).sort((a,b)=>a.info.targetMs-b.info.targetMs)[0];
@@ -4345,6 +4347,7 @@ function scheduleReservationReminders(){
   if(reservationReminderTimer)return;
   checkReservationReminders();
   reservationReminderTimer=setInterval(checkReservationReminders,30000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkReservationReminders();});
 }
 function showReservationReminder(reservation,info){
   activeReservationReminder={reservation,key:info.key};
@@ -7465,7 +7468,7 @@ function imprimirDocumentos(html){
   const area=$('print-area');if(!area)return;
   area.innerHTML=html;
   window.addEventListener('afterprint',()=>{area.innerHTML='';},{once:true});
-  window.print();
+  try{window.print();}catch(err){area.innerHTML='';showToast('No se pudo abrir la impresión de este dispositivo.');}
 }
 // getActiveStoreName devuelve el id del local cuando no conoce el nombre: eso no va en un ticket.
 function nombreComercio(){const n=window.getActiveStoreName?.();return n&&n!=='—'&&!window.isValidUuid?.(n)?n:'Colo Café';}
@@ -7716,8 +7719,11 @@ function cerrarModalCliente(){$('modal-cliente').classList.remove('open');client
 function closeModalCliente(e){if(e.target===$('modal-cliente'))cerrarModalCliente();}
 function guardarCliente(){
   if(operacionesBloqueadasPorDiario())return;
-  const nombre=($('cli-nombre')?.value||'').trim();if(!nombre){showToast('Ingresá el nombre');return;}
-  const data={nombre,telefono:$('cli-tel').value.trim(),email:$('cli-email').value.trim(),alergias:$('cli-alergias').value.trim(),preferencias:$('cli-prefs').value.trim()};
+  const nombre=($('cli-nombre')?.value||'').trim();if(!nombre){showToast('Ingresá el nombre');return false;}
+  const tel=$('cli-tel').value.trim(),mail=$('cli-email').value.trim();
+  if(tel&&!/^[+\d\s().-]+$/.test(tel)||tel&&(tel.match(/\d/g)||[]).length<6||(tel.match(/\d/g)||[]).length>15){showToast('El teléfono no parece válido: usá solo números (6 a 15 dígitos).');return false;}
+  if(mail&&!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(mail)){showToast('El email no parece válido.');return false;}
+  const data={nombre,telefono:tel,email:mail,alergias:$('cli-alergias').value.trim(),preferencias:$('cli-prefs').value.trim()};
   let newId=null;
   if(editClienteId){Object.assign(clientes.find(x=>x.id===editClienteId),data);}
   else{newId='cli_'+Date.now();clientes.push({id:newId,...data,visitas:[]});}
@@ -13217,6 +13223,7 @@ if(config.webappUrl){loadFromSheets();}
       }finally{
         window.__customerRemoteGuardActive=false;
       }
+      if(res===false)return res;
       const customer=wasEdit ? clientes.find(c=>sameId(c.id,targetId)) : clientes.find(c=>!beforeIds.has(String(c.id)));
       if(customer){
         customer._sync_status='pending';
